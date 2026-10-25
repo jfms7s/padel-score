@@ -1,12 +1,24 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 
+mod support;
+
+use axum::http::{Method, StatusCode};
 use padel_score_server::accounts_store::NewUser;
 use padel_score_server::db;
 use padel_score_server::linking::{ClaimPreview, preview_in};
 use padel_score_server::players::PlayerSlots;
 use padel_score_server::store::{NewMatch, Store, StoreError, Teams};
 use padel_scoring::{DecidingSet, DeuceRule, Format, Player, SetRules, SetsFormat, Start, Team};
+use serde_json::json;
 use sqlx::SqlitePool;
+use support::{
+    as_device, as_session, device_token, fragment_code, invited_user, req, send, with_admin,
+};
 
 async fn setup() -> (Store, SqlitePool) {
     let pool = db::connect("sqlite::memory:").await.unwrap();
@@ -395,4 +407,346 @@ async fn unlink_self_needs_own_link() {
     ));
     s.unlink_self(&u1, &rui).await.unwrap();
     assert!(s.my_links(&u1).await.unwrap().is_empty());
+}
+
+// Link codes.
+
+use padel_score_server::AppState;
+use padel_score_server::linking::LINK_CODE_TTL_SECS;
+
+/// Ana (admin, with a player "Rui") and Rui's own account.
+struct Qr {
+    state: AppState,
+    pool: SqlitePool,
+    app: axum::Router,
+    ana_id: String,
+    ana: String,
+    rui: String,
+    rui_user: String,
+    rui_session: String,
+}
+
+async fn qr_setup() -> Qr {
+    let (state, pool, app, ana_id, ana) = with_admin().await;
+    let (rui_user, rui_session) =
+        invited_user(&state, &app, &ana, "rui@example.com", "Rui Costa").await;
+    let res = send(
+        &app,
+        as_session(
+            &state,
+            &ana,
+            Method::POST,
+            "/api/players",
+            Some(json!({ "name": "Rui" })),
+        ),
+    )
+    .await;
+    let rui = res.body["id"].as_str().unwrap().to_owned();
+    Qr {
+        state,
+        pool,
+        app,
+        ana_id,
+        ana,
+        rui,
+        rui_user,
+        rui_session,
+    }
+}
+
+impl Qr {
+    async fn make_code(&self, session: &str, player: &str) -> support::Res {
+        let path = format!("/api/players/{player}/link-code");
+        send(
+            &self.app,
+            as_session(&self.state, session, Method::POST, &path, None),
+        )
+        .await
+    }
+
+    async fn post_code(&self, session: &str, route: &str, code: &str) -> support::Res {
+        let body = Some(json!({ "code": code }));
+        send(
+            &self.app,
+            as_session(&self.state, session, Method::POST, route, body),
+        )
+        .await
+    }
+
+    /// A fresh code for Rui's entry.
+    async fn code(&self) -> String {
+        let made = self.make_code(&self.ana, &self.rui).await;
+        assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
+        fragment_code(made.body["url"].as_str().unwrap())
+    }
+}
+
+#[tokio::test]
+async fn qr_link_round_trip() {
+    let q = qr_setup().await;
+    let made = q.make_code(&q.ana, &q.rui).await;
+    assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
+    assert!(made.body["expires_at"].as_i64().unwrap() > 0);
+    let code = fragment_code(made.body["url"].as_str().unwrap());
+    let looked = q
+        .post_code(&q.rui_session, "/api/link-codes/lookup", &code)
+        .await;
+    assert_eq!(looked.status, StatusCode::OK, "{}", looked.body);
+    assert_eq!(looked.body["name"], "Rui");
+    assert_eq!(looked.body["coordinator_name"], "Ana");
+    assert_eq!(looked.body["matches"], 0);
+    assert_eq!(looked.body["events"], 0);
+    let accepted = q
+        .post_code(&q.rui_session, "/api/link-codes/accept", &code)
+        .await;
+    assert_eq!(accepted.status, StatusCode::OK, "{}", accepted.body);
+    assert_eq!(accepted.body["player_id"], q.rui.as_str());
+    let links = q.state.store.links(&q.ana_id).await.unwrap();
+    assert_eq!(links[&q.rui].user_id, q.rui_user);
+    for route in ["/api/link-codes/lookup", "/api/link-codes/accept"] {
+        let res = q.post_code(&q.rui_session, route, &code).await;
+        assert_eq!(res.status, StatusCode::GONE, "{route}");
+        assert_eq!(res.body["error"], "link_code_invalid");
+    }
+}
+
+#[tokio::test]
+async fn link_code_needs_session() {
+    let q = qr_setup().await;
+    let token = device_token(&q.state.store, &q.ana_id).await;
+    let routes = [
+        format!("/api/players/{}/link-code", q.rui),
+        "/api/link-codes/lookup".to_owned(),
+        "/api/link-codes/accept".to_owned(),
+    ];
+    for path in &routes {
+        let body = Some(json!({ "code": "x" }));
+        let none = send(&q.app, req(Method::POST, path, body.clone(), &[])).await;
+        assert_eq!(none.status, StatusCode::UNAUTHORIZED, "{path}");
+        let device = send(&q.app, as_device(&token, Method::POST, path, body)).await;
+        assert_eq!(device.status, StatusCode::FORBIDDEN, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn link_code_expires() {
+    let (s, pool) = setup().await;
+    let ana = user(&s, "ana@example.com", "Ana").await;
+    let rui_user = user(&s, "rui@example.com", "Rui Costa").await;
+    let rui = player(&s, &ana, "Rui").await;
+    let (code, expires_at) = s.create_link_code(&ana, &rui, 1000).await.unwrap();
+    assert_eq!(expires_at, 1000 + LINK_CODE_TTL_SECS);
+    assert!(
+        s.link_code_preview(&code, expires_at - 1)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        s.link_code_preview(&code, expires_at)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        s.accept_link_code(&code, &rui_user, expires_at)
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(s.links(&ana).await.unwrap().is_empty());
+    // One second earlier it still works.
+    assert_eq!(
+        s.accept_link_code(&code, &rui_user, expires_at - 1)
+            .await
+            .unwrap(),
+        Some(rui.clone())
+    );
+    // Only the hash is stored.
+    let stored: String = sqlx::query_scalar("SELECT code_hash FROM link_codes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_ne!(stored, code);
+}
+
+#[tokio::test]
+async fn new_code_voids_old_code() {
+    let q = qr_setup().await;
+    let old = q.code().await;
+    let new = q.code().await;
+    assert_ne!(old, new);
+    let res = q
+        .post_code(&q.rui_session, "/api/link-codes/accept", &old)
+        .await;
+    assert_eq!(res.status, StatusCode::GONE);
+    let res = q
+        .post_code(&q.rui_session, "/api/link-codes/accept", &new)
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+}
+
+#[tokio::test]
+async fn link_code_for_other_users_player_is_404() {
+    let q = qr_setup().await;
+    let res = q.make_code(&q.rui_session, &q.rui).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    let res = q.make_code(&q.ana, "no-such").await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn link_code_for_linked_player_is_409() {
+    let q = qr_setup().await;
+    let code = q.code().await;
+    q.post_code(&q.rui_session, "/api/link-codes/accept", &code)
+        .await;
+    let res = q.make_code(&q.ana, &q.rui).await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(res.body["error"], "player_linked");
+}
+
+#[tokio::test]
+async fn code_for_entry_linked_meanwhile_is_dead() {
+    let q = qr_setup().await;
+    let code = q.code().await;
+    // Ana links the entry to herself before Rui scans.
+    let res = send(
+        &q.app,
+        as_session(
+            &q.state,
+            &q.ana,
+            Method::POST,
+            &format!("/api/players/{}/link-me", q.rui),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    let res = q
+        .post_code(&q.rui_session, "/api/link-codes/lookup", &code)
+        .await;
+    assert_eq!(res.status, StatusCode::GONE);
+    let res = q
+        .post_code(&q.rui_session, "/api/link-codes/accept", &code)
+        .await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(res.body["error"], "player_linked");
+    // The failed accept left the code unused, and the unlink makes it work again.
+    let res = send(
+        &q.app,
+        as_session(
+            &q.state,
+            &q.ana,
+            Method::DELETE,
+            &format!("/api/players/{}/link", q.rui),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    let res = q
+        .post_code(&q.rui_session, "/api/link-codes/accept", &code)
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+}
+
+#[tokio::test]
+async fn link_code_never_in_path_or_query() {
+    let q = qr_setup().await;
+    let made = q.make_code(&q.ana, &q.rui).await;
+    let url = made.body["url"].as_str().unwrap();
+    let (before, code) = url.split_once('#').unwrap();
+    assert_eq!(before, "/link-player");
+    assert!(!code.is_empty() && !before.contains('?'));
+    assert_eq!(
+        made.header(axum::http::header::CACHE_CONTROL),
+        Some("no-store")
+    );
+    assert_eq!(
+        made.header(axum::http::header::REFERRER_POLICY),
+        Some("no-referrer")
+    );
+}
+
+#[tokio::test]
+async fn link_code_routes_are_rate_limited() {
+    let q = qr_setup().await;
+    for i in 0..20 {
+        let res = q
+            .post_code(&q.rui_session, "/api/link-codes/lookup", "nope")
+            .await;
+        assert_eq!(res.status, StatusCode::GONE, "call {i}");
+    }
+    let res = q
+        .post_code(&q.rui_session, "/api/link-codes/lookup", "nope")
+        .await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    // Per user: another account is not affected.
+    let res = q.post_code(&q.ana, "/api/link-codes/lookup", "nope").await;
+    assert_eq!(res.status, StatusCode::GONE);
+}
+
+#[tokio::test]
+async fn link_me_and_unlink_routes() {
+    let q = qr_setup().await;
+    let link = format!("/api/players/{}/link", q.rui);
+    let res = send(
+        &q.app,
+        as_session(&q.state, &q.rui_session, Method::DELETE, &link, None),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    let res = send(
+        &q.app,
+        as_session(
+            &q.state,
+            &q.rui_session,
+            Method::POST,
+            &format!("/api/players/{}/link-me", q.rui),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    let code = q.code().await;
+    q.post_code(&q.rui_session, "/api/link-codes/accept", &code)
+        .await;
+    let res = send(
+        &q.app,
+        as_session(&q.state, &q.ana, Method::DELETE, &link, None),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    assert!(q.state.store.links(&q.ana_id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn expired_link_codes_are_purged() {
+    let q = qr_setup().await;
+    q.code().await;
+    let count = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM link_codes")
+            .fetch_one(&q.pool)
+            .await
+            .unwrap()
+    };
+    let expires_at: i64 = sqlx::query_scalar("SELECT expires_at FROM link_codes")
+        .fetch_one(&q.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        q.state
+            .store
+            .purge_expired_auth(expires_at - 1)
+            .await
+            .unwrap()
+            .link_codes,
+        0
+    );
+    assert_eq!(count().await, 1);
+    let purged = q.state.store.purge_expired_auth(expires_at).await.unwrap();
+    assert_eq!(purged.link_codes, 1);
+    assert_eq!(purged.total(), 1);
+    assert_eq!(count().await, 0);
 }

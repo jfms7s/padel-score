@@ -237,11 +237,12 @@ pub struct PurgedAuth {
     pub invites: u64,
     pub device_codes: u64,
     pub resets: u64,
+    pub link_codes: u64,
 }
 
 impl PurgedAuth {
     pub fn total(&self) -> u64 {
-        self.sessions + self.invites + self.device_codes + self.resets
+        self.sessions + self.invites + self.device_codes + self.resets + self.link_codes
     }
 }
 
@@ -1214,7 +1215,7 @@ impl Store {
 
     // Retention.
 
-    /// Delete expired sessions, invites, device codes and reset codes, in one transaction.
+    /// Delete expired sessions, invites, device codes, reset codes and link codes, in one transaction.
     pub async fn purge_expired_auth(&self, now: i64) -> Result<PurgedAuth, StoreError> {
         let mut tx = self.begin().await?;
         let mut purge = async |sql: &'static str| -> Result<u64, StoreError> {
@@ -1229,6 +1230,7 @@ impl Store {
             invites: purge("DELETE FROM invites WHERE expires_at <= ?").await?,
             device_codes: purge("DELETE FROM device_codes WHERE expires_at <= ?").await?,
             resets: purge("DELETE FROM password_resets WHERE expires_at <= ?").await?,
+            link_codes: purge("DELETE FROM link_codes WHERE expires_at <= ?").await?,
         };
         tx.commit().await?;
         Ok(purged)

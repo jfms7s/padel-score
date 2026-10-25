@@ -8,6 +8,10 @@ use serde::Serialize;
 use sqlx::{Row, SqliteConnection};
 
 use crate::store::{Store, StoreError, Tx};
+use crate::tokens::{hash_token, new_token};
+
+/// How long a link code works: 10 minutes.
+pub const LINK_CODE_TTL_SECS: i64 = 600;
 
 /// The account an entry is linked to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -229,5 +233,97 @@ impl Store {
             })
             .collect::<Result<_, sqlx::Error>>()
             .map_err(Into::into)
+    }
+
+    /// A new link code for one of the owner's unlinked entries: the raw code (handed out once;
+    /// only its hash is stored) and when it expires. The entry's other unused codes are deleted
+    /// in the same transaction, so only the newest QR works. `NotFound` unless the entry is the
+    /// owner's, `Conflict("player_linked")` when it is linked already.
+    pub async fn create_link_code(
+        &self,
+        owner: &str,
+        player_id: &str,
+        now: i64,
+    ) -> Result<(String, i64), StoreError> {
+        let mut tx = self.begin().await?;
+        require_owned_in(&mut tx, owner, player_id).await?;
+        let linked: Option<String> =
+            sqlx::query_scalar("SELECT linked_user_id FROM players WHERE id = ?")
+                .bind(player_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if linked.is_some() {
+            return Err(StoreError::Conflict("player_linked"));
+        }
+        sqlx::query("DELETE FROM link_codes WHERE player_id = ? AND used_by IS NULL")
+            .bind(player_id)
+            .execute(&mut *tx)
+            .await?;
+        let raw = new_token();
+        let expires_at = now + LINK_CODE_TTL_SECS;
+        sqlx::query(
+            "INSERT INTO link_codes (code_hash, player_id, created_by, created_at, expires_at) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(hash_token(&raw))
+        .bind(player_id)
+        .bind(owner)
+        .bind(now)
+        .bind(expires_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok((raw, expires_at))
+    }
+
+    /// What the code holder sees of the entry. `None` for an unknown, expired or used code, or
+    /// one whose entry was linked meanwhile: one answer for every reason.
+    pub async fn link_code_preview(
+        &self,
+        raw: &str,
+        now: i64,
+    ) -> Result<Option<ClaimPreview>, StoreError> {
+        let mut conn = self.pool().acquire().await?;
+        let player_id: Option<String> = sqlx::query_scalar(
+            "SELECT c.player_id FROM link_codes c JOIN players p ON p.id = c.player_id \
+             WHERE c.code_hash = ? AND c.used_by IS NULL AND c.expires_at > ? \
+               AND p.linked_user_id IS NULL",
+        )
+        .bind(hash_token(raw))
+        .bind(now)
+        .fetch_optional(&mut *conn)
+        .await?;
+        match player_id {
+            Some(id) => Ok(Some(preview_in(&mut conn, &id).await?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Spend the code and link its entry to `user_id`, in one transaction: the player id, or
+    /// `None` for a bad code (any reason). `link_in`'s conflicts pass through and roll the
+    /// spend back, so the code stays unused.
+    pub async fn accept_link_code(
+        &self,
+        raw: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<Option<String>, StoreError> {
+        let mut tx = self.begin().await?;
+        let player_id: Option<String> = sqlx::query_scalar(
+            "UPDATE link_codes SET used_by = ?, used_at = ? \
+             WHERE code_hash = ? AND used_by IS NULL AND expires_at > ? RETURNING player_id",
+        )
+        .bind(user_id)
+        .bind(now)
+        .bind(hash_token(raw))
+        .bind(now)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(player_id) = player_id else {
+            return Ok(None);
+        };
+        link_in(&mut tx, &player_id, user_id, now).await?;
+        tx.commit().await?;
+        Ok(Some(player_id))
     }
 }
