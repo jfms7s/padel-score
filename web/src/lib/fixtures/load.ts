@@ -4,6 +4,6 @@ import { isMatchView } from '../guards';
 import type { MatchView } from '../types';
 
 export function asView(json: unknown): MatchView {
-	if (!isMatchView(json)) throw new Error(`fixture is not a MatchView: ${JSON.stringify(json).slice(0, 200)}`);
+	if (!isMatchView(json, { strict: true })) throw new Error(`fixture is not a MatchView: ${JSON.stringify(json).slice(0, 200)}`);
 	return json;
 }

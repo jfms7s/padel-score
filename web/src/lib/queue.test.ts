@@ -571,6 +571,36 @@ describe('review fixes, round 2', () => {
 		expect(storage.getItem(KEY)).not.toBeNull();
 	});
 
+	it('carried_only_reload_without_view_does_not_recurse', async () => {
+		const storage = new MemoryStorage();
+		const landed = grow(grow(seen, ['b', 'b']), ['a']);
+		const h = harness([offline, applied(landed)], { view: seen, storage });
+		h.queue.point('a');
+		await tick();
+		h.queue.reconnect();
+		await tick();
+		h.queue.stop();
+
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			const r = harness([], { view: null, storage, idsFrom: 50 });
+			r.queue.connection('live');
+			await tick();
+			// Nothing to ask about without a view: it waits, without looping or a retry timer.
+			expect(error).not.toHaveBeenCalled();
+			expect(vi.getTimerCount()).toBe(0);
+			expect(r.viewReads()).toBeLessThan(20);
+			expect(r.queue.state().conflict).toBeNull();
+			r.setView(landed);
+			r.queue.viewArrived();
+			await tick();
+			expect(r.queue.state().conflict?.server).toEqual(landed);
+			expect(error).not.toHaveBeenCalled();
+		} finally {
+			error.mockRestore();
+		}
+	});
+
 	it('a stored v1 job without the offline flag loads as not offline', () => {
 		const storage = new MemoryStorage();
 		const req = { client_id: 'c1', batch: false, base_revision: 1, commands: [{ kind: 'point', team: 'a' }] };

@@ -638,6 +638,9 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 			}
 			else if (outstanding?.kind === 'replace') await sendOutstanding();
 			else if (mode === 'offline' && online && !outstanding && queued.length === 0 && carried.length > 0) {
+				// No view to ask against yet: nothing changes, so stop here rather than pump again
+				// (that would recurse without end). viewArrived() comes back once there is one.
+				if (!host.view()) return;
 				askAboutCarried();
 			}
 			else if (mode === 'offline' && online && (outstanding !== null || (base !== null && queued.length > 0))) {

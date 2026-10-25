@@ -1,9 +1,11 @@
-// Every recorded server and engine sample must match the TS wire types exactly.
+// Every recorded server and engine sample must match the TS wire types exactly (strict guards).
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { isEvent, isFormat, isMatchView, isScore } from './guards';
 import { asView } from './fixtures/load';
+
+const STRICT = { strict: true } as const;
 
 const all = import.meta.glob<{ default: unknown }>('./fixtures/*.json', { eager: true });
 const fixture = (name: string) => all[`./fixtures/${name}.json`]!.default;
@@ -15,19 +17,19 @@ describe('fixtures match the wire types', () => {
 	});
 
 	it.each(views)('%s is a MatchView', (path) => {
-		expect(isMatchView(all[path]!.default)).toBe(true);
+		expect(isMatchView(all[path]!.default, STRICT)).toBe(true);
 	});
 
 	it('the conflict, replace and SSE bodies carry MatchViews', () => {
-		expect(isMatchView((fixture('commands-409-conflict') as { view: unknown }).view)).toBe(true);
-		expect(isMatchView(fixture('replace-200'))).toBe(true);
+		expect(isMatchView((fixture('commands-409-conflict') as { view: unknown }).view, STRICT)).toBe(true);
+		expect(isMatchView(fixture('replace-200'), STRICT)).toBe(true);
 		const frame = readFileSync(new URL('./fixtures/stream-state.txt', import.meta.url), 'utf8');
 		const data = frame.split('\n').find((l) => l.startsWith('data: '))!.slice(6);
-		expect(isMatchView(JSON.parse(data))).toBe(true);
+		expect(isMatchView(JSON.parse(data), STRICT)).toBe(true);
 	});
 
 	it('the engine sample is a Score', () => {
-		expect(isScore((fixture('replay-ok-three-points') as { ok: unknown }).ok)).toBe(true);
+		expect(isScore((fixture('replay-ok-three-points') as { ok: unknown }).ok, STRICT)).toBe(true);
 	});
 
 	it('asView refuses a sample that drifted', () => {
@@ -41,20 +43,20 @@ describe('fixtures match the wire types', () => {
 
 describe('guards', () => {
 	it('accept every variant and reject unknown ones', () => {
-		expect(isEvent({ point: 'a' })).toBe(true);
-		expect(isEvent('time_up')).toBe(true);
-		expect(isEvent({ point: 'c' })).toBe(false);
-		expect(isEvent({ time_up: null })).toBe(false);
-		expect(isFormat({ timed: { deuce: 'star_point', draws_allowed: true } })).toBe(true);
-		expect(isFormat({ timed: { deuce: 'star_point' } })).toBe(false);
-		expect(isFormat({ sets: { deuce: 'advantage', sets: 'best_of_5', deciding: 'full_set' } })).toBe(false);
+		expect(isEvent({ point: 'a' }, STRICT)).toBe(true);
+		expect(isEvent('time_up', STRICT)).toBe(true);
+		expect(isEvent({ point: 'c' }, STRICT)).toBe(false);
+		expect(isEvent({ time_up: null }, STRICT)).toBe(false);
+		expect(isFormat({ timed: { deuce: 'star_point', draws_allowed: true } }, STRICT)).toBe(true);
+		expect(isFormat({ timed: { deuce: 'star_point' } }, STRICT)).toBe(false);
+		expect(isFormat({ sets: { deuce: 'advantage', sets: 'best_of_5', deciding: 'full_set' } }, STRICT)).toBe(false);
 	});
 
 	it('reject an extra or mistyped field', () => {
 		const score = structuredClone((fixture('view-tiebreak') as { score: Record<string, unknown> }).score);
-		expect(isScore(score)).toBe(true);
-		expect(isScore({ ...score, extra: 1 })).toBe(false);
-		expect(isScore({ ...score, games: [6, '6'] })).toBe(false);
-		expect(isScore({ ...score, status: { finished: {} } })).toBe(false);
+		expect(isScore(score, STRICT)).toBe(true);
+		expect(isScore({ ...score, extra: 1 }, STRICT)).toBe(false);
+		expect(isScore({ ...score, games: [6, '6'] }, STRICT)).toBe(false);
+		expect(isScore({ ...score, status: { finished: {} } }, STRICT)).toBe(false);
 	});
 });

@@ -57,6 +57,7 @@ export function harness(answers: Answer<CommandRequest>[], opts: HarnessOptions 
 	const replaceAnswers = opts.replace ?? [];
 	let ids = opts.idsFrom ?? 0;
 	let clock = 0;
+	let viewReads = 0;
 	const post = vi.fn(async (_token: string, req: CommandRequest) => {
 		sent.push(structuredClone(req));
 		const answer = answers.shift();
@@ -70,7 +71,10 @@ export function harness(answers: Answer<CommandRequest>[], opts: HarnessOptions 
 		return answer(req);
 	});
 	const queue = createQueue(TOKEN, storage, { post, replace }, replayLocal, {
-		view: () => view,
+		view: () => {
+			viewReads++;
+			return view;
+		},
 		newClientId: opts.newClientId ?? (() => `id-${++ids}`),
 		now: opts.now ?? (() => (clock += 1000)),
 		setTimeout: (f, ms) => setTimeout(f, ms),
@@ -96,7 +100,9 @@ export function harness(answers: Answer<CommandRequest>[], opts: HarnessOptions 
 		post,
 		replace,
 		setView: (v2: MatchView) => (view = v2),
-		view: () => view
+		view: () => view,
+		/** How many times the queue has asked for the page's view. */
+		viewReads: () => viewReads
 	};
 }
 
