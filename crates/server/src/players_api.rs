@@ -81,8 +81,12 @@ impl PageQuery {
         let limit = match self.limit.as_deref() {
             None | Some("") => DEFAULT_PAGE,
             Some(text) => {
-                let n: i64 = text.parse().map_err(|_| ApiError::BadRequest)?;
-                u32::try_from(n.clamp(1, i64::from(MAX_PAGE))).unwrap_or(DEFAULT_PAGE)
+                if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+                    return Err(ApiError::BadRequest);
+                }
+                // All digits: a value too large for u32 is simply "as many as allowed".
+                text.parse::<u32>()
+                    .map_or(MAX_PAGE, |n| n.clamp(1, MAX_PAGE))
             }
         };
         Ok(Page { before, limit })

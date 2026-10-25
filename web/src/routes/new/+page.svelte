@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { createMatch } from '#lib/api.ts';
+	import { ApiError, createMatch } from '#lib/api.ts';
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
 	import { listPlayers } from '#lib/players.ts';
 	import { bootSession } from '#lib/session.ts';
@@ -87,7 +87,12 @@
 		try {
 			created = await createMatch(req);
 		} catch (e) {
-			failure = e instanceof Error ? e.message : '';
+			failure =
+				e instanceof ApiError && e.code === 'invalid_match' && e.message === 'players need an account'
+					? strings.signedOutPlayers
+					: e instanceof Error
+						? e.message
+						: '';
 			busy = false;
 			return;
 		}

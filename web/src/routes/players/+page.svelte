@@ -150,7 +150,7 @@
 								</div>
 							</form>
 						{:else}
-							<a class="what" href="/players/{encodeURIComponent(player.id)}">
+							<a class="what" href="/players/{encodeURIComponent(player.id)}" aria-label={t.openLabel(player.name)}>
 								<strong>{player.name}</strong>
 								<span class="hint">{recordText(player.record)}</span>
 							</a>
@@ -182,7 +182,7 @@
 			<ul class="list" aria-label={t.archived}>
 				{#each archived as player (player.id)}
 					<li class="row">
-						<a class="what" href="/players/{encodeURIComponent(player.id)}">
+						<a class="what" href="/players/{encodeURIComponent(player.id)}" aria-label={t.openLabel(player.name)}>
 							<strong>{player.name}</strong>
 							<span class="hint">{recordText(player.record)}</span>
 						</a>

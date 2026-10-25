@@ -716,3 +716,11 @@ async fn history_and_player_page_shapes() {
     assert_eq!(page.body["player"]["archived"], true);
     assert_eq!(page.body["items"].as_array().unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn huge_limit_is_clamped() {
+    let (state, _pool, app, _id, raw) = with_admin().await;
+    let path = "/api/me/history?limit=99999999999999999999999999";
+    let res = send(&app, as_session(&state, &raw, Method::GET, path, None)).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+}

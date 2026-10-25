@@ -330,6 +330,7 @@ export const strings = {
 		archived: 'Archived',
 		archivedHint: 'Archived players keep their record, and are not offered for new matches.',
 		rename: 'Rename',
+		openLabel: (name: string) => `Open ${name}’s page`,
 		renameLabel: (name: string) => `Rename ${name}`,
 		newName: (name: string) => `New name for ${name}`,
 		save: 'Save',
@@ -388,6 +389,7 @@ export const strings = {
 	noMyMatches: 'Matches you start while signed in show up here, on any device.',
 
 	// API failures.
+	signedOutPlayers: "You've been signed out. Sign in again to use your players.",
 	networkError: "Can't reach the server.",
 	serverError: (status: number) => `The server answered ${status}.`
 } as const;

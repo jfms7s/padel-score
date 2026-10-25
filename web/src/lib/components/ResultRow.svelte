@@ -27,7 +27,7 @@
 			<p class="team" class:won={entry.winner === team}>
 				{#each entry.teams[team] as name, i (i)}
 					{@const id = entry.players[team][i]}
-					{#if i > 0}<span class="sep"> / </span>{/if}
+					{#if i > 0}<span class="sep">{' / '}</span>{/if}
 					{#if id}
 						<a href="/players/{encodeURIComponent(id)}">{name}</a>
 					{:else}
@@ -111,7 +111,7 @@
 		text-decoration-color: var(--line);
 		text-underline-offset: 3px;
 	}
-	.team span:not(.visually-hidden) {
+	.team span:not(.visually-hidden, .sep) {
 		display: inline-flex;
 		align-items: center;
 		min-height: var(--tap);
