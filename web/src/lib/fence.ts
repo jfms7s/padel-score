@@ -137,17 +137,3 @@ export function overlayTaps(view: MatchView, pending: Pending[]): Team[] {
 		p.intent.kind === 'point' && (!p.sent || p.base >= view.revision) ? [p.intent.team] : []
 	);
 }
-
-/**
- * The view as it will be once `points` land: the server's events plus the pending points,
- * replayed by the engine. Null when the engine refuses them (the match is over).
- */
-export function optimisticView(
-	view: MatchView,
-	points: Team[],
-	replay: (format: Format, start: Start, events: Event[]) => ReplayResult
-): MatchView | null {
-	const events: Event[] = [...view.events.map((e) => e.event), ...points.map((team) => ({ point: team }))];
-	const out = replay(view.format, view.start, events);
-	return 'ok' in out ? { ...view, score: out.ok } : null;
-}

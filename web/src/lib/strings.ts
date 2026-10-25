@@ -131,6 +131,8 @@ export const strings = {
 		mineUnknown: "This phone's taps can't be scored here.",
 		discard: 'Discard these taps',
 		lost: "Taps saved on this phone couldn't be read, so they were dropped.",
+		full: "This phone can't hold more taps offline. Get back online to send them.",
+		tooMany: 'Too many taps to send at once.',
 		failed: (message: string) => `The server didn't take the taps made offline. ${message}`
 	},
 

@@ -8,7 +8,6 @@ import {
 	latestView,
 	loadLayout,
 	nextLayout,
-	optimisticView,
 	overlayTaps,
 	saveLayout,
 	setsSummary,
@@ -170,28 +169,6 @@ describe('share links', () => {
 			scoring: 'https://p.example/s/sc',
 			viewing: null
 		});
-	});
-});
-
-describe('optimisticView', () => {
-	it('adds pending points to the server events', () => {
-		const out = optimisticView(v(newMatch), ['a', 'a', 'b'], replayLocal);
-		expect(out?.score.current).toEqual({
-			game: { a: 'thirty', b: 'fifteen', deuces: 0, deciding_point: false }
-		});
-		expect(out?.revision).toBe(v(newMatch).revision);
-	});
-
-	it('gives up when the engine refuses the points', () => {
-		expect(optimisticView(v(finished), ['a'], replayLocal)).toBeNull();
-	});
-
-	it('matches the server for the same points', () => {
-		const third = v(thirdGame);
-		const before: MatchView = { ...third, events: third.events.slice(0, -1) };
-		const point = third.events.at(-1)?.event;
-		if (!point || point === 'time_up') throw new Error('fixture');
-		expect(optimisticView(before, [point.point], replayLocal)?.score).toEqual(third.score);
 	});
 });
 

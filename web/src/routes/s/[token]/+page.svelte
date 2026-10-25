@@ -104,6 +104,9 @@
 			case 'nothing':
 				say(f.nothingToUndo);
 				break;
+			case 'full':
+				say(strings.queue.full);
+				break;
 			case 'failed':
 				say(f.failed(d.reason.message));
 				break;
@@ -232,9 +235,9 @@
 
 <svelte:window
 	onbeforeunload={(e) => {
-		// Taps not yet on the server are kept on this device and sent after a reload, but a live
-		// tap still on its way is worth a warning before the page goes.
-		if (sending.pending.length > 0) {
+		// Taps not yet on the server are kept on this device and sent after a reload, but warn
+		// before the page goes with any still waiting.
+		if (sending.pending.length > 0 || sending.queued.length > 0) {
 			e.preventDefault();
 			e.returnValue = '';
 		}

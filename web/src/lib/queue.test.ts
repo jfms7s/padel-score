@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type CommandOutcome } from './api';
 import { replayLocal } from './engine';
-import { localView, mineView, type QueueState } from './queue';
+import { localView, MAX_COMMANDS, mineView, type QueueState } from './queue';
 import { asView } from './fixtures/load';
 import {
 	applied,
@@ -17,6 +17,7 @@ import {
 	undone
 } from './fixtures/queue-harness';
 import onePoint from './fixtures/view-one-point.json';
+import newMatch from './fixtures/view-new.json';
 import finished from './fixtures/view-finished.json';
 
 // The offline queue: taps made without the server are kept (on the device), sent as one batch
@@ -399,6 +400,128 @@ describe('offline queue', () => {
 	});
 });
 
+describe('review fixes', () => {
+	const fresh = asView(newMatch);
+
+	it('unanswered_live_taps_when_going_offline_are_not_merged_silently', async () => {
+		// The phone taps A, A; the first post hangs and times out, the second never went.
+		let fail!: () => void;
+		const first = () =>
+			new Promise<CommandOutcome>((_, reject) => (fail = () => reject(new ApiError(0, 'network', 'timed out', true))));
+		// Meanwhile the watch scores B, B; the phone's resent A lands after them: 15-30 on the server.
+		const landed = grow(grow(fresh, ['b', 'b']), ['a']);
+		const h = harness([first, applied(landed), conflict(landed)], { view: fresh });
+		h.queue.point('a');
+		h.queue.point('a');
+		await tick();
+		fail();
+		await tick();
+		// The tap that never went is queued on the base, not left to go live.
+		expect(h.queue.state().pending.map((p) => p.sent)).toEqual([true]);
+		expect(h.queue.state().queued).toEqual([{ kind: 'point', team: 'a' }]);
+		h.queue.reconnect();
+		await tick();
+		expect(h.sent.map((r) => r.batch)).toEqual([false, false, true]);
+		expect(h.sent[2]?.base_revision).toBe(fresh.revision);
+		const c = h.queue.state().conflict;
+		expect(c?.server).toEqual(landed);
+		expect(points(c?.mine ?? null)).toEqual(['a', 'a']);
+	});
+
+	it('a lone live tap that lands after another device scored opens the choice', async () => {
+		const landed = grow(grow(seen, ['b', 'b']), ['a']);
+		const h = harness([offline, applied(landed)], { view: seen, replace: [applied(grow(seen, ['a'], 4))] });
+		h.queue.point('a');
+		await tick();
+		const out = h.queue.reconnect();
+		await tick();
+		expect(out).toBeUndefined();
+		const c = h.queue.state().conflict;
+		expect(c?.server).toEqual(landed);
+		expect(points(c?.mine ?? null)).toEqual(['a', 'a']);
+		await h.queue.keepMine();
+		expect(h.replaced[0]).toMatchObject({ base_seq: seen.head_seq, commands: [{ kind: 'point', team: 'a' }] });
+		expect(h.queue.state()).toMatchObject({ conflict: null, offline: false });
+	});
+
+	it('a live tap that lands straight on its base after an offline spell is not a conflict', async () => {
+		const h = harness([offline, applied(grow(seen, ['a']))], { view: seen });
+		h.queue.point('a');
+		await tick();
+		h.queue.reconnect();
+		await tick();
+		expect(h.queue.state()).toMatchObject({ conflict: null, offline: false, pending: [], queued: [] });
+	});
+
+	it('keep_mine_matches_sheet_when_other_device_undid_below_base', async () => {
+		// The phone saw A, B; offline it scores A. Meanwhile the watch undid B (below the base).
+		const before = grow(seen, ['b']);
+		const server = undone(before);
+		const h = harness([conflict(server)], { view: before, replace: [applied(grow(server, ['b', 'a'], 2))] });
+		h.queue.connection('offline');
+		h.queue.point('a');
+		await h.queue.flush();
+		// The sheet shows this phone's score as the phone had it: A, B, then A.
+		const mine = h.queue.state().conflict?.mine ?? null;
+		expect(points(mine)).toEqual(['a', 'b', 'a']);
+		await h.queue.keepMine();
+		// Keep what both agree on (A), put the rest back: the server ends at what the sheet showed.
+		expect(h.replaced[0]).toEqual({
+			client_id: 'id-2',
+			base_revision: server.revision,
+			base_seq: seen.events[0]?.seq,
+			commands: [
+				{ kind: 'point', team: 'b' },
+				{ kind: 'point', team: 'a' }
+			]
+		});
+	});
+
+	it('keep mine with an offline undo of a server point replaces from before it', async () => {
+		const before = grow(seen, ['b']);
+		const server = grow(before, ['a']);
+		const h = harness([conflict(server)], { view: before, replace: [applied(grow(seen, [], 3))] });
+		h.queue.connection('offline');
+		h.queue.undo();
+		await h.queue.flush();
+		expect(points(h.queue.state().conflict?.mine ?? null)).toEqual(['a']);
+		await h.queue.keepMine();
+		// Mine is a prefix of the server's: back up one and put the last agreed event back.
+		expect(h.replaced[0]).toMatchObject({ base_seq: 0, commands: [{ kind: 'point', team: 'a' }] });
+	});
+
+	it('keep mine with 250 queued taps goes as one batch and one replace', async () => {
+		const adv = grow({ ...seen, format: { sets: { deuce: 'advantage', sets: 'one', deciding: 'full_set' } } }, []);
+		const taps = Array.from({ length: 250 }, (_, i) => (i % 2 === 0 ? 'b' : 'a') as 'a' | 'b');
+		const server = grow(adv, ['a']);
+		const h = offlineWith(taps, [conflict(server)], { view: adv, replace: [applied(grow(adv, taps, 2))] });
+		const out = await h.queue.flush();
+		expect(out.status).toBe('conflict');
+		expect(h.sent).toHaveLength(1);
+		expect(h.sent[0]?.commands).toHaveLength(250);
+		await expect(h.queue.keepMine()).resolves.toEqual({ status: 'applied' });
+		expect(h.replaced).toHaveLength(1);
+		expect(h.replaced[0]?.commands).toHaveLength(250);
+		expect(h.queue.state().queued).toEqual([]);
+	});
+
+	it('refuses a tap past the most one request can carry', () => {
+		const h = harness([], { view: seen });
+		h.queue.connection('offline');
+		for (let i = 0; i < MAX_COMMANDS + 1; i++) h.queue.point(i % 2 === 0 ? 'a' : 'b');
+		expect(h.queue.state().queued).toHaveLength(MAX_COMMANDS);
+		expect(h.dropped).toEqual([{ intent: { kind: 'point', team: 'a' }, reason: { kind: 'full' } }]);
+	});
+
+	it('flush settles when the batch turns out empty', async () => {
+		const h = harness([], { view: undone(seen) });
+		h.queue.connection('offline');
+		h.queue.point('a');
+		h.queue.undo();
+		await expect(h.queue.flush()).resolves.toEqual({ status: 'idle' });
+	});
+});
+
 describe('local views', () => {
 	const state = (over: Partial<QueueState>): QueueState => ({
 		pending: [],
@@ -427,7 +550,7 @@ describe('local views', () => {
 	it('shows the server view when the engine refuses the taps', () => {
 		const over = asView(finished);
 		expect(localView(over, state({ queued: [{ kind: 'point', team: 'a' }] }), replayLocal)).toBe(over);
-		expect(mineView(over, over.head_seq, [{ kind: 'point', team: 'a' }], replayLocal)).toBeNull();
+		expect(mineView(over, over, [{ kind: 'point', team: 'a' }], replayLocal)).toBeNull();
 	});
 
 	it('shows the server view when the engine is not loaded', () => {

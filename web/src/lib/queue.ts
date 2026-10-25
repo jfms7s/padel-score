@@ -8,14 +8,15 @@
 // top of the last server view seen (the base). On reconnect the whole queue goes as one batch
 // that must land on that base revision. If the server moved meanwhile (the watch kept scoring)
 // it answers with a conflict, and nothing is merged silently: the page shows both scores and
-// someone picks one. "Keep this phone's score" replaces the server's events after the base seq
-// with this phone's taps.
+// someone picks one. "Keep this phone's score" replaces the server's events so it ends at
+// exactly the score the sheet showed for this phone.
 //
 // Everything here is kept in the store under `padel-score:queue:{token}` after every change, so
 // a reload loses nothing: a request already out is resent with its client_id.
 
 import { ApiError, type CommandOutcome } from './api';
 import { overlayTaps } from './fence';
+import { strings } from './strings';
 import { isEvent } from './guards';
 import { backoffDelay } from './stream';
 import type {
@@ -50,6 +51,8 @@ export type DropReason =
 	| { kind: 'nothing' }
 	/** An undo queued behind a tap that was dropped: it would undo the wrong point. */
 	| { kind: 'cancelled' }
+	/** More taps queued offline than one request can carry. */
+	| { kind: 'full' }
 	| { kind: 'failed'; message: string };
 
 export interface Dropped {
@@ -63,8 +66,8 @@ export type Problem = { kind: 'rejected'; error: ErrorKind } | { kind: 'failed';
 export interface Conflict {
 	/** The score on the server. */
 	server: MatchView;
-	/** The score on this phone: the server's events up to the base seq, then the queued taps. Null
-	 *  when the engine can't score them (not loaded, or it refuses a tap). */
+	/** The score on this phone: the last view it saw (the base), then its taps. Null when the
+	 *  engine can't score them (not loaded, or it refuses a tap). */
 	mine: MatchView | null;
 }
 
@@ -115,8 +118,11 @@ export interface QueueHost {
 	onState(state: QueueState): void;
 }
 
-/** The server takes at most this many commands in one request (crates/server MAX_COMMANDS). */
-export const MAX_BATCH = 200;
+/**
+ * The server takes at most this many commands in one request (crates/server MAX_COMMANDS). A
+ * batch and a replace each go whole, so no more taps than this are queued.
+ */
+export const MAX_COMMANDS = 1000;
 /** A live point that conflicts is resent fresh this many times before it is given up. */
 const MAX_CONFLICTS = 3;
 
@@ -185,15 +191,45 @@ export function localView(server: MatchView, state: QueueState, replay: Replay):
 	return scored(server, sim.events, replay) ?? server;
 }
 
-/** The score on this phone in a conflict: the server's events up to `baseSeq`, then `intents`. */
-export function mineView(server: MatchView, baseSeq: number, intents: Intent[], replay: Replay): MatchView | null {
-	const kept = server.events.filter((e) => e.seq <= baseSeq);
-	return scored(server, simulate(kept, server.head_seq, intents).events, replay);
+/** The events this phone wants: what it saw last (the base), then its own taps. */
+export function target(base: Base, intents: Intent[]): ViewEvent[] {
+	return simulate(base.events, base.head_seq, intents).events;
+}
+
+/** The score on this phone in a conflict, as the phone had it: the base, then `intents`. */
+export function mineView(server: MatchView, base: Base, intents: Intent[], replay: Replay): MatchView | null {
+	return scored(server, target(base, intents), replay);
+}
+
+/**
+ * The replace that turns the server's effective events into `wanted`, exactly: keep the
+ * longest run both agree on (the same rows, so the same seqs, and only rows from the base:
+ * this phone's own taps have no seq yet), then put the rest of `wanted` back as new events.
+ * Null when they are already the same.
+ */
+export function replacePlan(
+	server: ViewEvent[],
+	wanted: ViewEvent[],
+	baseHead: number
+): { base_seq: number; commands: Command[] } | null {
+	let k = 0;
+	while (k < server.length && k < wanted.length && wanted[k]!.seq <= baseHead && server[k]!.seq === wanted[k]!.seq) k++;
+	if (k === wanted.length) {
+		if (k === server.length) return null;
+		// Mine is a prefix of the server's. A replace needs a command, so with nothing of mine
+		// left undo the first event; otherwise put the last agreed one back.
+		if (k === 0) return { base_seq: server[0]!.seq, commands: [{ kind: 'undo', target_seq: server[0]!.seq }] };
+		k -= 1;
+	}
+	const commands = wanted.slice(k).map((e): Command =>
+		e.event === 'time_up' ? { kind: 'time_up' } : { kind: 'point', team: e.event.point }
+	);
+	return { base_seq: k === 0 ? 0 : wanted[k - 1]!.seq, commands };
 }
 
 // ---- stored shape ------------------------------------------------------------------------
 
-interface Base {
+export interface Base {
 	revision: number;
 	head_seq: number;
 	events: ViewEvent[];
@@ -207,6 +243,7 @@ interface StoredJob {
 	after: number | null;
 	target: number | 'none' | null;
 	conflicts: number;
+	offline: boolean;
 }
 
 interface Outstanding {
@@ -263,7 +300,8 @@ const job: Check = (v) =>
 	nul(request)(v.req) &&
 	nul(int)(v.after) &&
 	(v.target === null || v.target === 'none' || int(v.target)) &&
-	int(v.conflicts);
+	int(v.conflicts) &&
+	typeof v.offline === 'boolean';
 const stored: Check = (v) =>
 	obj(v) &&
 	v.v === 1 &&
@@ -307,6 +345,8 @@ interface Job {
 	target: number | 'none' | null;
 	attempt: number;
 	conflicts: number;
+	/** It was out when the line dropped: where it lands decides whether it was merged. */
+	offline: boolean;
 }
 
 type Mode = 'live' | 'offline' | 'conflict' | 'rejected';
@@ -370,7 +410,8 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 				req: j.req,
 				after: j.after?.id ?? null,
 				target: j.target,
-				conflicts: j.conflicts
+				conflicts: j.conflicts,
+				offline: j.offline
 			})),
 			queued,
 			carried,
@@ -386,8 +427,7 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 
 	function conflictOf(): Conflict | null {
 		if (mode !== 'conflict' || !conflictView) return null;
-		const baseSeq = base?.head_seq ?? conflictView.head_seq;
-		return { server: conflictView, mine: mineView(conflictView, baseSeq, mine(), replay) };
+		return { server: conflictView, mine: mineView(conflictView, base ?? snapshot(conflictView), mine(), replay) };
 	}
 
 	const mine = (): Intent[] => [...carried, ...queued.map((q) => q.intent)];
@@ -422,7 +462,9 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 	/** Back to live sending once nothing waits for a batch and the line is up. */
 	function settle() {
 		if (mode !== 'offline' || !online || outstanding !== null) return;
-		if (queued.length > 0) return;
+		if (queued.length > 0 || carried.length > 0) return;
+		// A tap out since the line dropped decides once it lands.
+		if (jobs.some((j) => j.offline)) return;
 		mode = 'live';
 		base = null;
 		carried = [];
@@ -447,7 +489,8 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 			after,
 			target: null,
 			attempt: 0,
-			conflicts: 0
+			conflicts: 0,
+			offline: false
 		});
 		changed();
 		void pump();
@@ -458,6 +501,10 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 			const view = host.view();
 			if (!view) return false;
 			base = snapshot(view);
+		}
+		if (queued.length >= MAX_COMMANDS) {
+			host.onDropped({ intent: item.intent, reason: { kind: 'full' } });
+			return true;
 		}
 		queued.push(item);
 		retake();
@@ -529,10 +576,6 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		if (bound.length > 0) {
 			queued = queued.filter((q) => q.after !== job.id);
 			for (const q of bound) host.onDropped({ intent: q.intent, reason: { kind: 'cancelled' } });
-			if (queued.length === 0 && outstanding === null) {
-				base = null;
-				carried = [];
-			}
 		}
 		settle();
 		changed();
@@ -555,6 +598,9 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 			const job = jobs[0];
 			if (job) await sendLive(job);
 			else if (outstanding?.kind === 'replace') await sendOutstanding();
+			else if (mode === 'offline' && online && !outstanding && queued.length === 0 && carried.length > 0) {
+				askAboutCarried();
+			}
 			else if (mode === 'offline' && online && (outstanding !== null || (base !== null && queued.length > 0))) {
 				buildBatch();
 				await sendOutstanding();
@@ -593,8 +639,7 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		} catch (e) {
 			if (stopped) return;
 			if (e instanceof ApiError && e.retryable) {
-				online = false;
-				if (mode === 'live') mode = 'offline';
+				goOffline();
 				changed();
 				attempt = job.attempt;
 				scheduleRetry();
@@ -617,7 +662,7 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 				// An undo bound behind it undoes what it made: its answer's latest event.
 				const landed = view.events.at(-1)?.seq ?? 'none';
 				for (const j of jobs) if (j.after === job) j.target = landed;
-				if (base && queued.length > 0) adopt(job, view);
+				if (job.offline) adopt(job, view);
 				settle();
 				changed();
 				return;
@@ -640,19 +685,58 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 	}
 
 	/**
-	 * A live tap landed while taps queue behind it. If it landed straight on the base, the batch
-	 * builds on its answer. If someone else's commands got in first, the batch stays on the old
-	 * base (so it can't merge silently) and the tap is carried into "mine" for the choice.
+	 * A live tap that was out when the line dropped has landed. If it landed straight on the
+	 * revision it was sent on, the queue builds on its answer. If someone else's commands got in
+	 * first, the queue stays on the old base (so nothing merges silently) and the tap is carried
+	 * into "mine" for the choice, which opens even with nothing else queued.
 	 */
 	function adopt(job: Job, view: MatchView) {
 		if (!base || view.revision <= base.revision) return;
-		if (view.revision === base.revision + 1) base = snapshot(view);
-		else carried.push(job.intent);
+		if (view.revision > job.base + 1) carried.push(job.intent);
+		else base = snapshot(view);
+	}
+
+	/**
+	 * The line dropped. The queue's base is the last view seen; a tap that never went joins the
+	 * queue on it (sent later, it would land live on whatever the server has by then), and the
+	 * one still out is marked so where it lands gets checked.
+	 */
+	function goOffline() {
+		online = false;
+		if (mode === 'live') mode = 'offline';
+		if (!base) {
+			const view = host.view();
+			if (view) base = snapshot(view);
+		}
+		if (!base) return;
+		const out: Job[] = [];
+		for (const j of jobs) {
+			if (j.req !== null) {
+				j.offline = true;
+				out.push(j);
+				continue;
+			}
+			const after = j.after && j.after.req !== null && jobs.includes(j.after) ? j.after.id : null;
+			if (queued.length < MAX_COMMANDS) queued.push({ intent: j.intent, after });
+			else host.onDropped({ intent: j.intent, reason: { kind: 'full' } });
+		}
+		jobs = out;
+	}
+
+	/** Only carried taps: they are on the server, but landed on someone else's. Ask. */
+	function askAboutCarried() {
+		const view = host.view();
+		if (!view) return;
+		conflictView = view;
+		mode = 'conflict';
+		changed();
+		const c = conflictOf();
+		if (c) resolve({ status: 'conflict', conflict: c });
 	}
 
 	function buildBatch() {
 		if (outstanding || !base) return;
-		const count = Math.min(queued.length, MAX_BATCH);
+		const count = queued.length;
 		const sim = simulate(
 			base.events,
 			base.head_seq,
@@ -662,6 +746,7 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 			queued.splice(0, count);
 			settle();
 			changed();
+			resolve({ status: 'idle' });
 			return;
 		}
 		outstanding = {
@@ -774,8 +859,7 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		connection(status: 'live' | 'offline') {
 			if (status === 'live') return reconnect();
 			if (stopped) return;
-			online = false;
-			if (mode === 'live') mode = 'offline';
+			goOffline();
 			changed();
 		},
 		reconnect,
@@ -801,17 +885,26 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		/** Conflict: put this phone's taps in place of the server's after the base seq. */
 		keepMine(): Promise<FlushOutcome> {
 			if (mode !== 'conflict' || !conflictView || outstanding) return Promise.resolve({ status: 'idle' });
-			const baseSeq = base?.head_seq ?? conflictView.head_seq;
-			const kept = conflictView.events.filter((e) => e.seq <= baseSeq);
-			const sim = simulate(kept, conflictView.head_seq, mine());
+			const from = base ?? snapshot(conflictView);
+			// The server ends at exactly the score the sheet showed for this phone.
+			const plan = replacePlan(conflictView.events, target(from, mine()), from.head_seq);
+			if (!plan) {
+				// Both scores are the same already.
+				clear();
+				return Promise.resolve({ status: 'applied' });
+			}
+			if (plan.commands.length > MAX_COMMANDS) {
+				stuck({ kind: 'failed', message: strings.queue.tooMany });
+				return Promise.resolve({ status: 'rejected', problem: { kind: 'failed', message: strings.queue.tooMany } });
+			}
 			outstanding = {
 				kind: 'replace',
 				count: queued.length,
 				req: {
 					client_id: host.newClientId(),
 					base_revision: conflictView.revision,
-					base_seq: baseSeq,
-					commands: sim.commands
+					base_seq: plan.base_seq,
+					commands: plan.commands
 				}
 			};
 			changed();

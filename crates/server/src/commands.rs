@@ -25,7 +25,7 @@ use crate::store::{
 };
 
 /// The most commands one request may carry.
-pub const MAX_COMMANDS: usize = 200;
+pub const MAX_COMMANDS: usize = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

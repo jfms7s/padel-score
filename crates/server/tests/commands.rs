@@ -6,8 +6,8 @@
 )]
 
 use padel_score_server::commands::{
-    Command, CommandOutcome, CommandRequest, MatchView, ReplaceRequest, apply_command,
-    replace_from, view_of,
+    Command, CommandOutcome, CommandRequest, MAX_COMMANDS, MatchView, ReplaceRequest,
+    apply_command, replace_from, view_of,
 };
 use padel_score_server::db;
 use padel_score_server::store::{EventState, NewMatch, Store, StoredEvent, StoredMatch, Teams};
@@ -449,7 +449,7 @@ async fn empty_or_oversized_request_is_invalid() {
         CommandOutcome::Invalid(_)
     ));
     assert!(matches!(
-        run(&s, &m, live("c2", vec![point(Team::A); 201])).await,
+        run(&s, &m, live("c2", vec![point(Team::A); MAX_COMMANDS + 1])).await,
         CommandOutcome::Invalid(_)
     ));
     assert!(matches!(
@@ -459,6 +459,25 @@ async fn empty_or_oversized_request_is_invalid() {
     assert!(s.find_result(&m.id, "c1").await.unwrap().is_none());
     assert!(s.events(&m.id).await.unwrap().is_empty());
     assert_eq!(revision(&s, &m).await, 0);
+}
+
+#[tokio::test]
+async fn request_over_1000_commands_is_invalid() {
+    // A whole match scored offline goes as one batch (or one replace): 1000 fits, 1001 doesn't.
+    assert_eq!(MAX_COMMANDS, 1000);
+    let s = store().await;
+    let m = new_match(&s).await;
+    assert!(matches!(
+        run(&s, &m, live("c1", vec![point(Team::A); 1001])).await,
+        CommandOutcome::Invalid(_)
+    ));
+    let alternating: Vec<Command> = (0..1000)
+        .map(|i| point(if i % 2 == 0 { Team::A } else { Team::B }))
+        .collect();
+    assert!(!matches!(
+        run(&s, &m, live("c2", alternating)).await,
+        CommandOutcome::Invalid(_)
+    ));
 }
 
 #[test]
