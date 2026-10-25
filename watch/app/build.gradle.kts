@@ -80,6 +80,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
+    implementation(libs.okhttp.sse)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.wear.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
