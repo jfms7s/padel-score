@@ -7,6 +7,7 @@
 //! - `POST /api/score/{token}/commands`, `/replace` and `/final` (a typed final score) run the
 //!   command rules; their status and body come from [`CommandOutcome::to_http`] alone.
 //! - `PUT /api/score/{token}/start` chooses who serves first, while the log is empty.
+//! - The coordinator's `/api/events*` routes are in [`crate::events_api`].
 //! - `GET /api/score/{token}/stream` and `/api/view/{token}/stream` are SSE: the current view as
 //!   event `state` at once, then one per applied command.
 //!
@@ -39,6 +40,7 @@ use crate::commands::{
     Authority, CommandOutcome, CommandRequest, FinalRequest, MatchView, ReplaceRequest,
     apply_command, record_final, replace_from, set_start, view_of,
 };
+use crate::competitions::view::event_id_of_match;
 use crate::hub::Subscription;
 use crate::players::PlayerSlots;
 use crate::store::{NewMatch, Store, StoreError, StoredMatch, Teams};
@@ -74,6 +76,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::owned::routes())
         .merge(crate::players_api::routes())
         .merge(crate::device::routes())
+        .merge(crate::events_api::routes())
 }
 
 #[derive(Debug)]
@@ -413,9 +416,7 @@ async fn start(
     let result = tokio::spawn(async move {
         let result = set_start(&task_state.store, &m, req.start, Authority::Scorer, now()).await;
         if let Ok(view) = &result {
-            if let Some(owner) = &m.owner_user_id {
-                task_state.hub.notify_user(owner);
-            }
+            notify_changed(&task_state, &m.id, m.owner_user_id.as_deref()).await;
             task_state.hub.publish(view.clone());
         }
         result.map_err(|e| (e, m.id))
@@ -440,7 +441,7 @@ async fn start(
 /// request; dropping the `JoinHandle` detaches the task, it does not cancel it.
 ///
 /// `owner` is the match's owner, whose list streams hear of the change too.
-async fn run_detached<F>(
+pub(crate) async fn run_detached<F>(
     state: &AppState,
     match_id: String,
     owner: Option<String>,
@@ -469,15 +470,16 @@ where
 /// - Conflict, locked, rejection, invalid, replayed non-200: nothing changed, nothing to
 ///   publish.
 ///
-/// The owner's list streams are told whenever the match's streams are: they re-read the list,
-/// which also picks up a match that has just finished and drops it.
+/// The owner's list streams, and for an event match its event's streams, are told whenever the
+/// match's streams are ([`notify_changed`]): they re-read, which also picks up a match that has
+/// just finished.
 async fn publish(state: &AppState, match_id: &str, owner: Option<&str>, outcome: &CommandOutcome) {
     let changed = matches!(
         outcome,
         CommandOutcome::Applied(_) | CommandOutcome::Replayed { status: 200, .. }
     );
-    if let Some(owner) = owner.filter(|_| changed) {
-        state.hub.notify_user(owner);
+    if changed {
+        notify_changed(state, match_id, owner).await;
     }
     match outcome {
         CommandOutcome::Applied(view) => state.hub.publish(view.clone()),
@@ -491,8 +493,24 @@ async fn publish(state: &AppState, match_id: &str, owner: Option<&str>, outcome:
     }
 }
 
+/// Tell the owner's list streams, and the event's streams when the match is an event match,
+/// that the match changed. An anonymous match is never an event match, so only an owned one
+/// costs the (indexed) event lookup.
+async fn notify_changed(state: &AppState, match_id: &str, owner: Option<&str>) {
+    let Some(owner) = owner else {
+        return;
+    };
+    state.hub.notify_user(owner);
+    match event_id_of_match(&state.store, match_id).await {
+        Ok(Some(event_id)) => state.hub.notify_event(&event_id),
+        Ok(None) => {}
+        // The change is stored; an event stream misses one frame until its next change.
+        Err(e) => tracing::warn!(match_id, error = %e, "cannot look up the match's event"),
+    }
+}
+
 /// Serve a command outcome: status and body come from [`CommandOutcome::to_http`] alone.
-fn respond(outcome: &CommandOutcome) -> Result<Response, ApiError> {
+pub(crate) fn respond(outcome: &CommandOutcome) -> Result<Response, ApiError> {
     let (status, body) = outcome.to_http().map_err(internal)?;
     let status = StatusCode::from_u16(status).map_err(internal)?;
     Ok((status, [(header::CONTENT_TYPE, "application/json")], body).into_response())

@@ -591,6 +591,41 @@ impl Store {
         Ok(rotated)
     }
 
+    /// The coordinator's match edit: with `label`, rename it (`InvalidField("label")`); with
+    /// `court`, assign it as [`assign_in`] does (`Some(None)` takes it off any court). One
+    /// transaction. Returns the match id if its scorer token was rotated.
+    pub async fn update_event_match(
+        &self,
+        owner: &str,
+        event_id: &str,
+        match_id: &str,
+        court: Option<Option<&str>>,
+        label: Option<String>,
+    ) -> Result<Option<String>, StoreError> {
+        let label = label
+            .as_deref()
+            .map(|l| clean_name(l, "label"))
+            .transpose()?;
+        let mut tx = self.begin().await?;
+        let ev = owned_event_in(&mut tx, owner, event_id).await?;
+        event_match_in(&mut tx, event_id, match_id)
+            .await?
+            .ok_or(StoreError::NotFound)?;
+        if let Some(label) = &label {
+            sqlx::query("UPDATE competition_matches SET label = ? WHERE match_id = ?")
+                .bind(label)
+                .bind(match_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        let rotated = match court {
+            Some(court_id) => assign_in(&mut tx, &ev, match_id, court_id).await?,
+            None => None,
+        };
+        tx.commit().await?;
+        Ok(rotated)
+    }
+
     /// The coordinator moves a court on. See [`advance_court_in`].
     pub async fn advance_court(
         &self,

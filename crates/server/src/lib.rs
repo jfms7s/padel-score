@@ -8,6 +8,7 @@ pub mod competitions;
 pub mod config;
 pub mod db;
 pub mod device;
+pub mod events_api;
 pub mod hub;
 pub mod owned;
 pub mod players;
@@ -57,6 +58,8 @@ pub struct AppState {
     pub credential_recheck: Duration,
     /// The open list streams per user, capped at [`owned::MAX_LIST_STREAMS`].
     pub list_streams: Arc<owned::ListStreams>,
+    /// The court phones connected to each court, for the coordinator's view.
+    pub court_phones: Arc<hub::CourtPhones>,
 }
 
 /// The default [`AppState::credential_recheck`].
@@ -74,6 +77,7 @@ impl AppState {
             setup_code: Arc::new(Mutex::new(None)),
             credential_recheck: CREDENTIAL_RECHECK,
             list_streams: Arc::new(owned::ListStreams::new()),
+            court_phones: Arc::new(hub::CourtPhones::new()),
         }
     }
 }

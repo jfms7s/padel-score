@@ -10,6 +10,7 @@ pub mod kinds;
 pub mod non_stop;
 pub mod places;
 pub mod tournament;
+pub mod view;
 
 use padel_scoring::Format;
 use serde::{Deserialize, Serialize};

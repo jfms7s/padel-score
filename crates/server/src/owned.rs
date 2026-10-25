@@ -2,7 +2,8 @@
 //!
 //! - `GET /api/me/matches` is the caller's live (not finished) matches, newest activity first,
 //!   at most [`LIVE_LIMIT`]: `[{id, label, created_at, last_activity_at, view, scorer_token?,
-//!   spectator_token?}]`. The tokens are only for a session caller; a device never gets them.
+//!   spectator_token?, context?}]`. The tokens are only for a session caller; a device never
+//!   gets them. `context` (`"Court 1 · Sunday cup"`) is there for an event match on a court.
 //! - `GET /api/me/matches/stream` is SSE: that list as event `matches` at once, then again
 //!   whenever one of the user's matches is created, scored or finished (the hub's per-user
 //!   channel).
@@ -45,6 +46,7 @@ use crate::accounts;
 use crate::api::{self, ApiError, ApiJson, ApiPath, internal};
 use crate::auth::{AuthVia, Credential, CurrentUser, credential, credential_holds};
 use crate::commands::{Authority, CommandRequest, MatchView, view_of};
+use crate::competitions::view::court_context;
 use crate::hub::Subscription;
 use crate::store::StoredMatch;
 
@@ -144,6 +146,9 @@ pub struct OwnedMatch {
     pub scorer_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spectator_token: Option<String>,
+    /// `"Court 1 · Sunday cup"` for an event match current on a court; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
 }
 
 fn label(m: &StoredMatch) -> String {
@@ -178,6 +183,7 @@ pub async fn live_list(state: &AppState, user: &CurrentUser) -> Result<Vec<Owned
         if matches!(view.score.status, Status::Finished { .. }) {
             continue;
         }
+        let context = court_context(&state.store, &m.id).await?;
         live.push(OwnedMatch {
             id: m.id.clone(),
             label: label(&m),
@@ -186,6 +192,7 @@ pub async fn live_list(state: &AppState, user: &CurrentUser) -> Result<Vec<Owned
             view,
             scorer_token: with_tokens.then(|| m.scorer_token.clone()),
             spectator_token: with_tokens.then(|| m.spectator_token.clone()),
+            context,
         });
     }
     Ok(live)
@@ -235,7 +242,7 @@ async fn match_stream(
 /// The checks run on their own task, not inside the response body: hyper stops polling a body
 /// whose client is not reading, and a check paused mid-query would hold a pool connection for
 /// as long. Dropping the future (the stream ending) aborts the task.
-fn lapsed(
+pub(crate) fn lapsed(
     state: &AppState,
     headers: &HeaderMap,
     user: &CurrentUser,
