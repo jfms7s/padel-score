@@ -71,6 +71,8 @@ data class Score(
     val server: Player,
     @SerialName("change_ends") val changeEnds: Boolean,
     val status: Status,
+    // Opaque: only emptiness matters (a timed match has no sets, the web's own test). Null when absent.
+    val sets: List<JsonElement>? = null,
 )
 
 // The event payload is opaque to the watch; only its seq matters (for undo targets).
