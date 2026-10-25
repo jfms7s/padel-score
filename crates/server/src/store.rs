@@ -25,6 +25,9 @@ pub enum StoreError {
     InvalidRules(RulesError),
     InvalidTeams,
     NotFound,
+    /// The stored log contradicts itself, e.g. the engine rejects an event already stored as
+    /// effective. Never expected; the request is refused rather than shown a wrong score.
+    Corrupt(String),
     Db(sqlx::Error),
 }
 
@@ -34,6 +37,7 @@ impl fmt::Display for StoreError {
             StoreError::InvalidRules(e) => write!(f, "invalid rules: {e}"),
             StoreError::InvalidTeams => write!(f, "invalid team names"),
             StoreError::NotFound => write!(f, "not found"),
+            StoreError::Corrupt(msg) => write!(f, "corrupt match log: {msg}"),
             StoreError::Db(e) => write!(f, "database error: {e}"),
         }
     }
