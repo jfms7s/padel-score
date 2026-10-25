@@ -44,6 +44,7 @@
 		<nav class="links" aria-label={strings.yourPages}>
 			<a href="/players">{strings.players.title}</a>
 			<a href="/history">{strings.history.link}</a>
+			<a href="/events">{strings.events.link}</a>
 		</nav>
 		<h2>{strings.myMatches}</h2>
 		{#if mineFailure}
@@ -128,7 +129,7 @@
 	}
 	.links {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 8px;
 		margin-top: 8px;
 	}

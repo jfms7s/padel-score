@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BACKOFF_MS, backoffDelay, openStream, sseParser, WATCHDOG_MS, type StreamStatus } from './stream';
+import { BACKOFF_MS, backoffDelay, openSseStream, openStream, sseParser, WATCHDOG_MS, type StreamStatus } from './stream';
 import type { MatchView } from './types';
 import { asView } from './fixtures/load';
 import onePoint from './fixtures/view-one-point.json';
@@ -100,6 +100,36 @@ describe('sseParser', () => {
 			['other', 'x']
 		]);
 		expect(comments).toBe(1);
+	});
+});
+
+describe('openSseStream', () => {
+	it('follows another frame type with its own check', async () => {
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			const server = fakeServer();
+			const got: { n: number }[] = [];
+			openSseStream(
+				'/api/events/e1/stream',
+				{ type: 'event', accept: (v): v is { n: number } => typeof (v as { n?: unknown })?.n === 'number' },
+				(v) => got.push(v),
+				() => {},
+				{
+					fetch: server.fetch as unknown as typeof fetch,
+					setTimeout: (f, ms) => setTimeout(f, ms),
+					clearTimeout: (id) => clearTimeout(id)
+				}
+			);
+			await tick();
+			server.conns[0]?.push(frame(view)); // a `state` frame: not this stream's
+			server.conns[0]?.push('event: event\ndata: {"n":"x"}\n\n');
+			server.conns[0]?.push('event: event\ndata: {"n":2}\n\n');
+			await tick();
+			expect(got).toEqual([{ n: 2 }]);
+			expect(error).toHaveBeenCalledTimes(1);
+		} finally {
+			error.mockRestore();
+		}
 	});
 });
 

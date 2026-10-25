@@ -4,8 +4,10 @@
 // Coordinator calls go through `accountRequest`, so a 401 sends the browser to sign-in. Court and
 // viewing calls need no account: a court phone is anyone holding the court's link.
 
-import { accountRequest, courtUrl, plainRequest } from './api';
+import { accountRequest, ApiError, courtUrl, plainRequest } from './api';
+import { authMessage } from './auth';
 import { strings } from './strings';
+import { pointLabel } from './view';
 import type {
 	CourtOut,
 	CourtState,
@@ -17,12 +19,14 @@ import type {
 	EventTeam,
 	EventView,
 	Format,
+	InvalidScore,
 	MatchChange,
 	MatchView,
 	NewEvent,
 	NewEventMatch,
 	NewTeam,
 	Place,
+	Score,
 	SetScore,
 	Team,
 	TeamChange,
@@ -296,4 +300,128 @@ export function placesFromOrder(groups: readonly (readonly string[])[]): Place[]
 		next = place_to + 1;
 	}
 	return places;
+}
+
+/**
+ * Teams in finishing order, grouped by ties: `tiedWithNext[i]` joins `order[i]` and
+ * `order[i + 1]` in one shared place. The result goes to `placesFromOrder`.
+ */
+export function groupsFromTies(order: readonly string[], tiedWithNext: readonly boolean[]): string[][] {
+	const groups: string[][] = [];
+	order.forEach((id, i) => {
+		const last = groups.at(-1);
+		if (last && i > 0 && tiedWithNext[i - 1]) last.push(id);
+		else groups.push([id]);
+	});
+	return groups;
+}
+
+/** `list` with the item at `from` moved to `to`; out-of-range indexes leave it as it is. */
+export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
+	const out = [...list];
+	if (from < 0 || from >= out.length || to < 0 || to >= out.length) return out;
+	const [item] = out.splice(from, 1);
+	out.splice(to, 0, item as T);
+	return out;
+}
+
+// ---- links -------------------------------------------------------------------------------
+
+/** A court's two QR links: the court phone's scoring page and its viewing page. */
+export function courtLinks(
+	origin: string,
+	court: Pick<CourtOut, 'scorer_token' | 'spectator_token'>
+): { scoring: string; viewing: string } {
+	return { scoring: `${origin}/c/${enc(court.scorer_token)}`, viewing: `${origin}/cv/${enc(court.spectator_token)}` };
+}
+
+/** The whole event's viewing link, for spectators. */
+export function eventLink(origin: string, spectatorToken: string): string {
+	return `${origin}/e/${enc(spectatorToken)}`;
+}
+
+/** One match's viewing page. */
+export function matchViewPath(spectatorToken: string): string {
+	return `/v/${enc(spectatorToken)}`;
+}
+
+// ---- words for the screens ---------------------------------------------------------------
+
+/** The rules on one line: "Best of 3, super tie-break, golden point", "Timed, golden point, no draws". */
+export function rulesText(format: Format): string {
+	const t = strings.events;
+	if ('timed' in format) {
+		const { deuce, draws_allowed } = format.timed;
+		return [t.timed, strings.deuceInLine[deuce], draws_allowed ? t.drawsAllowed : t.noDraws].join(', ');
+	}
+	const { deuce, sets, deciding } = format.sets;
+	const parts: string[] = [strings.setup.setsOptions[sets]];
+	if (sets === 'best_of_3') parts.push(t.rulesDeciding[deciding]);
+	parts.push(strings.deuceInLine[deuce]);
+	return parts.join(', ');
+}
+
+/** A live match's score: the sets' games (or a timed match's games), then the point. */
+export function liveScoreText(score: Score): string {
+	const games = score.sets.length > 0 ? score.sets.map((s) => `${s.a}-${s.b}`).join(' ') : `${score.games[0]}-${score.games[1]}`;
+	const c = score.current;
+	if (c === 'none') return games;
+	const point = 'game' in c ? `${pointLabel(c.game.a)}-${pointLabel(c.game.b)}` : `${c.tie_break.a}-${c.tie_break.b}`;
+	return strings.events.liveScore(games, point);
+}
+
+type InvalidScoreKey = keyof typeof strings.events.invalidScore;
+
+/** Which `strings.events.invalidScore` entry explains `reason`. */
+export function invalidScoreKey(reason: InvalidScore): InvalidScoreKey {
+	if (typeof reason === 'string') return reason;
+	if ('invalid_rules' in reason) return reason.invalid_rules;
+	if ('impossible_set' in reason) return 'impossible_set';
+	return 'missing_tie_break';
+}
+
+/** Why the engine refused a typed score, in words (set numbers counted from one). */
+export function invalidScoreText(reason: InvalidScore): string {
+	const t = strings.events.invalidScore;
+	if (typeof reason === 'string') return t[reason];
+	if ('impossible_set' in reason) return t.impossible_set(reason.impossible_set.index + 1);
+	if ('missing_tie_break' in reason) return t.missing_tie_break(reason.missing_tie_break.index + 1);
+	return t[reason.invalid_rules];
+}
+
+/** Why typed text isn't a score yet, in words. */
+export function parsedErrorText(error: Exclude<ParsedScore, { ok: TypedScore }>['error']): string {
+	return strings.events.parsed[error];
+}
+
+/** What to tell the coordinator about a failed event call. */
+export function eventMessage(e: unknown): string {
+	if (e instanceof ApiError) {
+		const errors: Record<string, string> = strings.events.errors;
+		const fields: Record<string, string> = strings.events.fields;
+		if (e.code === 'invalid_score' && e.reason !== undefined) return invalidScoreText(e.reason);
+		if (e.code === 'validation' && e.field !== undefined && Object.hasOwn(fields, e.field)) return fields[e.field]!;
+		if (Object.hasOwn(errors, e.code)) return errors[e.code]!;
+		const players: Record<string, string> = strings.players.errors;
+		if (Object.hasOwn(players, e.code)) return players[e.code]!;
+	}
+	return authMessage(e);
+}
+
+// ---- stream frames -----------------------------------------------------------------------
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+/**
+ * A loose check of an `event` frame on the coordinator's stream: the parts the screen walks.
+ * (No strict guard yet: there are no server samples of these shapes.)
+ */
+export function isEventDetail(v: unknown): v is EventDetail {
+	return (
+		isObject(v) &&
+		isObject(v.event) &&
+		typeof v.event.id === 'string' &&
+		typeof v.spectator_token === 'string' &&
+		['teams', 'courts', 'matches', 'places'].every((k) => Array.isArray(v[k]))
+	);
 }

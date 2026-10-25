@@ -97,6 +97,26 @@ export function openStream(
 	onStatus: (status: StreamStatus) => void,
 	deps: StreamDeps = defaultDeps()
 ): { close(): void } {
+	return openSseStream(url, { type: 'state', accept: isMatchView }, onState, onStatus, deps);
+}
+
+/** Which frames a stream follows: their SSE event type, and the check each payload must pass. */
+export interface FrameKind<T> {
+	type: string;
+	accept: (v: unknown) => v is T;
+}
+
+/**
+ * `openStream` for any frame type: follow `url`'s `kind.type` events, handing each payload that
+ * passes `kind.accept` to `onFrame`. Status, watchdog and reconnects are as `openStream`'s.
+ */
+export function openSseStream<T>(
+	url: string,
+	kind: FrameKind<T>,
+	onFrame: (frame: T) => void,
+	onStatus: (status: StreamStatus) => void,
+	deps: StreamDeps = defaultDeps()
+): { close(): void } {
 	let closed = false;
 	let status: StreamStatus | null = null;
 	let attempt = 0;
@@ -166,19 +186,19 @@ export function openStream(
 		const parser = sseParser(
 			(type, data) => {
 				alive(ctrl);
-				if (type !== 'state') return;
-				let view: unknown;
+				if (type !== kind.type) return;
+				let payload: unknown;
 				try {
-					view = JSON.parse(data);
+					payload = JSON.parse(data);
 				} catch {
-					console.error('stream: dropped an unreadable state frame');
+					console.error(`stream: dropped an unreadable ${kind.type} frame`);
 					return;
 				}
-				if (!isMatchView(view)) {
-					console.error('stream: dropped a state frame that is not a match view');
+				if (!kind.accept(payload)) {
+					console.error(`stream: dropped a ${kind.type} frame of the wrong shape`);
 					return;
 				}
-				if (!closed) onState(view);
+				if (!closed) onFrame(payload);
 			},
 			() => alive(ctrl)
 		);

@@ -3,21 +3,34 @@ import {
 	addTeam,
 	advanceByCourt,
 	assignMatch,
+	courtLinks,
 	courtStatusText,
 	courtStreamUrl,
+	eventLink,
+	eventMessage,
 	eventStreamUrl,
 	eventViewStreamUrl,
 	getCourt,
+	groupsFromTies,
+	invalidScoreKey,
+	invalidScoreText,
+	isEventDetail,
 	listEvents,
+	liveScoreText,
 	matchText,
+	matchViewPath,
+	moveItem,
+	parsedErrorText,
 	parseTypedScore,
 	placesFromOrder,
 	postEventResult,
+	rulesText,
 	teamText,
 	withOvertimeWinner
 } from './events';
 import { ApiError, setUnauthorizedHandler } from './api';
-import type { CourtOut, EventMatch, EventTeam, Format } from './types';
+import { strings } from './strings';
+import type { CourtOut, EventMatch, EventTeam, Format, InvalidScore, Score } from './types';
 
 const ONE_SET: Format = { sets: { deuce: 'advantage', sets: 'one', deciding: 'full_set' } };
 const BEST_OF_3: Format = { sets: { deuce: 'golden_point', sets: 'best_of_3', deciding: 'full_set' } };
@@ -235,5 +248,104 @@ describe('requests', () => {
 		expect(sent(f)).toMatchObject({ path: '/api/court/ct/advance', method: 'POST' });
 		undo();
 		expect(redirected).toBe(0);
+	});
+});
+
+describe('coordinator screens', () => {
+	it('typed_sheet_reason_text_covers_every_invalid_score', () => {
+		// Every InvalidScore variant the engine can give (keep in step with types.ts).
+		const all: InvalidScore[] = [
+			{ invalid_rules: 'super_tie_break_needs_multiple_sets' },
+			{ invalid_rules: 'invalid_player_index' },
+			'wrong_format',
+			{ impossible_set: { index: 1 } },
+			{ missing_tie_break: { index: 0 } },
+			'match_not_finished',
+			'extra_sets',
+			'draw_not_allowed',
+			'overtime_winner_when_not_level'
+		];
+		const table: Record<string, unknown> = strings.events.invalidScore;
+		const keys = new Set(all.map(invalidScoreKey));
+		// One strings entry per variant, and no stale ones.
+		expect([...keys].sort()).toEqual(Object.keys(table).sort());
+		const texts = all.map(invalidScoreText);
+		for (const text of texts) expect(text.trim().length).toBeGreaterThan(0);
+		expect(new Set(texts).size).toBe(texts.length);
+		// Set numbers are counted from one.
+		expect(invalidScoreText({ impossible_set: { index: 1 } })).toContain('2');
+		expect(invalidScoreText({ missing_tie_break: { index: 0 } })).toContain('1');
+		// The parser's own reasons have words too.
+		for (const e of ['empty', 'syntax', 'needs_tiebreak', 'needs_overtime_winner'] as const)
+			expect(parsedErrorText(e).length).toBeGreaterThan(0);
+	});
+
+	it('qr_links_use_origin_and_tokens', () => {
+		const links = courtLinks('https://padel.example', court(0, null));
+		expect(links).toEqual({ scoring: 'https://padel.example/c/cs', viewing: 'https://padel.example/cv/cv' });
+		expect(eventLink('https://padel.example', 'ev')).toBe('https://padel.example/e/ev');
+		expect(matchViewPath('sp')).toBe('/v/sp');
+	});
+
+	it('rules_text', () => {
+		expect(rulesText(ONE_SET)).toBe('1 set, advantage');
+		expect(rulesText(SUPER)).toBe('Best of 3, super tie-break, golden point');
+		expect(rulesText(BEST_OF_3)).toBe('Best of 3, full deciding set, golden point');
+		expect(rulesText(TIMED)).toBe('Timed, golden point, no draws');
+		expect(rulesText(TIMED_DRAWS)).toBe('Timed, golden point, draws allowed');
+	});
+
+	it('live_score_text', () => {
+		const base: Score = {
+			sets: [set(6, 4), set(2, 1)],
+			sets_won: [1, 0],
+			games: [2, 1],
+			regulation_games: [2, 1],
+			current: { game: { a: 'thirty', b: 'fifteen', deuces: 0, deciding_point: false } },
+			server: { team: 'a', index: 0 },
+			side: 'right',
+			change_ends: false,
+			overtime: false,
+			time_up: false,
+			status: 'in_progress'
+		};
+		expect(liveScoreText(base)).toBe('6-4 2-1, 30-15');
+		expect(liveScoreText({ ...base, sets: [set(6, 6)], current: { tie_break: { a: 3, b: 2, super_tiebreak: false } } })).toBe('6-6, 3-2');
+		expect(liveScoreText({ ...base, sets: [], games: [4, 3], current: { game: { a: 'love', b: 'forty', deuces: 0, deciding_point: false } } })).toBe('4-3, 0-40');
+		expect(liveScoreText({ ...base, sets: [], games: [4, 3], current: 'none' })).toBe('4-3');
+	});
+
+	it('event_message', () => {
+		expect(eventMessage(new ApiError(409, 'too_few_teams', 'x'))).toBe(strings.events.errors.too_few_teams);
+		expect(eventMessage(new ApiError(409, 'no_courts', 'x'))).toBe(strings.events.errors.no_courts);
+		expect(eventMessage(new ApiError(422, 'validation', 'x', false, { field: 'name' }))).toBe(strings.events.fields.name);
+		expect(eventMessage(new ApiError(0, 'network', 'x'))).toBe(strings.networkError);
+		expect(eventMessage(new Error('boom'))).toBe(strings.networkError);
+	});
+
+	it('places_editor_helpers', () => {
+		expect(moveItem(['a', 'b', 'c'], 0, 2)).toEqual(['b', 'c', 'a']);
+		expect(moveItem(['a', 'b', 'c'], 2, 1)).toEqual(['a', 'c', 'b']);
+		expect(moveItem(['a', 'b'], 0, 5)).toEqual(['a', 'b']);
+		expect(groupsFromTies(['a', 'b', 'c', 'd'], [false, false, true])).toEqual([['a'], ['b'], ['c', 'd']]);
+		expect(groupsFromTies(['a', 'b', 'c'], [true, true])).toEqual([['a', 'b', 'c']]);
+		expect(groupsFromTies(['a', 'b'], [])).toEqual([['a'], ['b']]);
+		expect(groupsFromTies([], [])).toEqual([]);
+	});
+
+	it('is_event_detail', () => {
+		const detail = {
+			event: { id: 'e1', name: 'Sunday cup', status: 'setup' },
+			spectator_token: 'ev',
+			teams: [],
+			courts: [],
+			matches: [],
+			places: [],
+			kind_data: null
+		};
+		expect(isEventDetail(detail)).toBe(true);
+		expect(isEventDetail({ ...detail, courts: null })).toBe(false);
+		expect(isEventDetail(null)).toBe(false);
+		expect(isEventDetail({ ...detail, event: 'x' })).toBe(false);
 	});
 });
