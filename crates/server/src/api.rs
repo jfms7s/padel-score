@@ -114,6 +114,7 @@ impl From<StoreError> for ApiError {
             StoreError::InvalidRules(_) | StoreError::InvalidTeams => {
                 ApiError::InvalidMatch(e.to_string())
             }
+            StoreError::InvalidPlayerName => ApiError::Validation { field: "name" },
             StoreError::Conflict(code) => ApiError::Conflict(code),
             StoreError::Corrupt(_) | StoreError::Db(_) => internal(e),
         }

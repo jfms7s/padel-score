@@ -18,7 +18,7 @@ use crate::tokens::new_token;
 
 pub type Tx<'a> = sqlx::Transaction<'a, sqlx::Sqlite>;
 
-const MAX_NAME_CHARS: usize = 40;
+pub(crate) const MAX_NAME_CHARS: usize = 40;
 
 /// `SELECT <every matches column> FROM matches <rest>`, as a `&'static str`. Every query that
 /// builds a [`StoredMatch`] goes through it, so a new column is added in one place.
@@ -37,6 +37,8 @@ pub(crate) use select_matches;
 pub enum StoreError {
     InvalidRules(RulesError),
     InvalidTeams,
+    /// A player name that is blank or over 40 chars.
+    InvalidPlayerName,
     NotFound,
     /// The write would break a uniqueness or state rule, e.g. a taken email or a used invite.
     /// The code is a snake_case error name, served as a 409.
@@ -52,6 +54,7 @@ impl fmt::Display for StoreError {
         match self {
             StoreError::InvalidRules(e) => write!(f, "invalid rules: {e}"),
             StoreError::InvalidTeams => write!(f, "invalid team names"),
+            StoreError::InvalidPlayerName => write!(f, "invalid player name"),
             StoreError::NotFound => write!(f, "not found"),
             StoreError::Conflict(code) => write!(f, "conflict: {code}"),
             StoreError::Corrupt(msg) => write!(f, "corrupt match log: {msg}"),
