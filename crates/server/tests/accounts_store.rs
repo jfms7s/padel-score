@@ -49,6 +49,7 @@ fn new_match(owner: Option<&str>) -> NewMatch {
             b: ["Cris".into(), "Dani".into()],
         },
         owner_user_id: owner.map(str::to_owned),
+        players: Default::default(),
     }
 }
 

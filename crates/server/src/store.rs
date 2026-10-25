@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
+use crate::players::{PlayerSlots, resolve_slots_in};
 use crate::tokens::new_token;
 
 pub type Tx<'a> = sqlx::Transaction<'a, sqlx::Sqlite>;
@@ -39,6 +40,8 @@ pub enum StoreError {
     InvalidTeams,
     /// A player name that is blank or over 40 chars.
     InvalidPlayerName,
+    /// The players picked for a match are not usable; the text is safe to show.
+    InvalidPlayers(&'static str),
     NotFound,
     /// The write would break a uniqueness or state rule, e.g. a taken email or a used invite.
     /// The code is a snake_case error name, served as a 409.
@@ -55,6 +58,7 @@ impl fmt::Display for StoreError {
             StoreError::InvalidRules(e) => write!(f, "invalid rules: {e}"),
             StoreError::InvalidTeams => write!(f, "invalid team names"),
             StoreError::InvalidPlayerName => write!(f, "invalid player name"),
+            StoreError::InvalidPlayers(msg) => write!(f, "invalid players: {msg}"),
             StoreError::NotFound => write!(f, "not found"),
             StoreError::Conflict(code) => write!(f, "conflict: {code}"),
             StoreError::Corrupt(msg) => write!(f, "corrupt match log: {msg}"),
@@ -115,6 +119,8 @@ pub struct NewMatch {
     pub teams: Teams,
     /// The signed-in creator, or `None` for an anonymous quick match.
     pub owner_user_id: Option<String>,
+    /// Slots filled from the owner's player list; default is all free text.
+    pub players: PlayerSlots,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -405,7 +411,16 @@ impl Store {
     pub async fn create_match(&self, new: NewMatch, now: i64) -> Result<StoredMatch, StoreError> {
         new.format.validate()?;
         new.start.validate()?;
-        let teams = new.teams.normalized()?;
+        let mut teams = new.teams.normalized()?;
+        let mut tx = self.begin().await?;
+        let picked = resolve_slots_in(
+            &mut tx,
+            new.owner_user_id.as_deref(),
+            &new.players,
+            &mut teams,
+        )
+        .await?;
+        let teams = teams.normalized()?;
         let stored = StoredMatch {
             id: uuid::Uuid::new_v4().to_string(),
             scorer_token: new_token(),
@@ -432,8 +447,20 @@ impl Store {
         .bind(&stored.owner_user_id)
         .bind(now)
         .bind(now)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        for (team, position, player_id) in picked {
+            sqlx::query(
+                "INSERT INTO match_players (match_id, team, position, player_id) VALUES (?, ?, ?, ?)",
+            )
+            .bind(&stored.id)
+            .bind(team)
+            .bind(position)
+            .bind(player_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
         Ok(stored)
     }
 

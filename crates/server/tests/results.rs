@@ -48,6 +48,7 @@ async fn new_match(s: &Store, format: Format, owner: Option<&str>) -> StoredMatc
                 b: ["Marta".into(), "João".into()],
             },
             owner_user_id: owner.map(str::to_owned),
+            players: Default::default(),
         },
         NOW,
     )

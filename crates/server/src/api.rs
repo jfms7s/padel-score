@@ -38,6 +38,7 @@ use crate::commands::{
     CommandOutcome, CommandRequest, MatchView, ReplaceRequest, apply_command, replace_from, view_of,
 };
 use crate::hub::Subscription;
+use crate::players::PlayerSlots;
 use crate::store::{NewMatch, Store, StoreError, StoredMatch, Teams};
 
 /// The largest request body accepted, in bytes.
@@ -117,6 +118,7 @@ impl From<StoreError> for ApiError {
             StoreError::InvalidRules(_) | StoreError::InvalidTeams => {
                 ApiError::InvalidMatch(e.to_string())
             }
+            StoreError::InvalidPlayers(msg) => ApiError::InvalidMatch(msg.to_owned()),
             StoreError::InvalidPlayerName => ApiError::InvalidPlayer,
             StoreError::Conflict(code) => ApiError::Conflict(code),
             StoreError::Corrupt(_) | StoreError::Db(_) => internal(e),
@@ -232,6 +234,8 @@ pub struct CreateMatchRequest {
     pub format: Format,
     pub start: Start,
     pub teams: Teams,
+    #[serde(default)]
+    pub players: PlayerSlots,
 }
 
 #[derive(Debug, Serialize)]
@@ -253,6 +257,7 @@ async fn create_match(
         start: req.start,
         teams: req.teams,
         owner_user_id: user.map(|u| u.user.id),
+        players: req.players,
     };
     let m = state.store.create_match(new, now()).await?;
     if let Some(owner) = &m.owner_user_id {

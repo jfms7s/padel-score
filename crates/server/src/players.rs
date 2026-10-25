@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
-use crate::store::{MAX_NAME_CHARS, Store, StoreError};
+use crate::store::{MAX_NAME_CHARS, Store, StoreError, Teams};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Player {
@@ -19,6 +19,54 @@ pub struct Player {
 pub struct PlayerChange {
     pub name: Option<String>,
     pub archived: Option<bool>,
+}
+
+/// The players picked from the list for a match's four slots; `None` is a free-text slot.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct PlayerSlots {
+    #[serde(default)]
+    pub a: [Option<String>; 2],
+    #[serde(default)]
+    pub b: [Option<String>; 2],
+}
+
+impl PlayerSlots {
+    fn is_empty(&self) -> bool {
+        self.a.iter().chain(&self.b).all(Option::is_none)
+    }
+}
+
+/// Check the picked players for a new match owned by `owner` and put each one's current name in
+/// its slot of `teams`. Returns `(team, position, player id)` for every picked slot.
+pub(crate) async fn resolve_slots_in(
+    conn: &mut SqliteConnection,
+    owner: Option<&str>,
+    slots: &PlayerSlots,
+    teams: &mut Teams,
+) -> Result<Vec<(&'static str, i64, String)>, StoreError> {
+    if slots.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(owner) = owner else {
+        return Err(StoreError::InvalidPlayers("players need an account"));
+    };
+    let mut picked = Vec::new();
+    let sides = [("a", &slots.a, &mut teams.a), ("b", &slots.b, &mut teams.b)];
+    for (team, ids, names) in sides {
+        for (position, (id, name)) in ids.iter().zip(names.iter_mut()).enumerate() {
+            let Some(id) = id else { continue };
+            let player = player_in(conn, owner, id)
+                .await?
+                .filter(|p| !p.archived)
+                .ok_or(StoreError::InvalidPlayers("unknown player"))?;
+            if picked.iter().any(|(_, _, other)| *other == player.id) {
+                return Err(StoreError::InvalidPlayers("same player twice"));
+            }
+            *name = player.name;
+            picked.push((team, position as i64, player.id));
+        }
+    }
+    Ok(picked)
 }
 
 /// Trim a player name; blank or over 40 chars (not bytes) is `InvalidPlayerName`.

@@ -46,6 +46,7 @@ fn new_match() -> NewMatch {
         start: start(),
         teams: teams(),
         owner_user_id: None,
+        players: Default::default(),
     }
 }
 

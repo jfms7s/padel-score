@@ -238,3 +238,202 @@ async fn cross_site_post_is_refused() {
     .await;
     assert_eq!(list.body["items"].as_array().unwrap().len(), 0);
 }
+
+fn match_body(teams: serde_json::Value, players: Option<serde_json::Value>) -> serde_json::Value {
+    let mut body = json!({
+        "format": {"sets": {"deuce": "advantage", "sets": "one", "deciding": "full_set"}},
+        "start": {"first_server": {"team": "a", "index": 0}, "other_first_server": 0},
+        "teams": teams,
+    });
+    if let Some(players) = players {
+        body["players"] = players;
+    }
+    body
+}
+
+fn free_teams() -> serde_json::Value {
+    json!({"a": ["Xx", "Yy"], "b": ["Zz", "Ww"]})
+}
+
+async fn make_player(
+    state: &padel_score_server::AppState,
+    app: &axum::Router,
+    raw: &str,
+    name: &str,
+) -> String {
+    let res = send(
+        app,
+        as_session(
+            state,
+            raw,
+            Method::POST,
+            "/api/players",
+            Some(json!({"name": name})),
+        ),
+    )
+    .await;
+    res.body["id"].as_str().unwrap().to_owned()
+}
+
+async fn create(
+    state: &padel_score_server::AppState,
+    app: &axum::Router,
+    raw: Option<&str>,
+    body: serde_json::Value,
+) -> support::Res {
+    match raw {
+        Some(raw) => {
+            send(
+                app,
+                as_session(state, raw, Method::POST, "/api/matches", Some(body)),
+            )
+            .await
+        }
+        None => send(app, req(Method::POST, "/api/matches", Some(body), &[])).await,
+    }
+}
+
+async fn count(pool: &sqlx::SqlitePool, table: &str) -> i64 {
+    let sql = match table {
+        "matches" => "SELECT COUNT(*) FROM matches",
+        "match_players" => "SELECT COUNT(*) FROM match_players",
+        other => panic!("count: unknown table {other}"),
+    };
+    sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
+}
+
+#[tokio::test]
+async fn match_with_players_records_slots() {
+    let (state, pool, app, _id, raw) = with_admin().await;
+    let ana = make_player(&state, &app, &raw, "Ana").await;
+    let rui = make_player(&state, &app, &raw, "Rui").await;
+    let body = match_body(
+        free_teams(),
+        Some(json!({"a": [ana, null], "b": [null, rui]})),
+    );
+    let res = create(&state, &app, Some(&raw), body).await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
+    let rows: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT team, position, player_id FROM match_players ORDER BY team, position",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![("a".into(), 0, ana.clone()), ("b".into(), 1, rui.clone())]
+    );
+    let teams: String = sqlx::query_scalar("SELECT teams FROM matches")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let teams: serde_json::Value = serde_json::from_str(&teams).unwrap();
+    assert_eq!(teams, json!({"a": ["Ana", "Yy"], "b": ["Zz", "Rui"]}));
+}
+
+#[tokio::test]
+async fn match_with_players_needs_account() {
+    let (state, pool, app, _id, raw) = with_admin().await;
+    let ana = make_player(&state, &app, &raw, "Ana").await;
+    let body = match_body(free_teams(), Some(json!({"a": [ana, null]})));
+    let res = create(&state, &app, None, body).await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", res.body);
+    assert_eq!(res.body["error"], "invalid_match");
+    assert_eq!(count(&pool, "matches").await, 0);
+}
+
+#[tokio::test]
+async fn match_with_other_users_player_is_422() {
+    let (state, pool, app, _id, raw_a) = with_admin().await;
+    let (_b, raw_b) = invited_user(&state, &app, &raw_a, "b@x.test", "Rui").await;
+    let ana = make_player(&state, &app, &raw_a, "Ana").await;
+    let foreign = create(
+        &state,
+        &app,
+        Some(&raw_b),
+        match_body(free_teams(), Some(json!({"a": [ana, null]}))),
+    )
+    .await;
+    let missing = create(
+        &state,
+        &app,
+        Some(&raw_b),
+        match_body(free_teams(), Some(json!({"a": ["nope", null]}))),
+    )
+    .await;
+    assert_eq!(foreign.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(foreign.status, missing.status);
+    assert_eq!(foreign.body, missing.body);
+    assert_eq!(count(&pool, "matches").await, 0);
+}
+
+#[tokio::test]
+async fn match_with_archived_player_is_422() {
+    let (state, pool, app, _id, raw) = with_admin().await;
+    let ana = make_player(&state, &app, &raw, "Ana").await;
+    let res = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::PATCH,
+            &format!("/api/players/{ana}"),
+            Some(json!({"archived": true})),
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let res = create(
+        &state,
+        &app,
+        Some(&raw),
+        match_body(free_teams(), Some(json!({"a": [ana, null]}))),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(count(&pool, "matches").await, 0);
+}
+
+#[tokio::test]
+async fn same_player_twice_is_422() {
+    let (state, pool, app, _id, raw) = with_admin().await;
+    let ana = make_player(&state, &app, &raw, "Ana").await;
+    let res = create(
+        &state,
+        &app,
+        Some(&raw),
+        match_body(
+            free_teams(),
+            Some(json!({"a": [ana, null], "b": [ana, null]})),
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.body["error"], "invalid_match");
+    assert_eq!(count(&pool, "matches").await, 0);
+    assert_eq!(count(&pool, "match_players").await, 0);
+}
+
+#[tokio::test]
+async fn mixed_slots_are_fine() {
+    let (state, pool, app, _id, raw) = with_admin().await;
+    let ana = make_player(&state, &app, &raw, "Ana").await;
+    let res = create(
+        &state,
+        &app,
+        Some(&raw),
+        match_body(free_teams(), Some(json!({"b": [null, ana]}))),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
+    assert_eq!(count(&pool, "match_players").await, 1);
+}
+
+#[tokio::test]
+async fn anonymous_match_unchanged() {
+    let (state, pool, app, _id, _raw) = with_admin().await;
+    let res = create(&state, &app, None, match_body(free_teams(), None)).await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
+    assert_eq!(count(&pool, "matches").await, 1);
+    assert_eq!(count(&pool, "match_players").await, 0);
+}
