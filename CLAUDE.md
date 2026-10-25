@@ -4,4 +4,4 @@
 - Use Conventional Commits (`type(scope): description`); CI checks every subject.
 - The scoring crate must never panic (bad input returns `Err`) and must stay wasm-clean:
   it builds for `wasm32-unknown-unknown` with no extra features and uses no `std::time`, threads, `rand` or filesystem.
-- Before committing: `cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked && cargo build -p padel-scoring --target wasm32-unknown-unknown --locked`.
+- Before committing: `cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked && cargo build -p padel-scoring --target wasm32-unknown-unknown --locked && cargo build -p padel-scoring-wasm --target wasm32-unknown-unknown --locked`.
