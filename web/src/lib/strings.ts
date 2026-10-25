@@ -285,7 +285,10 @@ export const strings = {
 			copy: 'Copy link',
 			copied: 'Copied',
 			copyFailed: 'Copy the link above by hand.',
-			qr: 'QR code for the link'
+			qr: 'QR code for the link',
+			/** The time left on a code that expires, "9:41". */
+			timeLeft: (clock: string) => `Good for ${clock}`,
+			expired: 'This code has expired.'
 		},
 
 		errors: {
@@ -349,6 +352,125 @@ export const strings = {
 			invalid_player: 'Enter a name of 1 to 40 characters.',
 			player_exists: 'Another player already has this name.',
 			not_found: 'This player is not on your list.'
+		}
+	},
+
+	// Linking player entries to accounts, claims, and the combined history.
+	linking: {
+		/** On a player's page, unlinked. */
+		linkToAccount: 'Link to an account',
+		linkHint: 'Show this code to the player. They scan it signed in and confirm that it is them. It works once.',
+		linkCodeTitle: (name: string) => `Link code for ${name}`,
+		hideCode: 'Hide the code',
+		thisIsMe: 'This is me',
+		linkedMe: 'This player is now linked to you.',
+		unlink: 'Unlink',
+		unlinkConfirm: (name: string) => `Unlink ${name}? Their matches stay in your history.`,
+		unlinkYes: 'Yes, unlink',
+		keep: 'Keep the link',
+		unlinked: 'Unlinked.',
+		you: 'You',
+		linkedTo: (name: string) => `Linked · ${name}`,
+		claimBadge: (n: number) => (n === 1 ? '1 claim' : `${n} claims`),
+		// Previews: "5 matches · 2 events · Mar 2026 – Oct 2026".
+		match: (n: number) => (n === 1 ? '1 match' : `${n} matches`),
+		event: (n: number) => (n === 1 ? '1 event' : `${n} events`),
+		nothingYet: 'No finished matches yet',
+		range: (from: string, to: string) => `${from} – ${to}`,
+		// The page the QR code opens.
+		page: {
+			title: 'Is this you?',
+			noCode: 'This link is incomplete. Ask for a new one.',
+			is: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
+			yes: 'Yes, that’s me',
+			confirming: 'Linking…'
+		},
+		// Claims waiting for the coordinator.
+		claims: 'Claims',
+		claimsHint: 'People who say one of your players is them. Approving links the player to their account.',
+		claimFor: (claimant: string, email: string) => `${claimant} (${email})`,
+		claimOn: (name: string) => `Says they are ${name}`,
+		approve: 'Approve',
+		approveLabel: (claimant: string, name: string) => `Approve ${claimant} as ${name}`,
+		approved: (name: string) => `${name} is now linked.`,
+		decline: 'Decline',
+		declineLabel: (claimant: string, name: string) => `Decline ${claimant} as ${name}`,
+		declineConfirm: (claimant: string, name: string) => `Decline ${claimant} as ${name}?`,
+		declineYes: 'Yes, decline',
+		declined: 'Claim declined.',
+		// Their wider history, on a linked player's page.
+		allMatches: 'All their matches',
+		allMatchesHint: 'Every match across all coordinators. Other coordinators’ matches show no names.',
+		noAllMatches: 'No finished matches yet.',
+		byCoordinator: (name: string) => `Coordinator: ${name}`,
+		anotherCoordinators: 'Another coordinator’s match',
+		private: 'Their wider history is private.',
+		loadFailed: 'Couldn’t load their wider history.',
+		// Claims from a match (the spectator page and the claim sheet).
+		thatsMe: 'That’s me',
+		thatsMeLabel: (name: string) => `That’s me: ${name}`,
+		barMany: 'Is one of these you?',
+		claimSentShort: 'Claim sent',
+		sheet: {
+			title: 'Is this you?',
+			is: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
+			needsApproval: (coordinator: string) =>
+				`${coordinator} has to approve before you are linked. You see no scores until then.`,
+			send: 'Send claim',
+			sending: 'Sending…',
+			sent: (coordinator: string) => `Sent. ${coordinator} will see it next time they open their players.`,
+			linked: 'Linked.',
+			close: 'Close',
+			loading: 'Loading…'
+		},
+		// My results and the privacy setting (/profile).
+		profile: {
+			title: 'My results',
+			link: 'My results',
+			back: 'Home',
+			empty: 'Ask a coordinator to show you the link QR for your name, or tap ‘That’s me’ on a match you played in.',
+			linkedEntries: 'Linked entries',
+			linkedEntry: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
+			unlinkLabel: (name: string, coordinator: string) => `Unlink ${name} from ${coordinator}’s players`,
+			unlinkConfirm: (name: string) => `Unlink ${name}? Their matches stay in that coordinator’s history, and leave yours.`,
+			claimsTitle: 'My claims',
+			claimStatus: { pending: 'Waiting for approval', approved: 'Approved', declined: 'Declined', withdrawn: 'Withdrawn' },
+			claimLine: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
+			withdraw: 'Withdraw',
+			withdrawLabel: (name: string) => `Withdraw your claim on ${name}`,
+			privacyTitle: 'Who can see my history',
+			privacyOptions: {
+				private: { label: 'Private', hint: 'Only you' },
+				coordinators: { label: 'Coordinators', hint: 'Coordinators you’ve played for (default)' },
+				public: { label: 'Public', hint: 'Anyone with your profile link' }
+			},
+			profileLink: 'Your profile link',
+			profileLinkHint: 'Anyone with this link sees your record and results, without other people’s names.',
+			newLink: 'Make a new link',
+			newLinkConfirm: 'Make a new link? The old one stops working.',
+			newLinkYes: 'Yes, make a new link',
+			keepLink: 'Keep the old link',
+			privacySaved: 'Saved.',
+			loadMore: 'Load more',
+			loadFailed: 'Couldn’t load this part.'
+		},
+		// The public profile (/p/{token}).
+		publicProfile: {
+			title: (name: string) => `${name}’s results`,
+			notPublic: 'This profile isn’t public.',
+			note: 'Only dates, outcomes and scores are shown. No names.'
+		},
+		errors: {
+			link_code_invalid: 'This link has expired or was already used. Ask for a new one.',
+			link_overlaps: 'Two entries of one account can’t share a match or an event, and these do.',
+			player_linked: 'This player is already linked to an account.',
+			player_not_linked: 'This player isn’t linked to an account.',
+			already_yours: 'This player is already linked to you.',
+			claim_decided: 'This claim was already decided.',
+			claim_declined: 'This claim was declined, so it can’t be made again.',
+			not_public: 'This profile isn’t public.',
+			too_many_claims: 'You have too many open claims. Withdraw one first, then try again.',
+			history_private: 'Their wider history is private.'
 		}
 	},
 

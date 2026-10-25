@@ -51,16 +51,24 @@ pub(crate) async fn resolve_slots_in(
         return Err(StoreError::InvalidPlayers("players need an account"));
     };
     let mut picked = Vec::new();
+    let mut accounts: Vec<String> = Vec::new();
     let sides = [("a", &slots.a, &mut teams.a), ("b", &slots.b, &mut teams.b)];
     for (team, ids, names) in sides {
         for (position, (id, name)) in ids.iter().zip(names.iter_mut()).enumerate() {
             let Some(id) = id else { continue };
-            let player = player_in(conn, owner, id)
+            let (player, linked) = linked_player_in(conn, owner, id)
                 .await?
-                .filter(|p| !p.archived)
+                .filter(|(p, _)| !p.archived)
                 .ok_or(StoreError::InvalidPlayers("unknown player"))?;
             if picked.iter().any(|(_, _, other)| *other == player.id) {
                 return Err(StoreError::InvalidPlayers("same player twice"));
+            }
+            // Two entries of one account are the same person.
+            if let Some(user) = linked {
+                if accounts.contains(&user) {
+                    return Err(StoreError::InvalidPlayers("same player twice"));
+                }
+                accounts.push(user);
             }
             *name = player.name;
             picked.push((team, position as i64, player.id));
@@ -87,7 +95,7 @@ pub fn name_key(name: &str) -> String {
 macro_rules! select_players {
     ($rest:literal) => {
         concat!(
-            "SELECT id, name, archived_at, created_at FROM players ",
+            "SELECT id, name, archived_at, created_at, linked_user_id FROM players ",
             $rest
         )
     };
@@ -107,12 +115,23 @@ async fn player_in(
     owner: &str,
     id: &str,
 ) -> Result<Option<Player>, StoreError> {
+    Ok(linked_player_in(conn, owner, id).await?.map(|(p, _)| p))
+}
+
+/// [`player_in`] plus the account the entry is linked to, if any.
+async fn linked_player_in(
+    conn: &mut SqliteConnection,
+    owner: &str,
+    id: &str,
+) -> Result<Option<(Player, Option<String>)>, StoreError> {
     let row = sqlx::query(select_players!("WHERE owner_user_id = ? AND id = ?"))
         .bind(owner)
         .bind(id)
         .fetch_optional(conn)
         .await?;
-    Ok(row.as_ref().map(player_from_row).transpose()?)
+    row.as_ref()
+        .map(|r| Ok((player_from_row(r)?, r.try_get("linked_user_id")?)))
+        .transpose()
 }
 
 async fn player_by_key_in(

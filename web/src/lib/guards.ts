@@ -173,7 +173,9 @@ function build(exact: (shape: Shape, optional?: Shape) => Check) {
 		name: str,
 		archived: bool,
 		created_at: int,
-		record: exact({ wins: int, losses: int, draws: int })
+		record: exact({ wins: int, losses: int, draws: int }),
+		link: nullable(exact({ display_name: str, linked_at: int, is_me: bool })),
+		pending_claims: int
 	});
 	const historyShape: Shape = {
 		match_id: str,

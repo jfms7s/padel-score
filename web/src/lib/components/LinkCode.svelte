@@ -4,7 +4,15 @@
 	import QRCode from 'qrcode';
 	import { strings } from '#lib/strings.ts';
 
-	let { url, title, hint }: { url: string; title: string; hint: string } = $props();
+	// `deadline` (ms on this device's clock, from `codeDeadline`) shows the time left, and `onexpire`
+	// is called once when it runs out (the page then makes a new code and passes the new url).
+	let {
+		url,
+		title,
+		hint,
+		deadline,
+		onexpire
+	}: { url: string; title: string; hint: string; deadline?: number; onexpire?: () => void } = $props();
 
 	const s = strings.auth.share;
 	let code = $state('');
@@ -31,6 +39,28 @@
 		};
 	});
 
+	let now = $state(Date.now());
+	const left = $derived(deadline === undefined ? null : Math.max(0, Math.ceil((deadline - now) / 1000)));
+	const clock = $derived(
+		left === null ? '' : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
+	);
+
+	$effect(() => {
+		if (deadline === undefined) return;
+		const at = deadline;
+		let fired = false;
+		const tick = () => {
+			now = Date.now();
+			if (!fired && now >= at) {
+				fired = true;
+				onexpire?.();
+			}
+		};
+		tick();
+		const timer = setInterval(tick, 1000);
+		return () => clearInterval(timer);
+	});
+
 	async function copy() {
 		copyFailed = false;
 		try {
@@ -51,6 +81,9 @@
 	<figcaption>
 		<strong>{title}</strong>
 		<span class="hint">{hint}</span>
+		{#if left !== null}
+			<span class="hint" role="timer">{left > 0 ? s.timeLeft(clock) : s.expired}</span>
+		{/if}
 		<input class="link" readonly value={url} aria-label={title} onclick={(e) => e.currentTarget.select()} />
 		<button type="button" class="primary" onclick={copy}>{copied ? s.copied : s.copy}</button>
 		{#if copyFailed}<span class="hint" role="alert">{s.copyFailed}</span>{/if}

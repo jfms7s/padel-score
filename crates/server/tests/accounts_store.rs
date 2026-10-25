@@ -677,9 +677,10 @@ async fn purge_expired_auth_removes_only_expired_rows() {
             purged.sessions,
             purged.invites,
             purged.device_codes,
-            purged.resets
+            purged.resets,
+            purged.link_codes
         ),
-        (1, 1, 1, 1)
+        (1, 1, 1, 1, 0)
     );
     for table in ["sessions", "invites", "device_codes", "password_resets"] {
         assert_eq!(count(table).await, 0, "{table}");
