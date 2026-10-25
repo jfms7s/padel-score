@@ -1,0 +1,123 @@
+{
+  "id": "7355889e-afe9-4ccf-8770-8b6a3e7c195e",
+  "format": {
+    "sets": {
+      "deuce": "golden_point",
+      "sets": "best_of_3",
+      "deciding": "super_tie_break"
+    }
+  },
+  "start": {
+    "first_server": {
+      "team": "a",
+      "index": 0
+    },
+    "other_first_server": 0
+  },
+  "teams": {
+    "a": [
+      "Ana",
+      "Rui"
+    ],
+    "b": [
+      "João",
+      "Marta"
+    ]
+  },
+  "revision": 1,
+  "head_seq": 9,
+  "events": [
+    {
+      "seq": 1,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 2,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 3,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 4,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 5,
+      "event": {
+        "point": "b"
+      }
+    },
+    {
+      "seq": 6,
+      "event": {
+        "point": "b"
+      }
+    },
+    {
+      "seq": 7,
+      "event": {
+        "point": "b"
+      }
+    },
+    {
+      "seq": 8,
+      "event": {
+        "point": "b"
+      }
+    },
+    {
+      "seq": 9,
+      "event": {
+        "point": "b"
+      }
+    }
+  ],
+  "score": {
+    "sets": [
+      {
+        "a": 1,
+        "b": 1,
+        "tiebreak": null
+      }
+    ],
+    "sets_won": [
+      0,
+      0
+    ],
+    "games": [
+      1,
+      1
+    ],
+    "regulation_games": [
+      1,
+      1
+    ],
+    "current": {
+      "game": {
+        "a": "love",
+        "b": "fifteen",
+        "deuces": 0,
+        "deciding_point": false
+      }
+    },
+    "server": {
+      "team": "a",
+      "index": 1
+    },
+    "side": "left",
+    "change_ends": false,
+    "overtime": false,
+    "time_up": false,
+    "status": "in_progress"
+  }
+}

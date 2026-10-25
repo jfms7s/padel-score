@@ -1,0 +1,4 @@
+{
+  "error": "invalid_match",
+  "message": "invalid rules: a super tie-break needs a match of more than one set"
+}

@@ -1,0 +1,87 @@
+{
+  "id": "38c91c70-6e5d-40df-88e0-34b75891162b",
+  "format": {
+    "timed": {
+      "deuce": "golden_point",
+      "draws_allowed": false
+    }
+  },
+  "start": {
+    "first_server": {
+      "team": "a",
+      "index": 0
+    },
+    "other_first_server": 0
+  },
+  "teams": {
+    "a": [
+      "Ana",
+      "Rui"
+    ],
+    "b": [
+      "João",
+      "Marta"
+    ]
+  },
+  "revision": 2,
+  "head_seq": 5,
+  "events": [
+    {
+      "seq": 1,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 2,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 3,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 4,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 5,
+      "event": "time_up"
+    }
+  ],
+  "score": {
+    "sets": [],
+    "sets_won": [
+      0,
+      0
+    ],
+    "games": [
+      1,
+      0
+    ],
+    "regulation_games": [
+      1,
+      0
+    ],
+    "current": "none",
+    "server": {
+      "team": "b",
+      "index": 0
+    },
+    "side": "right",
+    "change_ends": false,
+    "overtime": false,
+    "time_up": true,
+    "status": {
+      "finished": {
+        "winner": "a"
+      }
+    }
+  }
+}

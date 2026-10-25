@@ -1,0 +1,210 @@
+{
+  "id": "4c204d91-ef07-4235-b56f-807f99fa4588",
+  "format": {
+    "sets": {
+      "deuce": "golden_point",
+      "sets": "one",
+      "deciding": "full_set"
+    }
+  },
+  "start": {
+    "first_server": {
+      "team": "a",
+      "index": 0
+    },
+    "other_first_server": 0
+  },
+  "teams": {
+    "a": [
+      "Ana",
+      "Rui"
+    ],
+    "b": [
+      "João",
+      "Marta"
+    ]
+  },
+  "revision": 1,
+  "head_seq": 24,
+  "events": [
+    {
+      "seq": 1,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 2,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 3,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 4,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 5,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 6,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 7,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 8,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 9,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 10,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 11,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 12,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 13,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 14,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 15,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 16,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 17,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 18,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 19,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 20,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 21,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 22,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 23,
+      "event": {
+        "point": "a"
+      }
+    },
+    {
+      "seq": 24,
+      "event": {
+        "point": "a"
+      }
+    }
+  ],
+  "score": {
+    "sets": [
+      {
+        "a": 6,
+        "b": 0,
+        "tiebreak": null
+      }
+    ],
+    "sets_won": [
+      1,
+      0
+    ],
+    "games": [
+      6,
+      0
+    ],
+    "regulation_games": [
+      6,
+      0
+    ],
+    "current": "none",
+    "server": {
+      "team": "a",
+      "index": 1
+    },
+    "side": "right",
+    "change_ends": false,
+    "overtime": false,
+    "time_up": false,
+    "status": {
+      "finished": {
+        "winner": "a"
+      }
+    }
+  }
+}
