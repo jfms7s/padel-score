@@ -29,6 +29,9 @@ function fakeStorage(initial: Record<string, string> = {}): StorageLike & { data
 		getItem: (k) => (k in data ? data[k] : null),
 		setItem: (k, v) => {
 			data[k] = v;
+		},
+		removeItem: (k) => {
+			delete data[k];
 		}
 	};
 }
@@ -38,6 +41,9 @@ const throwing: StorageLike = {
 		throw new Error('denied');
 	},
 	setItem: () => {
+		throw new Error('denied');
+	},
+	removeItem: () => {
 		throw new Error('denied');
 	}
 };

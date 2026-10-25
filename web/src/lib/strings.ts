@@ -153,6 +153,172 @@ export const strings = {
 		qr: (what: string) => `QR code for the ${what.toLowerCase()} link`
 	},
 
+	// Accounts: sign-in, setup, invites, account, admin, watch approval, reset.
+	auth: {
+		signIn: 'Sign in',
+		signOut: 'Sign out',
+		signingIn: 'Signing in…',
+		account: 'Account',
+		header: 'Account menu',
+		email: 'Email',
+		password: 'Password',
+		name: 'Your name',
+		nameHint: 'Shown to the people you invite.',
+		passwordHint: '8 to 128 characters.',
+		back: 'Home',
+		save: 'Save',
+		saving: 'Saving…',
+		loading: 'Loading…',
+		signInFirst: 'Sign in to see this page.',
+
+		login: {
+			title: 'Sign in',
+			setupFirst: 'This server has no accounts yet.',
+			setupLink: 'Set it up'
+		},
+
+		setup: {
+			title: 'Set up this server',
+			intro: 'Create the first account. It will be the admin, and can invite everyone else.',
+			code: 'Setup code',
+			codeHint: 'Find it in the server log',
+			submit: 'Create the admin account',
+			done: 'This server is already set up.'
+		},
+
+		invite: {
+			title: 'Join Padel score',
+			invitedBy: (name: string) => `${name} invited you.`,
+			expires: (date: string) => `The invite is good until ${date}.`,
+			submit: 'Create my account',
+			noCode: 'This invite link is incomplete. Ask for a new one.',
+			signedInNote: 'Creating an account here signs you out of the one you use now.'
+		},
+
+		reset: {
+			title: 'Choose a new password',
+			newPassword: 'New password',
+			submit: 'Set the password',
+			done: 'Your password is set. Sign in with it now.',
+			noCode: 'This reset link is incomplete. Ask an admin for a new one.'
+		},
+
+		accountPage: {
+			title: 'Account',
+			signedInAs: (name: string, email: string) => `Signed in as ${name} (${email}).`,
+			admin: 'Manage users',
+			link: 'Approve a watch',
+
+			password: 'Change password',
+			currentPassword: 'Current password',
+			newPassword: 'New password',
+			passwordChanged: 'Password changed. Your other devices were signed out.',
+
+			invites: 'Invites',
+			invitesHint: 'Each link makes one account and expires after 7 days.',
+			createInvite: 'Create an invite link',
+			newInvite: 'New invite link',
+			newInviteHint: 'Send it to one person. It works once.',
+			noInvites: "You haven't made any invites.",
+			inviteStatus: {
+				active: 'Waiting',
+				used: 'Used',
+				expired: 'Expired',
+				revoked: 'Revoked'
+			},
+			usedBy: (name: string) => `Used by ${name}`,
+			madeOn: (date: string) => `Made ${date}`,
+			revoke: 'Revoke',
+			revokeInvite: (date: string) => `Revoke the invite made ${date}`,
+
+			devices: 'Watches',
+			devicesHint: 'Watches signed in to your account. Revoke one you no longer use.',
+			noDevices: 'No watches signed in.',
+			lastUsed: (date: string) => `Last used ${date}`,
+			neverUsed: 'Not used yet',
+			revokeDevice: (name: string) => `Revoke ${name}`
+		},
+
+		adminPage: {
+			title: 'Users',
+			notAdmin: 'Only admins can see this page.',
+			you: 'You',
+			adminBadge: 'Admin',
+			disabledBadge: 'Disabled',
+			invitedBy: (name: string) => `Invited by ${name}`,
+			firstUser: 'Set up the server',
+			disable: 'Disable',
+			enable: 'Enable',
+			disableUser: (name: string) => `Disable ${name}`,
+			enableUser: (name: string) => `Enable ${name}`,
+			resetLink: 'Create reset link',
+			resetLinkFor: (name: string) => `Create a reset link for ${name}`,
+			resetTitle: (name: string) => `Reset link for ${name}`,
+			resetHint: 'Shown only once. It works once, for 24 hours.'
+		},
+
+		link: {
+			title: 'Approve a watch',
+			intro: 'Type the code your watch shows.',
+			code: 'Code on the watch',
+			next: 'Continue',
+			checking: 'Checking…',
+			device: (name: string) => `${name} wants to sign in to your account.`,
+			made: (ago: string) => `The code was made ${ago}.`,
+			warning: 'Only approve a code shown on your own watch.',
+			approve: 'Approve',
+			deny: 'Deny',
+			approved: 'Approved. Your watch is signing in.',
+			denied: 'Denied. The watch was not signed in.',
+			another: 'Approve another watch',
+			notFound: 'No watch is waiting with this code. Check the code on the watch.'
+		},
+
+		// "made 2 minutes ago".
+		ago: (secs: number) => {
+			if (secs < 60) return 'just now';
+			const mins = Math.floor(secs / 60);
+			return mins === 1 ? '1 minute ago' : `${mins} minutes ago`;
+		},
+
+		share: {
+			copy: 'Copy link',
+			copied: 'Copied',
+			copyFailed: 'Copy the link above by hand.',
+			qr: 'QR code for the link'
+		},
+
+		errors: {
+			invalid_credentials: 'Wrong email or password.',
+			unauthorized: 'Your session ended. Sign in again.',
+			forbidden: "You can't do that.",
+			setup_code: "That setup code isn't right.",
+			setup_done: 'This server is already set up.',
+			email_taken: 'An account with this email already exists.',
+			too_many_invites: 'You have too many open invites. Revoke one first.',
+			invite_used: 'That invite was already used.',
+			invite_invalid: 'This invite has expired, was revoked or was already used.',
+			reset_invalid: 'This reset link has expired or was already used.',
+			cannot_disable_self: "You can't disable your own account.",
+			last_admin: "You can't disable the last admin.",
+			device_code_used: 'This code was already used.',
+			not_found: 'Not found.',
+			tooMany: (mins: number) =>
+				`Too many attempts. Try again in ${mins === 1 ? '1 minute' : `${mins} minutes`}.`,
+			field: {
+				email: 'Enter a valid email address.',
+				display_name: 'Enter a name of 1 to 40 characters.',
+				password: 'The password needs 8 to 128 characters.',
+				new_password: 'The new password needs 8 to 128 characters.',
+				other: 'Check the form and try again.'
+			}
+		}
+	},
+
+	// Home, signed in.
+	myMatches: 'My matches',
+	noMyMatches: 'Matches you start while signed in show up here, on any device.',
+
 	// API failures.
 	networkError: "Can't reach the server.",
 	serverError: (status: number) => `The server answered ${status}.`

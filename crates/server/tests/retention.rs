@@ -1,4 +1,11 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+
+mod support;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,6 +44,7 @@ fn new_match() -> NewMatch {
             a: ["Ana".into(), "Bea".into()],
             b: ["Cris".into(), "Dani".into()],
         },
+        owner_user_id: None,
     }
 }
 
@@ -121,7 +129,7 @@ async fn purge_once_closes_hub_entries_of_purged_matches() {
     let (store, _) = setup().await;
     let old = idle_match(&store, 31 * DAY).await;
     let recent = idle_match(&store, DAY).await;
-    let state = AppState::new(Arc::new(Config::from_map(&HashMap::new())), store);
+    let state = AppState::new(Arc::new(Config::from_map(&HashMap::new()).unwrap()), store);
     let _old_sub = state.hub.subscribe(&old.id);
     let _recent_sub = state.hub.subscribe(&recent.id);
     assert_eq!(purge_once(&state, NOW).await, 1);
@@ -134,7 +142,10 @@ async fn run_purges_at_startup_and_stops_on_shutdown() {
     let (store, _) = setup().await;
     // Real time: a match idle since the epoch is far past retention.
     let old = store.create_match(new_match(), 1).await.unwrap();
-    let state = AppState::new(Arc::new(Config::from_map(&HashMap::new())), store.clone());
+    let state = AppState::new(
+        Arc::new(Config::from_map(&HashMap::new()).unwrap()),
+        store.clone(),
+    );
     let task = tokio::spawn(padel_score_server::retention::run(state.clone()));
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
     while exists(&store, &old).await {
@@ -146,4 +157,69 @@ async fn run_purges_at_startup_and_stops_on_shutdown() {
         .await
         .expect("run did not stop")
         .unwrap();
+}
+
+#[tokio::test]
+async fn retention_purges_expired_auth_but_keeps_owned_matches() {
+    let (state, pool, _, admin_id, _) = support::with_admin().await;
+    let mut owned_new = new_match();
+    owned_new.owner_user_id = Some(admin_id.clone());
+    let owned = state
+        .store
+        .create_match(owned_new, NOW - 90 * DAY)
+        .await
+        .unwrap();
+    let anon = idle_match(&state.store, 31 * DAY).await;
+    // One expired and one live row of each kind (the admin's own session expires far later).
+    for (name, expires) in [("old", NOW - 1), ("live", NOW + 1)] {
+        let sqls = [
+            "INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?1, ?2, ?3, 0)",
+            "INSERT INTO invites (id, code_hash, created_by, created_at, expires_at) VALUES (?1, ?1, ?2, 0, ?3)",
+            "INSERT INTO device_codes (id, user_code, device_code_hash, device_name, created_at, expires_at) VALUES (?1, ?1, ?1, 'W', 0, ?3)",
+            "INSERT INTO password_resets (code_hash, user_id, created_by, created_at, expires_at) VALUES (?1, ?2, ?2, 0, ?3)",
+        ];
+        for sql in sqls {
+            sqlx::query(sql)
+                .bind(name)
+                .bind(&admin_id)
+                .bind(expires)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    }
+    assert_eq!(purge_once(&state, NOW).await, 1);
+    assert!(!exists(&state.store, &anon).await);
+    assert!(exists(&state.store, &owned).await);
+    let counts = [
+        (
+            "sessions",
+            "SELECT COUNT(*) FROM sessions WHERE expires_at = ?",
+        ),
+        (
+            "invites",
+            "SELECT COUNT(*) FROM invites WHERE expires_at = ?",
+        ),
+        (
+            "device_codes",
+            "SELECT COUNT(*) FROM device_codes WHERE expires_at = ?",
+        ),
+        (
+            "password_resets",
+            "SELECT COUNT(*) FROM password_resets WHERE expires_at = ?",
+        ),
+    ];
+    for (table, sql) in counts {
+        let (old,): (i64,) = sqlx::query_as(sql)
+            .bind(NOW - 1)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let (live,): (i64,) = sqlx::query_as(sql)
+            .bind(NOW + 1)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!((table, old, live), (table, 0, 1));
+    }
 }

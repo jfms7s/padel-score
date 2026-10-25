@@ -7,7 +7,22 @@
 // a server that adds a MatchView field doesn't freeze the board. Unknown enum values and variants
 // fail in both modes: those are values the app can't show or score.
 
-import type { Event, Format, MatchView, Score } from './types';
+import type {
+	AdminUser,
+	CreatedInvite,
+	Device,
+	DeviceLookup,
+	Event,
+	Format,
+	Invite,
+	InviteLookup,
+	MatchView,
+	Me,
+	MyMatch,
+	ResetLink,
+	Score,
+	SetupStatus
+} from './types';
 
 export interface GuardOptions {
 	/** Refuse unknown keys too (the fixture tests). Default false. */
@@ -19,23 +34,31 @@ type Check = (v: unknown) => boolean;
 const isObj = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** An object with exactly these keys, each passing its check. */
+type Shape = Record<string, Check>;
+
+/** The `optional` keys that are present pass their checks (serde's `skip_serializing_if`). */
+const optionalOk = (v: Record<string, unknown>, optional: Shape) =>
+	Object.entries(optional).every(([k, c]) => !Object.hasOwn(v, k) || c(v[k]));
+
+/** An object with exactly these keys (plus any of the `optional` ones), each passing its check. */
 const exactly =
-	(shape: Record<string, Check>): Check =>
+	(shape: Shape, optional: Shape = {}): Check =>
 	(v) => {
 		if (!isObj(v)) return false;
-		const keys = Object.keys(v);
 		return (
-			keys.length === Object.keys(shape).length &&
-			keys.every((k) => Object.hasOwn(shape, k) && shape[k]!(v[k]))
+			Object.keys(v).every((k) => Object.hasOwn(shape, k) || Object.hasOwn(optional, k)) &&
+			Object.entries(shape).every(([k, c]) => Object.hasOwn(v, k) && c(v[k])) &&
+			optionalOk(v, optional)
 		);
 	};
 
 /** An object with at least these keys, each passing its check; others are ignored. */
 const atLeast =
-	(shape: Record<string, Check>): Check =>
+	(shape: Shape, optional: Shape = {}): Check =>
 	(v) =>
-		isObj(v) && Object.entries(shape).every(([k, c]) => Object.hasOwn(v, k) && c(v[k]));
+		isObj(v) &&
+		Object.entries(shape).every(([k, c]) => Object.hasOwn(v, k) && c(v[k])) &&
+		optionalOk(v, optional);
 
 /** A serde externally tagged variant: an object with one key. */
 const tagged =
@@ -70,7 +93,7 @@ const nullable =
 	(v) =>
 		v === null || c(v);
 
-function build(exact: (shape: Record<string, Check>) => Check) {
+function build(exact: (shape: Shape, optional?: Shape) => Check) {
 	const team = oneOf('a', 'b');
 	const deuce = oneOf('advantage', 'golden_point', 'star_point');
 	const call = oneOf('love', 'fifteen', 'thirty', 'forty', 'advantage');
@@ -117,7 +140,43 @@ function build(exact: (shape: Record<string, Check>) => Check) {
 		events: array(exact({ seq: int, event })),
 		score
 	});
-	return { format, event, score, matchView };
+
+	// Accounts. Times are Unix seconds.
+	const me = exact({ id: str, email: str, display_name: str, is_admin: bool });
+	const setupStatus = exact({ needs_setup: bool });
+	const createdInvite = exact({ id: str, url: str, expires_at: int });
+	const invite = exact(
+		{ id: str, created_at: int, expires_at: int, status: oneOf('active', 'used', 'expired', 'revoked') },
+		{ used_by_name: str }
+	);
+	const inviteLookup = exact({ invited_by_name: str, expires_at: int });
+	const adminUser = exact(
+		{ id: str, email: str, display_name: str, is_admin: bool, disabled: bool, created_at: int },
+		{ invited_by_name: str }
+	);
+	const resetLink = exact({ url: str, expires_at: int });
+	const deviceLookup = exact({ device_name: str, created_secs_ago: int, expires_in_secs: int });
+	const device = exact({ id: str, name: str, prefix: str, created_at: int }, { last_used_at: nullable(int) });
+	const myMatch = exact(
+		{ id: str, label: str, created_at: int, last_activity_at: int, view: matchView },
+		{ scorer_token: str, spectator_token: str }
+	);
+	return {
+		format,
+		event,
+		score,
+		matchView,
+		me,
+		setupStatus,
+		createdInvite,
+		invite,
+		inviteLookup,
+		adminUser,
+		resetLink,
+		deviceLookup,
+		device,
+		myMatch
+	};
 }
 
 const strictChecks = build(exactly);
@@ -128,3 +187,19 @@ export const isFormat = (v: unknown, o?: GuardOptions): v is Format => pick(o).f
 export const isEvent = (v: unknown, o?: GuardOptions): v is Event => pick(o).event(v);
 export const isScore = (v: unknown, o?: GuardOptions): v is Score => pick(o).score(v);
 export const isMatchView = (v: unknown, o?: GuardOptions): v is MatchView => pick(o).matchView(v);
+
+export const isMe = (v: unknown, o?: GuardOptions): v is Me => pick(o).me(v);
+export const isSetupStatus = (v: unknown, o?: GuardOptions): v is SetupStatus => pick(o).setupStatus(v);
+export const isCreatedInvite = (v: unknown, o?: GuardOptions): v is CreatedInvite => pick(o).createdInvite(v);
+export const isInvite = (v: unknown, o?: GuardOptions): v is Invite => pick(o).invite(v);
+export const isInviteLookup = (v: unknown, o?: GuardOptions): v is InviteLookup => pick(o).inviteLookup(v);
+export const isAdminUser = (v: unknown, o?: GuardOptions): v is AdminUser => pick(o).adminUser(v);
+export const isResetLink = (v: unknown, o?: GuardOptions): v is ResetLink => pick(o).resetLink(v);
+export const isDeviceLookup = (v: unknown, o?: GuardOptions): v is DeviceLookup => pick(o).deviceLookup(v);
+export const isDevice = (v: unknown, o?: GuardOptions): v is Device => pick(o).device(v);
+export const isMyMatch = (v: unknown, o?: GuardOptions): v is MyMatch => pick(o).myMatch(v);
+/** A list whose every item passes `item` (lenient). */
+export const isListOf =
+	<T>(item: (v: unknown) => v is T) =>
+	(v: unknown): v is T[] =>
+		Array.isArray(v) && v.every((x) => item(x));

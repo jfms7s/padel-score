@@ -6,7 +6,7 @@ import newMatch from './fixtures/view-new.json';
 
 function store(init: Record<string, string> = {}) {
 	const m = new Map(Object.entries(init));
-	return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), m };
+	return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), m };
 }
 
 describe('last view', () => {
@@ -31,7 +31,7 @@ describe('last view', () => {
 		expect(loadView(s, 't')?.revision).toBe(9);
 	});
 	it('a storage that throws is tolerated', () => {
-		const bad = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } };
+		const bad = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); }, removeItem: () => { throw new Error('x'); } };
 		expect(() => saveView(bad, 't', asView(onePoint))).not.toThrow();
 		expect(loadView(bad, 't')).toBeNull();
 	});

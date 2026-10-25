@@ -1,18 +1,68 @@
 <script lang="ts">
+	import { authMessage, listMyMatches } from '#lib/auth.ts';
+	import { session } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
 	import { listRecent, scorerPath, type RecentMatch } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
+	import type { MyMatch } from '#lib/types.ts';
 
 	let recent = $state<RecentMatch[]>([]);
 	$effect(() => {
 		recent = listRecent(safeStorage());
 	});
+
+	// Signed in, the server's list of live matches this user started, on any device.
+	let mine = $state<MyMatch[] | null>(null);
+	let mineFailure = $state<string | null>(null);
+	const signedIn = $derived($session.status === 'signed_in');
+	$effect(() => {
+		if (!signedIn) return;
+		let live = true;
+		listMyMatches().then(
+			(list) => {
+				if (live) mine = list;
+			},
+			(e: unknown) => {
+				if (live) mineFailure = authMessage(e);
+			}
+		);
+		return () => {
+			live = false;
+		};
+	});
+
+	/** Only a session gets the tokens; without them there is no page to open. */
+	const openable = (m: MyMatch): m is MyMatch & { scorer_token: string } => typeof m.scorer_token === 'string';
 </script>
 
 <main>
 	<h1>{strings.appName}</h1>
 	<p class="intro">{strings.homeIntro}</p>
 	<a class="primary" href="/new">{strings.newMatch}</a>
+
+	{#if signedIn}
+		<h2>{strings.myMatches}</h2>
+		{#if mineFailure}
+			<p class="hint" role="alert">{mineFailure}</p>
+		{:else if mine === null}
+			<p class="hint">{strings.auth.loading}</p>
+		{:else if mine.filter(openable).length === 0}
+			<p class="hint">{strings.noMyMatches}</p>
+		{:else}
+			<ul aria-label={strings.myMatches}>
+				{#each mine.filter(openable) as match (match.id)}
+					<li>
+						<a href={scorerPath(match.scorer_token, match.spectator_token)}>
+							<span class="label">{match.label}</span>
+							<time datetime={new Date(match.last_activity_at * 1000).toISOString()}>
+								{new Date(match.last_activity_at * 1000).toLocaleDateString()}
+							</time>
+						</a>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	{/if}
 
 	<h2>{strings.recentMatches}</h2>
 	{#if recent.length === 0}
@@ -37,7 +87,7 @@
 	main {
 		max-width: 28rem;
 		margin: 0 auto;
-		padding: 32px 16px 48px;
+		padding: 16px 16px 48px;
 	}
 	h1 {
 		margin: 0 0 8px;

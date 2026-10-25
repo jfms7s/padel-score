@@ -409,8 +409,7 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 
 	function forget() {
 		try {
-			if (storage.removeItem) storage.removeItem(key);
-			else storage.setItem(key, 'null');
+			storage.removeItem(key);
 		} catch {
 			// Nothing to keep anyway.
 		}

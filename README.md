@@ -21,6 +21,41 @@ docker run --rm -p 8080:8080 -v padel-score-dev:/data padel-score:dev
 
 Then open <http://localhost:8080>. With `podman build`, add `--format docker`, or the `HEALTHCHECK` is dropped.
 
+## Accounts
+
+Anonymous quick matches need no account. Owned matches, invites, the admin pages and watch sign-in do.
+
+**First run.** While there are no users, the server logs a one-time setup code (a new one on each restart until the first admin exists). Find it, then open `/setup`:
+
+```sh
+kubectl logs -n padel-score deploy/padel-score-padel-score-server | grep "setup code"
+```
+
+Or set `SETUP_TOKEN` and use that value as the setup code. The setup creates the first admin.
+
+**Invites.** There is no public sign-up. Any signed-in user creates an invite on `/account` and sends the link (`/invite#<code>`) to the person. The code is in the URL fragment and then in request bodies, never in a URL path, so it never reaches a server log. Invites expire and can be revoked.
+
+**Admin.** The admin page lists the users, disables and re-enables them, and makes password reset links.
+
+**Password resets.** An admin creates a reset link (`/reset#<code>`) for a user and sends it to them. Using it sets a new password and signs the user out everywhere.
+
+**Known gap: no email.** The server sends no email, so a forgotten password is recovered through an admin-made reset link, never by the user alone. If the only admin loses their password, a reset needs database access.
+
+**Known gap: per-address limits are global behind the homelab's load balancer.** Behind the homelab's Traefik ServiceLB, every visitor reaches the app with the same in-cluster address, so the per-address rate limits (login, device start and polling, invite and reset codes) are in effect one shared bucket. The per-email login limit still protects each account. The proper fix (`externalTrafficPolicy: Local`) comes before the app is public.
+
+**Watch sign-in.** The watch shows a code; sign in on the web and enter it at `/link` to approve the device. A signed-in watch is listed on the account page and can be revoked there.
+
+Expired sessions, invites, device codes and reset codes are deleted hourly, together with anonymous matches idle for 30 days. Owned matches are never purged.
+
+Environment variables:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SECURE_COOKIES` | on | The session cookie is `__Host-padel_session` with `Secure`. Set `false` or `0` for plain-HTTP development, e.g. `docker run -e SECURE_COOKIES=false`. |
+| `TRUSTED_PROXIES` | empty | Comma-separated CIDRs or IPs of reverse proxies whose `X-Forwarded-For` is believed. Empty: the TCP peer is the client, which behind a proxy puts every user in one rate-limit bucket. A bad entry stops startup. |
+| `PUBLIC_ORIGIN` | unset | The public URL, e.g. `https://padel.example.com`, no trailing slash. The CSRF check compares a request's `Origin` with it. Unset: it compares the `Origin` host with `Host`. |
+| `SETUP_TOKEN` | unset | The setup code for the first admin. Unset: a random one-time code is logged. |
+
 ## Releases
 
 Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`. If the tagged commit is on `main` and every CI check passes on it, the workflow builds `ghcr.io/jfms7s/padel-score:vX.Y.Z`

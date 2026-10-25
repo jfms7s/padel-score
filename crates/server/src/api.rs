@@ -1,7 +1,8 @@
 //! The match API and its live SSE streams.
 //!
 //! - `POST /api/matches` creates a match: 201 `{id, scorer_token, spectator_token}` with
-//!   `Location: /s/{scorer_token}`.
+//!   `Location: /s/{scorer_token}`. A signed-in caller owns it (see [`crate::owned`]); anyone
+//!   else creates an anonymous quick match.
 //! - `GET /api/score/{token}` and `GET /api/view/{token}` return the `MatchView`.
 //! - `POST /api/score/{token}/commands` and `/replace` run the command rules; their status and
 //!   body come from [`CommandOutcome::to_http`] alone.
@@ -32,6 +33,7 @@ use serde_json::json;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::AppState;
+use crate::auth::OptionalUser;
 use crate::commands::{
     CommandOutcome, CommandRequest, MatchView, ReplaceRequest, apply_command, replace_from, view_of,
 };
@@ -43,6 +45,9 @@ pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
 /// How often an idle SSE stream sends a keep-alive comment.
 pub const KEEP_ALIVE: Duration = Duration::from_secs(10);
+
+/// The longest a stream's store re-read may take before the stream ends instead.
+pub const REREAD_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The current time in unix seconds: the one clock read for the whole API.
 pub fn now() -> i64 {
@@ -60,6 +65,9 @@ pub fn routes() -> Router<AppState> {
         .route("/api/score/{token}/replace", post(replace))
         .route("/api/score/{token}/stream", get(score_stream))
         .route("/api/view/{token}/stream", get(view_stream))
+        .merge(crate::accounts::routes())
+        .merge(crate::owned::routes())
+        .merge(crate::device::routes())
 }
 
 #[derive(Debug)]
@@ -69,11 +77,32 @@ pub enum ApiError {
     MethodNotAllowed,
     PayloadTooLarge,
     InvalidMatch(String),
+    /// 401: no credential, or one that is unknown, expired, revoked or a disabled user's.
+    Unauthorized,
+    /// 401 `invalid_credentials`: a sign-in or password check failed. One answer for an unknown
+    /// email, a wrong password and a disabled user, so none can be told apart.
+    InvalidCredentials,
+    /// 403: signed in but not allowed (a device token on a session-only route, a non-admin on an
+    /// admin route, or a cross-site unsafe request carrying the session cookie).
+    Forbidden,
+    /// 429 with `Retry-After: {retry_after}` seconds.
+    TooMany {
+        retry_after: u64,
+    },
+    /// 409, with the snake_case code from [`StoreError::Conflict`].
+    Conflict(&'static str),
+    /// 410, with a snake_case code: a secret code (an invite, a reset link) that cannot be used.
+    /// One answer for every reason, so a code's state cannot be probed.
+    Gone(&'static str),
+    /// 422: the named request field fails its policy.
+    Validation {
+        field: &'static str,
+    },
     Internal,
 }
 
 /// Log an unexpected failure and hide it behind a 500.
-fn internal(e: impl std::fmt::Display) -> ApiError {
+pub(crate) fn internal(e: impl std::fmt::Display) -> ApiError {
     tracing::error!(error = %e, "request failed");
     ApiError::Internal
 }
@@ -85,6 +114,7 @@ impl From<StoreError> for ApiError {
             StoreError::InvalidRules(_) | StoreError::InvalidTeams => {
                 ApiError::InvalidMatch(e.to_string())
             }
+            StoreError::Conflict(code) => ApiError::Conflict(code),
             StoreError::Corrupt(_) | StoreError::Db(_) => internal(e),
         }
     }
@@ -106,6 +136,29 @@ impl IntoResponse for ApiError {
             ApiError::InvalidMatch(message) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 json!({ "error": "invalid_match", "message": message }),
+            ),
+            ApiError::Unauthorized => {
+                (StatusCode::UNAUTHORIZED, json!({ "error": "unauthorized" }))
+            }
+            ApiError::InvalidCredentials => (
+                StatusCode::UNAUTHORIZED,
+                json!({ "error": "invalid_credentials" }),
+            ),
+            ApiError::Forbidden => (StatusCode::FORBIDDEN, json!({ "error": "forbidden" })),
+            ApiError::TooMany { retry_after } => {
+                let body = json!({ "error": "too_many_requests", "retry_after_secs": retry_after });
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [(header::RETRY_AFTER, retry_after.to_string())],
+                    Json(body),
+                )
+                    .into_response();
+            }
+            ApiError::Conflict(code) => (StatusCode::CONFLICT, json!({ "error": code })),
+            ApiError::Gone(code) => (StatusCode::GONE, json!({ "error": code })),
+            ApiError::Validation { field } => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "error": "validation", "field": field }),
             ),
             ApiError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -180,16 +233,23 @@ struct Created<'a> {
     spectator_token: &'a str,
 }
 
+/// A signed-in caller owns the match; anyone else (no credential, or one that fails) creates an
+/// anonymous quick match exactly as before, never a 401.
 async fn create_match(
     State(state): State<AppState>,
+    OptionalUser(user): OptionalUser,
     ApiJson(req): ApiJson<CreateMatchRequest>,
 ) -> Result<Response, ApiError> {
     let new = NewMatch {
         format: req.format,
         start: req.start,
         teams: req.teams,
+        owner_user_id: user.map(|u| u.user.id),
     };
     let m = state.store.create_match(new, now()).await?;
+    if let Some(owner) = &m.owner_user_id {
+        state.hub.notify_user(owner);
+    }
     let location = format!("/s/{}", m.scorer_token);
     let body = Created {
         id: &m.id,
@@ -246,9 +306,20 @@ async fn commands(
     ApiJson(req): ApiJson<CommandRequest>,
 ) -> Result<Response, ApiError> {
     let m = by_scorer(&state.store, &token).await?;
+    run_command(&state, m, req).await
+}
+
+/// Apply a command request to `m` and serve the outcome: the one path behind both the scorer's
+/// route and the owner's (`/api/me/matches/{id}/commands`), so their shapes and idempotency
+/// are the same.
+pub(crate) async fn run_command(
+    state: &AppState,
+    m: StoredMatch,
+    req: CommandRequest,
+) -> Result<Response, ApiError> {
     let store = state.store.clone();
-    let match_id = m.id.clone();
-    run_detached(&state, match_id, async move {
+    let (match_id, owner) = (m.id.clone(), m.owner_user_id.clone());
+    run_detached(state, match_id, owner, async move {
         apply_command(&store, &m, req, now()).await
     })
     .await
@@ -261,8 +332,8 @@ async fn replace(
 ) -> Result<Response, ApiError> {
     let m = by_scorer(&state.store, &token).await?;
     let store = state.store.clone();
-    let match_id = m.id.clone();
-    run_detached(&state, match_id, async move {
+    let (match_id, owner) = (m.id.clone(), m.owner_user_id.clone());
+    run_detached(&state, match_id, owner, async move {
         replace_from(&store, &m, req, now()).await
     })
     .await
@@ -275,14 +346,21 @@ async fn replace(
 /// command would be stored yet never reach the streams, and the client's resend would come back
 /// `Replayed`. Spawning makes commit-then-publish run to completion whatever happens to the
 /// request; dropping the `JoinHandle` detaches the task, it does not cancel it.
-async fn run_detached<F>(state: &AppState, match_id: String, work: F) -> Result<Response, ApiError>
+///
+/// `owner` is the match's owner, whose list streams hear of the change too.
+async fn run_detached<F>(
+    state: &AppState,
+    match_id: String,
+    owner: Option<String>,
+    work: F,
+) -> Result<Response, ApiError>
 where
     F: Future<Output = Result<CommandOutcome, StoreError>> + Send + 'static,
 {
     let task_state = state.clone();
     let outcome = tokio::spawn(async move {
         let outcome = work.await?;
-        publish(&task_state, &match_id, &outcome).await;
+        publish(&task_state, &match_id, owner.as_deref(), &outcome).await;
         Ok::<_, StoreError>(outcome)
     })
     .await
@@ -297,7 +375,17 @@ where
 ///   [`run_detached`]; e.g. a server restart in between). Publish the *current* view as belt and
 ///   braces; streams drop it by revision if they already have it.
 /// - Conflict, rejection, invalid, replayed non-200: nothing changed, nothing to publish.
-async fn publish(state: &AppState, match_id: &str, outcome: &CommandOutcome) {
+///
+/// The owner's list streams are told whenever the match's streams are: they re-read the list,
+/// which also picks up a match that has just finished and drops it.
+async fn publish(state: &AppState, match_id: &str, owner: Option<&str>, outcome: &CommandOutcome) {
+    let changed = matches!(
+        outcome,
+        CommandOutcome::Applied(_) | CommandOutcome::Replayed { status: 200, .. }
+    );
+    if let Some(owner) = owner.filter(|_| changed) {
+        state.hub.notify_user(owner);
+    }
     match outcome {
         CommandOutcome::Applied(view) => state.hub.publish(view.clone()),
         CommandOutcome::Replayed { status: 200, .. } if state.hub.is_watched(match_id) => {
@@ -322,7 +410,7 @@ async fn score_stream(
     ApiPath(token): ApiPath<String>,
 ) -> Result<Response, ApiError> {
     let m = by_scorer(&state.store, &token).await?;
-    stream(state, m.id).await
+    stream(state, m.id, std::future::pending()).await
 }
 
 async fn view_stream(
@@ -330,10 +418,17 @@ async fn view_stream(
     ApiPath(token): ApiPath<String>,
 ) -> Result<Response, ApiError> {
     let m = by_either(&state.store, &token).await?;
-    stream(state, m.id).await
+    stream(state, m.id, std::future::pending()).await
 }
 
-async fn stream(state: AppState, match_id: String) -> Result<Response, ApiError> {
+/// The SSE stream of one match's views: event `state` with the current view at once, then one
+/// per applied command. It ends on shutdown, when the match is purged, or when `end` resolves
+/// (a signed-in stream's credential lapsing; the token routes pass a future that never does).
+pub(crate) async fn stream(
+    state: AppState,
+    match_id: String,
+    end: impl Future<Output = ()> + Send + 'static,
+) -> Result<Response, ApiError> {
     // Subscribe before the first read so no publish can fall between the two.
     let subscription = state.hub.subscribe(&match_id);
     let first = current_view(&state.store, &match_id).await?;
@@ -345,10 +440,55 @@ async fn stream(state: AppState, match_id: String) -> Result<Response, ApiError>
         last_revision: i64::MIN,
     };
     let events = futures_util::stream::unfold(watch, next_event)
-        .take_until(state.shutdown.clone().cancelled_owned());
-    Ok(Sse::new(events)
+        .take_until(until_either(state.shutdown.clone().cancelled_owned(), end));
+    Ok(sse(events))
+}
+
+/// An SSE response with the streams' keep-alive.
+pub(crate) fn sse<S>(events: S) -> Response
+where
+    S: futures_util::Stream<Item = Result<Event, Infallible>> + Send + 'static,
+{
+    Sse::new(events)
         .keep_alive(KeepAlive::new().interval(KEEP_ALIVE))
-        .into_response())
+        .into_response()
+}
+
+/// Resolves as soon as either future does.
+pub(crate) async fn until_either(
+    a: impl Future<Output = ()> + Send,
+    b: impl Future<Output = ()> + Send,
+) {
+    tokio::select! {
+        () = a => {}
+        () = b => {}
+    }
+}
+
+/// A stream's store re-read, run on its own task and bounded by [`REREAD_TIMEOUT`]; `None`
+/// ends the stream (a failed read, already logged, or one that timed out, logged here).
+///
+/// Its own task because hyper stops polling the body of a client that is not reading: a read
+/// paused inside the body would keep its pool connection (or its place in the pool's queue) for
+/// as long as the client stalls. On a task the read finishes, or times out, and lets go of the
+/// connection whatever the body does.
+pub(crate) async fn detached_reread<T, F>(stream: &'static str, read: F) -> Option<T>
+where
+    T: Send + 'static,
+    F: Future<Output = Result<T, ApiError>> + Send + 'static,
+{
+    let task = tokio::spawn(tokio::time::timeout(REREAD_TIMEOUT, read));
+    match task.await {
+        Ok(Ok(result)) => result.ok(),
+        Ok(Err(_)) => {
+            tracing::warn!(stream, timeout = ?REREAD_TIMEOUT, "stream re-read timed out, ending stream");
+            None
+        }
+        Err(e) => {
+            tracing::warn!(stream, error = %e, "stream re-read task failed, ending stream");
+            None
+        }
+    }
 }
 
 /// One SSE stream's state.
@@ -373,10 +513,12 @@ impl Watch {
                 Err(RecvError::Lagged(skipped)) => {
                     tracing::debug!(match_id = %self.match_id, skipped, "stream lagged, re-reading");
                     // A purged match or a failed read ends the stream; the client reconnects.
-                    return current_view(&self.store, &self.match_id)
-                        .await
-                        .ok()
-                        .map(Arc::new);
+                    let (store, match_id) = (self.store.clone(), self.match_id.clone());
+                    return detached_reread("match stream", async move {
+                        current_view(&store, &match_id).await
+                    })
+                    .await
+                    .map(Arc::new);
                 }
                 Err(RecvError::Closed) => return None,
             }

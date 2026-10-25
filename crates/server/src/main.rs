@@ -2,16 +2,22 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use padel_score_server::{AppState, Config, Store, db, router};
+use padel_score_server::{AppState, Config, Store, db, router, trace_layer};
 use tower_http::compression::CompressionLayer;
-use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    let config = Config::from_env();
+    let config = match Config::from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            // Logging is configured from the config, so this goes straight to stderr.
+            eprintln!("error: {error}");
+            std::process::exit(1);
+        }
+    };
     if let Ok(raw) = std::env::var("PORT")
         && !raw.trim().is_empty()
         && raw.trim().parse::<u16>().is_err()
@@ -34,6 +40,14 @@ async fn main() -> Result<(), BoxError> {
         )
         .init();
 
+    let trusted_proxies = config.trusted_proxies.len();
+    if trusted_proxies == 0 {
+        tracing::warn!(
+            "no TRUSTED_PROXIES: the TCP peer is the client IP; behind a reverse proxy every client shares its key"
+        );
+    } else {
+        tracing::info!(trusted_proxies, "trusted proxies configured");
+    }
     let port = config.port;
     if let Some(dir) = config
         .database_url
@@ -45,21 +59,37 @@ async fn main() -> Result<(), BoxError> {
     }
     let store = Store::new(db::connect(&config.database_url).await?);
     let state = AppState::new(Arc::new(config), store);
+    // Logs the one-time setup code while there are no users and SETUP_TOKEN is unset.
+    padel_score_server::accounts::init_setup_code(&state).await?;
+    // Hash the dummy now, so the first unknown-email login is not a timing outlier. A server
+    // that cannot hash fails closed instead of serving logins.
+    if let Err(error) = padel_score_server::auth::warm_dummy(&state.password_permits).await {
+        tracing::error!(%error, "cannot start");
+        std::process::exit(1);
+    }
     let streams = state.shutdown.clone();
     tokio::spawn(padel_score_server::retention::run(state.clone()));
+    tokio::spawn(padel_score_server::ratelimit::run_sweeper(
+        state.limits.clone(),
+        state.shutdown.clone(),
+    ));
     let app = router(state)
         .layer(CompressionLayer::new())
-        .layer(TraceLayer::new_for_http());
+        .layer(trace_layer());
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!(%addr, "listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown().await;
-            // End the SSE streams too, or they would hold graceful shutdown open.
-            streams.cancel();
-        })
-        .await?;
+    // Connect info gives the handlers the TCP peer, the base of the client IP (`client_ip`).
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        shutdown().await;
+        // End the SSE streams too, or they would hold graceful shutdown open.
+        streams.cancel();
+    })
+    .await?;
     Ok(())
 }
 

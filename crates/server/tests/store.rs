@@ -45,6 +45,7 @@ fn new_match() -> NewMatch {
         format: sets_format(),
         start: start(),
         teams: teams(),
+        owner_user_id: None,
     }
 }
 

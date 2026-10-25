@@ -22,7 +22,7 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 
 async fn setup() -> (Router, AppState) {
     let store = Store::new(db::connect("sqlite::memory:").await.unwrap());
-    let state = AppState::new(Arc::new(Config::from_map(&HashMap::new())), store);
+    let state = AppState::new(Arc::new(Config::from_map(&HashMap::new()).unwrap()), store);
     (router(state.clone()), state)
 }
 
