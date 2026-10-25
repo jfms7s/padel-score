@@ -71,6 +71,13 @@ pub struct User {
     pub created_at: i64,
 }
 
+/// A user with their inviter's display name, for the admin list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserListing {
+    pub user: User,
+    pub invited_by_name: Option<String>,
+}
+
 /// A user with their password hash, for sign-in only. No `Debug`, so the hash stays out of logs.
 pub struct UserWithHash {
     pub user: User,
@@ -507,6 +514,28 @@ impl Store {
                 .fetch_optional(self.pool())
                 .await?,
         )
+    }
+
+    /// Every user with their inviter's display name, oldest first.
+    pub async fn list_users(&self) -> Result<Vec<UserListing>, StoreError> {
+        let rows = sqlx::query(concat!(
+            "SELECT ",
+            user_columns!(),
+            ", inviter.display_name AS invited_by_name FROM users u \
+             LEFT JOIN users inviter ON inviter.id = u.invited_by \
+             ORDER BY u.created_at, u.rowid"
+        ))
+        .fetch_all(self.pool())
+        .await?;
+        rows.iter()
+            .map(|row| -> Result<UserListing, sqlx::Error> {
+                Ok(UserListing {
+                    user: user_from_row(row)?,
+                    invited_by_name: row.try_get("invited_by_name")?,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
     }
 
     /// Disable the user as of `at` (`Some`), or enable them (`None`). Disabling deletes their

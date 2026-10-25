@@ -28,10 +28,24 @@
 //!   expired, revoked and disabled-creator invites are all the same 410 `invite_invalid`.
 //! - `POST /api/invites/{code}/accept` (public) takes `{email, display_name, password}`, checked
 //!   as setup checks them (422 naming the field), and creates the user signed in: 201 [`Me`]
-//!   with the session cookie. An unusable invite is 410 `invite_invalid`, a taken email 409
-//!   `email_taken`.
+//!   with the session cookie (a session the browser presented ends, as at login). An unusable
+//!   invite is 410 `invite_invalid`, a taken email 409 `email_taken`.
 //!
-//! The public code routes (invite lookup and accept) share the `invite_lookup` limiter by
+//! Admin (Task 6), admins on a session only (a device token is 403):
+//!
+//! - `GET /api/admin/users` is
+//!   `[{id, email, display_name, is_admin, disabled, invited_by_name?, created_at}]`.
+//! - `POST /api/admin/users/{id}/disable` signs the user out everywhere (sessions, device tokens,
+//!   approved device codes): 204. Yourself is 409 `cannot_disable_self`; the last enabled admin
+//!   409 `last_admin`. `/enable` lets them sign in again: 204.
+//! - `POST /api/admin/users/{id}/reset-link` is 201 `{url: "/reset#<code>", expires_at}`: one use,
+//!   24 hours. This admin-mediated link is the stand-in for a reset email.
+//! - An unknown user id is 404.
+//! - `POST /api/reset` (public) takes `{code, password}`, sets the password and signs the user
+//!   out everywhere: 204, with no session for anyone; the user then signs in. An unusable code
+//!   is 410 `reset_invalid`.
+//!
+//! The public code routes (invite lookup, accept, reset) share the `invite_lookup` limiter by
 //! client address: every call counts, success or not, so a code cannot be guessed at speed.
 //!
 //! Every response here carries `Referrer-Policy: no-referrer` and `Cache-Control: no-store`:
@@ -49,11 +63,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::AppState;
-use crate::accounts_store::{InviteStatus, NewUser, User, normalize_email};
+use crate::accounts_store::{
+    InviteStatus, NewUser, RESET_TTL_SECS, User, UserListing, normalize_email,
+};
 use crate::api::{ApiError, ApiJson, now};
 use crate::auth::{
-    CurrentUser, SessionUser, check_csrf, check_password, clear_session_cookie, hash_password,
-    session_cookie, session_token, verify_dummy, verify_password,
+    AdminUser, CurrentUser, SessionUser, check_csrf, check_password, clear_session_cookie,
+    hash_password, session_cookie, session_token, verify_dummy, verify_password,
 };
 use crate::client_ip::{ClientIp, rate_key};
 use crate::store::StoreError;
@@ -79,6 +95,11 @@ pub fn routes() -> Router<AppState> {
             get(lookup_invite).delete(revoke_invite),
         )
         .route("/api/invites/{key}/accept", post(accept_invite))
+        .route("/api/admin/users", get(list_users))
+        .route("/api/admin/users/{id}/disable", post(disable_user))
+        .route("/api/admin/users/{id}/enable", post(enable_user))
+        .route("/api/admin/users/{id}/reset-link", post(reset_link))
+        .route("/api/reset", post(reset_password))
         .layer(axum::middleware::map_response(secret_headers))
 }
 
@@ -420,6 +441,8 @@ async fn change_password(
 
 /// Where the PWA's invite page lives; the code follows in the fragment.
 const INVITE_PAGE: &str = "/invite";
+/// Where the PWA's reset page lives; the code follows in the fragment.
+const RESET_PAGE: &str = "/reset";
 
 /// `{page}#{code}`: the only form a code leaves the server in.
 fn fragment_url(page: &str, code: &str) -> String {
@@ -574,6 +597,106 @@ async fn accept_invite(
         &raw,
         Some(Me::from(&user)),
     ))
+}
+
+// Admin.
+
+#[derive(Serialize)]
+struct AdminUserItem {
+    id: String,
+    email: String,
+    display_name: String,
+    is_admin: bool,
+    disabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    invited_by_name: Option<String>,
+    created_at: i64,
+}
+
+impl From<UserListing> for AdminUserItem {
+    fn from(l: UserListing) -> AdminUserItem {
+        let u = l.user;
+        AdminUserItem {
+            disabled: u.disabled_at.is_some(),
+            id: u.id,
+            email: u.email,
+            display_name: u.display_name,
+            is_admin: u.is_admin,
+            invited_by_name: l.invited_by_name,
+            created_at: u.created_at,
+        }
+    }
+}
+
+async fn list_users(
+    State(state): State<AppState>,
+    AdminUser(_): AdminUser,
+) -> Result<Json<Vec<AdminUserItem>>, ApiError> {
+    let users = state.store.list_users().await?;
+    Ok(Json(users.into_iter().map(AdminUserItem::from).collect()))
+}
+
+async fn disable_user(
+    State(state): State<AppState>,
+    AdminUser(caller): AdminUser,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    if id == caller.user.id {
+        return Err(ApiError::Conflict("cannot_disable_self"));
+    }
+    state.store.set_disabled(&id, Some(now())).await?;
+    tracing::info!(user_id = %id, by = %caller.user.id, "user disabled");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn enable_user(
+    State(state): State<AppState>,
+    AdminUser(caller): AdminUser,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.store.set_disabled(&id, None).await?;
+    tracing::info!(user_id = %id, by = %caller.user.id, "user enabled");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn reset_link(
+    State(state): State<AppState>,
+    AdminUser(caller): AdminUser,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let t = now();
+    let code = state.store.create_reset(&id, &caller.user.id, t).await?;
+    tracing::info!(user_id = %id, by = %caller.user.id, "reset link created");
+    let body = json!({
+        "url": fragment_url(RESET_PAGE, &code),
+        "expires_at": t + RESET_TTL_SECS,
+    });
+    Ok((StatusCode::CREATED, Json(body)).into_response())
+}
+
+#[derive(Deserialize)]
+struct ResetBody {
+    code: String,
+    password: String,
+}
+
+/// The password is checked and hashed before the code is used, so the transaction stays short;
+/// signs nobody in.
+async fn reset_password(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    ApiJson(body): ApiJson<ResetBody>,
+) -> Result<StatusCode, ApiError> {
+    limit_code_route(&state, ip)?;
+    let hash = hash_password(&state.password_permits, &body.password).await?;
+    match state.store.consume_reset(&body.code, &hash, now()).await {
+        Ok(user_id) => {
+            tracing::info!(user_id = %user_id, "password reset");
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(StoreError::NotFound) => Err(ApiError::Gone("reset_invalid")),
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[cfg(test)]
