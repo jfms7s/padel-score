@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Padel score</string>
-    <string name="tracer_checking">Checking the server…</string>
-    <string name="tracer_server_version">Server %1$s</string>
-    <string name="tracer_unreachable">Can\'t reach the server</string>
     <string name="sign_in_title">Sign in</string>
     <string name="sign_in_starting">Getting a code…</string>
     <string name="sign_in_open_on_phone">On your phone, open</string>
@@ -25,4 +22,19 @@
     <string name="sign_out_text">Signing out only forgets this watch\'s sign-in. To revoke the watch, use the Account page on the web.</string>
     <string name="sign_out_confirm">Yes, sign out</string>
     <string name="sign_out_cancel">Cancel</string>
+    <string name="quick_match">Quick match</string>
+    <string name="score_loading">Loading score…</string>
+    <string name="score_point">Point %1$s</string>
+    <string name="score_sending">Sending</string>
+    <string name="score_offline">Offline</string>
+    <string name="score_golden_point">Golden point</string>
+    <string name="score_deciding_point">Deciding point</string>
+    <string name="score_change_ends">Change ends</string>
+    <string name="score_undo">Undo</string>
+    <string name="score_not_sent">Not sent</string>
+    <string name="score_match_over">Match over</string>
+    <string name="score_undo_conflict">Score changed, nothing undone</string>
+    <string name="score_win">%1$s win</string>
+    <string name="score_draw">Draw</string>
+    <string name="score_back">Back to matches</string>
 </resources>

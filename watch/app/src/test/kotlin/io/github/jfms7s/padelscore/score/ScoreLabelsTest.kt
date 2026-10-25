@@ -84,4 +84,11 @@ class ScoreLabelsTest {
         assertFalse(decidingPoint(fixtureView("view-tiebreak.json").score))
         assertFalse(decidingPoint(fixtureView("view-finished.json").score))
     }
+
+    @Test fun golden_point_comes_from_the_match_format() {
+        assertTrue(goldenPoint(fixtureView("view-golden-point-40-40.json")))
+        assertTrue(goldenPoint(fixtureView("view-timed.json")))
+        assertFalse(goldenPoint(fixtureView("view-star-point.json")))
+        assertFalse(goldenPoint(fixtureView("view-advantage.json").copy(format = null)))
+    }
 }

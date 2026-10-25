@@ -1,11 +1,14 @@
 package io.github.jfms7s.padelscore.score
 
 import io.github.jfms7s.padelscore.net.Current
+import io.github.jfms7s.padelscore.net.MatchView
 import io.github.jfms7s.padelscore.net.PointCall
 import io.github.jfms7s.padelscore.net.Score
 import io.github.jfms7s.padelscore.net.Status
 import io.github.jfms7s.padelscore.net.Team
 import io.github.jfms7s.padelscore.net.Teams
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 // Pure formatting of a server Score; nothing here computes or predicts a score.
 
@@ -35,3 +38,9 @@ fun teamLabel(teams: Teams, team: Team): String = (if (team == Team.A) teams.a e
 fun isServing(score: Score, team: Team): Boolean = score.status == Status.InProgress && score.server.team == team
 
 fun decidingPoint(score: Score): Boolean = (score.current as? Current.Game)?.score?.decidingPoint == true
+
+/** The format is `{"sets": {...}}` or `{"timed": {...}}`; either variant carries the deuce rule. */
+fun goldenPoint(view: MatchView): Boolean {
+    val variant = (view.format as? JsonObject)?.values?.singleOrNull() as? JsonObject ?: return false
+    return (variant["deuce"] as? JsonPrimitive)?.content == "golden_point"
+}
