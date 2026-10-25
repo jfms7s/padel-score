@@ -468,7 +468,6 @@ export const strings = {
 			already_yours: 'This player is already linked to you.',
 			claim_decided: 'This claim was already decided.',
 			claim_declined: 'This claim was declined, so it can’t be made again.',
-			claim_status: 'This claim has changed. Reload and try again.',
 			not_public: 'This profile isn’t public.',
 			too_many_claims: 'You have too many open claims. Withdraw one first, then try again.',
 			history_private: 'Their wider history is private.'

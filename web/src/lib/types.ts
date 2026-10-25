@@ -299,7 +299,6 @@ export type LinkingErrorCode =
 	| 'already_yours'
 	| 'claim_decided'
 	| 'claim_declined'
-	| 'claim_status'
 	| 'not_public'
 	| 'too_many_claims'
 	| 'history_private';
@@ -455,6 +454,8 @@ export interface MyLink {
 export interface CreatedLinkCode {
 	url: string;
 	expires_at: number;
+	/** Seconds left by the server's clock; count down from this, not from `expires_at`. */
+	expires_in: number;
 }
 
 /** One match of a combined history; the redacted form has no names, coordinator or link. */

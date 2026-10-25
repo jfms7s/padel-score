@@ -54,6 +54,15 @@ export function unlink(playerId: string): Promise<void> {
 	return accountRequest(`/api/players/${enc(playerId)}/link`, { method: DELETE, ok: 204, signedIn: true });
 }
 
+/**
+ * When a link code stops working on the client's clock (ms): `expiresIn` seconds, as the server
+ * counted them, after the response arrived. The server's `expires_at` is never compared with the
+ * client's clock, so a phone that runs minutes fast or slow still gets the full time.
+ */
+export function codeDeadline(expiresIn: number, receivedAt: number): number {
+	return receivedAt + Math.max(0, expiresIn) * 1000;
+}
+
 // ---- claims ------------------------------------------------------------------------------
 
 export async function getSlots(spectatorToken: string): Promise<SlotState[]> {
