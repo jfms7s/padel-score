@@ -206,3 +206,36 @@ fn finished_match_snapshot_does_not_panic() {
     );
     assert_eq!(s.games, [1, 0]);
 }
+
+#[test]
+fn no_change_ends_after_match_point_sets() {
+    // One set 6-3: 9 games (odd) would change ends, but the match is over.
+    let s = play(&sets(GoldenPoint, One, FullSet), &games(6, 3));
+    assert_eq!(
+        s.status,
+        Status::Finished {
+            winner: Some(Team::A)
+        }
+    );
+    assert!(!s.change_ends);
+    // Best of 3 won 6-3 in the second set.
+    let s = play(&bo3(), &format!("{}{}", games(6, 0), games(6, 3)));
+    assert_eq!(
+        s.status,
+        Status::Finished {
+            winner: Some(Team::A)
+        }
+    );
+    assert!(!s.change_ends);
+    // A super tie-break won 10-2 (12 points, a multiple of 6) ends the match.
+    let f = sets(GoldenPoint, BestOf3, SuperTieBreak);
+    let to_deciding = format!("{}{}", games(6, 0), games(0, 6));
+    let s = play(&f, &format!("{to_deciding}bb aaaaaaaaaa"));
+    assert_eq!(
+        s.status,
+        Status::Finished {
+            winner: Some(Team::A)
+        }
+    );
+    assert!(!s.change_ends);
+}

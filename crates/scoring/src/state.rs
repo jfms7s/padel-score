@@ -2,8 +2,8 @@ use crate::serve::{
     ends_change_after_game, ends_change_in_tiebreak, in_rotation, serve_side, tiebreak_server,
 };
 use crate::{
-    DecidingSet, ErrorKind, Event, Format, Game, GameScore, Player, RulesError, SUPER_TIEBREAK_TO,
-    ServeSide, SetRules, Start, TIEBREAK_TO, Team, TieBreak,
+    DecidingSet, DeuceRule, ErrorKind, Event, Format, Game, GameScore, Player, RulesError,
+    SUPER_TIEBREAK_TO, ServeSide, SetRules, Start, TIEBREAK_TO, Team, TieBreak,
 };
 use serde::{Deserialize, Serialize};
 
@@ -70,7 +70,8 @@ pub struct Score {
     pub server: Player,
     /// Where the next serve goes from.
     pub side: ServeSide,
-    /// The players change ends now: true only in the snapshot right after the event that caused it.
+    /// The players change ends now: true only in the snapshot right after the event that caused it,
+    /// and never once the match is over.
     pub change_ends: bool,
     pub overtime: bool,
     pub time_up: bool,
@@ -88,8 +89,7 @@ pub struct MatchState {
 #[serde(rename_all = "snake_case")]
 enum Mode {
     Sets(SetsMatch),
-    // TODO(Task 6): timed-format state. Until then a timed match accepts events and ignores them.
-    Timed,
+    Timed(TimedMatch),
 }
 
 impl MatchState {
@@ -98,7 +98,10 @@ impl MatchState {
         start.validate()?;
         let mode = match format {
             Format::Sets(rules) => Mode::Sets(SetsMatch::new(rules)),
-            Format::Timed { .. } => Mode::Timed,
+            Format::Timed {
+                deuce,
+                draws_allowed,
+            } => Mode::Timed(TimedMatch::new(deuce, draws_allowed)),
         };
         Ok(MatchState { start, mode })
     }
@@ -107,23 +110,27 @@ impl MatchState {
     pub fn apply(&mut self, e: Event) -> Result<(), ErrorKind> {
         match &mut self.mode {
             Mode::Sets(m) => m.apply(e),
-            // TODO(Task 6): timed-format events.
-            Mode::Timed => Ok(()),
+            Mode::Timed(m) => m.apply(e),
         }
     }
 
     pub fn score(&self) -> Score {
-        match &self.mode {
+        let mut score = match &self.mode {
             Mode::Sets(m) => m.score(self.start),
-            // TODO(Task 6): timed-format score.
-            Mode::Timed => Score::blank(self.start),
+            Mode::Timed(m) => m.score(self.start),
+        };
+        // No change of ends after match point: the match is over.
+        if score.status != Status::InProgress {
+            score.change_ends = false;
         }
+        score
     }
 }
 
 impl Score {
-    /// A score with nothing played.
-    fn blank(start: Start) -> Score {
+    /// Defaults for the fields a mode doesn't set: no sets, no games, no time-up or overtime.
+    /// Every mode sets `current`, `server`, `side`, `change_ends` and `status` itself.
+    fn base(start: Start) -> Score {
         Score {
             sets: Vec::new(),
             sets_won: [0, 0],
@@ -135,6 +142,136 @@ impl Score {
             overtime: false,
             time_up: false,
             status: Status::InProgress,
+        }
+    }
+}
+
+/// A timed (non-stop) match: games accumulate with no sets and no tie-breaks
+/// until time is up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TimedMatch {
+    deuce: DeuceRule,
+    draws_allowed: bool,
+    /// Games in the whole match.
+    games: [u16; 2],
+    unit: TimedUnit,
+    /// Places along the service rotation (mod 4) of the current game's server.
+    rotation: u16,
+    /// Whether the last event made the players change ends.
+    change_ends: bool,
+    time_up: bool,
+    overtime: bool,
+}
+
+/// What is being played in a timed match.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TimedUnit {
+    Game(Game),
+    /// The match is over; `winner` is `None` for a draw.
+    Over {
+        winner: Option<Team>,
+    },
+}
+
+impl TimedMatch {
+    fn new(deuce: DeuceRule, draws_allowed: bool) -> TimedMatch {
+        TimedMatch {
+            deuce,
+            draws_allowed,
+            games: [0, 0],
+            unit: TimedUnit::Game(Game::new(deuce)),
+            rotation: 0,
+            change_ends: false,
+            time_up: false,
+            overtime: false,
+        }
+    }
+
+    fn apply(&mut self, e: Event) -> Result<(), ErrorKind> {
+        let TimedUnit::Game(game) = &mut self.unit else {
+            return Err(ErrorKind::MatchOver);
+        };
+        match e {
+            Event::Point(team) => {
+                self.change_ends = false;
+                if let Some(w) = game.point(team) {
+                    self.game_won(w);
+                }
+            }
+            Event::TimeUp => {
+                if self.time_up {
+                    return Err(ErrorKind::AlreadyTimeUp);
+                }
+                self.time_up();
+            }
+        }
+        Ok(())
+    }
+
+    /// `w` won the game in progress: count it, pass service on, and either
+    /// end the match (an overtime game decides it) or start the next game.
+    fn game_won(&mut self, w: Team) {
+        let g = slot(&mut self.games, w);
+        *g = g.saturating_add(1);
+        let [a, b] = self.games;
+        // The whole match is one "set" for the change-of-ends rule.
+        self.rotation = self.rotation.wrapping_add(1) % 4;
+        self.change_ends |= ends_change_after_game(a.saturating_add(b));
+        if self.overtime {
+            self.finish(Some(w));
+        } else {
+            self.unit = TimedUnit::Game(Game::new(self.deuce));
+        }
+    }
+
+    /// Time is up: discard the game in progress, then the leader wins, or a level
+    /// match is a draw or goes to a single overtime game. The discarded game doesn't
+    /// move the rotation, so its server serves the overtime game.
+    fn time_up(&mut self) {
+        self.time_up = true;
+        self.change_ends = false;
+        let [a, b] = self.games;
+        if a > b {
+            self.finish(Some(Team::A));
+        } else if b > a {
+            self.finish(Some(Team::B));
+        } else if self.draws_allowed {
+            self.finish(None);
+        } else {
+            self.overtime = true;
+            self.unit = TimedUnit::Game(Game::new(self.deuce));
+        }
+    }
+
+    fn finish(&mut self, winner: Option<Team>) {
+        self.unit = TimedUnit::Over { winner };
+    }
+
+    fn score(&self, start: Start) -> Score {
+        let server = in_rotation(start.first_server, self.rotation);
+        let (current, side, status) = match &self.unit {
+            TimedUnit::Game(game) => {
+                let gs = game.score();
+                let side = serve_side(game.points_played(), gs.deciding_point);
+                (Current::Game(gs), side, Status::InProgress)
+            }
+            TimedUnit::Over { winner } => (
+                Current::None,
+                ServeSide::Right,
+                Status::Finished { winner: *winner },
+            ),
+        };
+        Score {
+            games: self.games,
+            current,
+            server,
+            side,
+            change_ends: self.change_ends,
+            overtime: self.overtime,
+            time_up: self.time_up,
+            status,
+            ..Score::base(start)
         }
     }
 }
@@ -335,7 +472,7 @@ impl SetsMatch {
             side,
             change_ends: self.change_ends,
             status,
-            ..Score::blank(start)
+            ..Score::base(start)
         }
     }
 }
