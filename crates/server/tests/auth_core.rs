@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 use http_body_util::BodyExt;
-use padel_score_server::accounts_store::{NewUser, PollOutcome};
+use padel_score_server::accounts_store::{NewUser, PollOutcome, SESSION_TTL_SECS};
 use padel_score_server::api::{ApiError, now};
 use padel_score_server::auth::{AdminUser, AuthVia, CurrentUser, OptionalUser, SessionUser};
 use padel_score_server::{AppState, Config, Store, db, router};
@@ -162,18 +162,66 @@ async fn bearer_device_token_is_accepted() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body, json!({ "id": user, "via": { "device": device_id } }));
-    // A bad pdl_ bearer is a 401 even next to a good cookie.
+}
+
+#[tokio::test]
+async fn bad_bearer_next_to_good_cookie_is_401() {
+    let state = state_with(&[]).await;
+    let (_, user) = admin_and_user(&state.store).await;
+    let raw = state.store.create_session(&user, now()).await.unwrap();
+    let c = cookie(&state, &raw);
+    let app = test_routes(state);
+    // The cookie alone is good.
+    assert_eq!(
+        status_of(&app, Method::GET, "/t/me", &[("cookie", &c)]).await,
+        StatusCode::OK
+    );
+    // A bad pdl_ bearer is a 401 even next to that good cookie.
     let (status, _, body) = send(
         &app,
         req(
             Method::GET,
             "/t/me",
-            &[("authorization", "Bearer pdl_nope")],
+            &[("authorization", "Bearer pdl_nope"), ("cookie", &c)],
         ),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body, json!({ "error": "unauthorized" }));
+}
+
+#[tokio::test]
+async fn expired_session_is_401() {
+    let state = state_with(&[]).await;
+    let (_, user) = admin_and_user(&state.store).await;
+    // Created just over 30 days ago, so it expired a second ago.
+    let raw = state
+        .store
+        .create_session(&user, now() - SESSION_TTL_SECS - 1)
+        .await
+        .unwrap();
+    let c = cookie(&state, &raw);
+    let app = test_routes(state);
+    let (status, _, body) = send(&app, req(Method::GET, "/t/me", &[("cookie", &c)])).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body, json!({ "error": "unauthorized" }));
+    assert_eq!(
+        status_of(&app, Method::GET, "/t/maybe", &[("cookie", &c)]).await,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn device_token_sent_as_cookie_is_rejected() {
+    let state = state_with(&[]).await;
+    let (_, user) = admin_and_user(&state.store).await;
+    let token = device_token(&state.store, &user).await;
+    let c = cookie(&state, &token);
+    let app = test_routes(state);
+    assert_eq!(
+        status_of(&app, Method::GET, "/t/me", &[("cookie", &c)]).await,
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]

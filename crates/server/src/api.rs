@@ -60,6 +60,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/score/{token}/replace", post(replace))
         .route("/api/score/{token}/stream", get(score_stream))
         .route("/api/view/{token}/stream", get(view_stream))
+        .merge(crate::accounts::routes())
 }
 
 #[derive(Debug)]
@@ -71,6 +72,9 @@ pub enum ApiError {
     InvalidMatch(String),
     /// 401: no credential, or one that is unknown, expired, revoked or a disabled user's.
     Unauthorized,
+    /// 401 `invalid_credentials`: a sign-in or password check failed. One answer for an unknown
+    /// email, a wrong password and a disabled user, so none can be told apart.
+    InvalidCredentials,
     /// 403: signed in but not allowed (a device token on a session-only route, a non-admin on an
     /// admin route, or a cross-site unsafe request carrying the session cookie).
     Forbidden,
@@ -126,6 +130,10 @@ impl IntoResponse for ApiError {
             ApiError::Unauthorized => {
                 (StatusCode::UNAUTHORIZED, json!({ "error": "unauthorized" }))
             }
+            ApiError::InvalidCredentials => (
+                StatusCode::UNAUTHORIZED,
+                json!({ "error": "invalid_credentials" }),
+            ),
             ApiError::Forbidden => (StatusCode::FORBIDDEN, json!({ "error": "forbidden" })),
             ApiError::TooMany { retry_after } => {
                 let body = json!({ "error": "too_many_requests", "retry_after_secs": retry_after });

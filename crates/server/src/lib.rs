@@ -1,3 +1,4 @@
+pub mod accounts;
 pub mod accounts_store;
 pub mod api;
 pub mod auth;
@@ -12,7 +13,7 @@ pub mod store;
 pub mod tokens;
 pub mod web;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, State};
@@ -38,6 +39,9 @@ pub struct AppState {
     pub password_permits: Arc<Semaphore>,
     /// The named rate limiters (`state.limits.login_ip`, ...); see [`ratelimit::Limits`].
     pub limits: Arc<ratelimit::Limits>,
+    /// The one-time setup code while the users table is empty and `SETUP_TOKEN` is unset; set by
+    /// [`accounts::init_setup_code`] at startup and cleared by a successful setup.
+    pub setup_code: Arc<Mutex<Option<String>>>,
 }
 
 impl AppState {
@@ -49,6 +53,7 @@ impl AppState {
             shutdown: CancellationToken::new(),
             password_permits: Arc::new(Semaphore::new(auth::HASH_PERMITS)),
             limits: Arc::new(ratelimit::Limits::new()),
+            setup_code: Arc::new(Mutex::new(None)),
         }
     }
 }

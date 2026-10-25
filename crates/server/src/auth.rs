@@ -55,9 +55,11 @@ pub fn check_password(pw: &str) -> Result<(), ApiError> {
     }
 }
 
-/// The argon2id PHC string of `pw`, with a fresh salt. It does not apply the policy; callers
-/// run [`check_password`] first.
+/// The argon2id PHC string of `pw`, with a fresh salt. It applies [`check_password`] first, so
+/// no caller can store a password outside the policy: a failure is
+/// `Validation { field: "password" }`.
 pub async fn hash_password(permits: &Arc<Semaphore>, pw: &str) -> Result<String, ApiError> {
+    check_password(pw)?;
     let pw = pw.to_owned();
     blocking(permits, move || hash_blocking(&pw))
         .await?
@@ -79,6 +81,14 @@ pub async fn verify_dummy(permits: &Arc<Semaphore>, pw: &str) {
     let pw = pw.to_owned();
     // The outcome is meaningless (it never matches); only the time spent counts.
     let _ = blocking(permits, move || verify_blocking(&pw, dummy_phc())).await;
+}
+
+/// Make the dummy hash now, at startup, so the first unknown-email login does not also pay for
+/// hashing it and stand out by its timing.
+pub async fn warm_dummy(permits: &Arc<Semaphore>) {
+    if blocking(permits, || dummy_phc().len()).await.is_err() {
+        tracing::error!("cannot warm the dummy password hash");
+    }
 }
 
 static DUMMY_PHC: OnceLock<String> = OnceLock::new();
@@ -189,7 +199,7 @@ fn bearer_device_token(value: &HeaderValue) -> Option<&str> {
 /// `Sec-Fetch-Site` decides when present: `same-origin` or `none` (typed in the address bar)
 /// pass, anything else is refused. Without it, `Origin` must equal `PUBLIC_ORIGIN`, or, when
 /// that is unset, name the same host and port as the request. With neither header, refuse.
-fn check_csrf(
+pub(crate) fn check_csrf(
     method: &Method,
     uri: &Uri,
     headers: &HeaderMap,
@@ -361,6 +371,25 @@ mod tests {
         assert!(verify_password(&p, "correct horse", &phc).await);
         // A fresh salt every time.
         assert_ne!(phc, hash_password(&p, "correct horse").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn hash_password_enforces_the_policy() {
+        let p = permits();
+        for no in ["", "1234567", &"x".repeat(129)] {
+            let r = hash_password(&p, no).await;
+            assert!(
+                matches!(r, Err(ApiError::Validation { field: "password" })),
+                "{} bytes: {r:?}",
+                no.len()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn warm_dummy_makes_the_dummy() {
+        warm_dummy(&permits()).await;
+        assert!(DUMMY_PHC.get().unwrap().starts_with("$argon2id$"));
     }
 
     #[tokio::test]
