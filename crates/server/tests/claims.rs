@@ -588,8 +588,9 @@ async fn approve_after_qr_link_is_409() {
     let res = w.approve(&w.ana, &c1).await;
     assert_eq!(res.status, StatusCode::CONFLICT);
     assert_eq!(res.body["error"], "player_linked");
-    // Still pending, so the coordinator can decline it.
-    assert_eq!(w.inbox().await.len(), 1);
+    // Still pending, so the coordinator can decline it by id, though the linked entry has left
+    // the inbox.
+    assert_eq!(w.inbox().await.len(), 0);
     assert_eq!(w.decline(&w.ana, &c1).await.status, StatusCode::NO_CONTENT);
     assert_eq!(
         w.state.store.links(&w.ana_id).await.unwrap()[&w.rui].user_id,
@@ -713,4 +714,104 @@ async fn claim_routes_are_rate_limited() {
     }
     let res = w.claim(&w.r1, 0).await;
     assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn preview_of_linked_entry_is_404() {
+    let w = world().await;
+    let preview = |who: String| {
+        let w = &w;
+        async move {
+            w.call(&who, Method::POST, "/api/claims/preview", Some(w.target(0)))
+                .await
+        }
+    };
+    assert_eq!(preview(w.r1.clone()).await.status, StatusCode::OK);
+    let res = w
+        .call(
+            &w.ana,
+            Method::POST,
+            &format!("/api/players/{}/link-me", w.rui),
+            None,
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    let res = preview(w.r1.clone()).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    assert_eq!(res.body["error"], "not_found");
+}
+
+#[tokio::test]
+async fn claims_on_linked_entries_leave_inbox_and_badge_until_unlinked() {
+    let w = world().await;
+    w.claim(&w.r1, 0).await;
+    assert_eq!(w.inbox().await.len(), 1);
+    // A QR link by another account settles the entry.
+    let made = w
+        .call(
+            &w.ana,
+            Method::POST,
+            &format!("/api/players/{}/link-code", w.rui),
+            None,
+        )
+        .await;
+    let code = support::fragment_code(made.body["url"].as_str().unwrap());
+    let res = w
+        .call(
+            &w.r2,
+            Method::POST,
+            "/api/link-codes/accept",
+            Some(json!({ "code": code })),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert!(w.inbox().await.is_empty());
+    let badge = |list: Vec<Value>| {
+        list.iter().find(|p| p["id"] == w.rui.as_str()).unwrap()["pending_claims"].clone()
+    };
+    assert_eq!(badge(w.player_list().await), 0);
+    // Unlinked again: the pending claim is back.
+    let res = w
+        .call(
+            &w.ana,
+            Method::DELETE,
+            &format!("/api/players/{}/link", w.rui),
+            None,
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    assert_eq!(w.inbox().await.len(), 1);
+    assert_eq!(badge(w.player_list().await), 1);
+}
+
+#[tokio::test]
+async fn own_pending_claim_is_approved_when_the_claimant_accepts_a_qr() {
+    let w = world().await;
+    let id = w.claim(&w.r1, 0).await.body["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let made = w
+        .call(
+            &w.ana,
+            Method::POST,
+            &format!("/api/players/{}/link-code", w.rui),
+            None,
+        )
+        .await;
+    let code = support::fragment_code(made.body["url"].as_str().unwrap());
+    let res = w
+        .call(
+            &w.r1,
+            Method::POST,
+            "/api/link-codes/accept",
+            Some(json!({ "code": code })),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let mine = w.call(&w.r1, Method::GET, "/api/me/claims", None).await;
+    let claim = &mine.body["items"][0];
+    assert_eq!(claim["id"], id.as_str());
+    assert_eq!(claim["status"], "approved");
+    assert!(claim["decided_at"].as_i64().is_some());
 }

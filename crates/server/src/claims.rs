@@ -94,7 +94,9 @@ impl ClaimStatus {
             "approved" => Ok(ClaimStatus::Approved),
             "declined" => Ok(ClaimStatus::Declined),
             "withdrawn" => Ok(ClaimStatus::Withdrawn),
-            _ => Err(StoreError::Conflict("claim_status")),
+            _ => Err(StoreError::Corrupt(format!(
+                "unknown claim status {text:?}"
+            ))),
         }
     }
 }
@@ -258,10 +260,19 @@ impl Store {
         target: &ClaimTarget,
     ) -> Result<Option<ClaimPreview>, StoreError> {
         let mut conn = self.pool().acquire().await?;
-        match resolve_target_in(&mut conn, target).await? {
-            Some((player_id, _)) => Ok(Some(preview_in(&mut conn, &player_id).await?)),
-            None => Ok(None),
+        let Some((player_id, _)) = resolve_target_in(&mut conn, target).await? else {
+            return Ok(None);
+        };
+        // One answer for a linked entry too, as `link_code_preview` gives.
+        let linked: Option<String> =
+            sqlx::query_scalar("SELECT linked_user_id FROM players WHERE id = ?")
+                .bind(&player_id)
+                .fetch_one(&mut *conn)
+                .await?;
+        if linked.is_some() {
+            return Ok(None);
         }
+        Ok(Some(preview_in(&mut conn, &player_id).await?))
     }
 
     /// Ask to take over the target's entry: the claim, and whether this call created (or
@@ -340,7 +351,7 @@ impl Store {
         Ok((claim, created))
     }
 
-    /// Pending claims on the owner's entries, oldest first, without disabled claimants.
+    /// Pending claims on the owner's unlinked entries, oldest first, without disabled claimants.
     pub async fn incoming_claims(&self, owner: &str) -> Result<Vec<Claim>, StoreError> {
         let mut conn = self.pool().acquire().await?;
         let rows = sqlx::query(
@@ -348,6 +359,7 @@ impl Store {
              FROM player_claims c JOIN players p ON p.id = c.player_id \
              JOIN users u ON u.id = c.claimant_user_id \
              WHERE c.owner_user_id = ? AND c.status = 'pending' AND u.disabled_at IS NULL \
+               AND p.linked_user_id IS NULL \
              ORDER BY c.created_at, c.id",
         )
         .bind(owner)
@@ -456,7 +468,9 @@ impl Store {
         let rows = sqlx::query(
             "SELECT c.player_id, COUNT(*) AS n FROM player_claims c \
              JOIN users u ON u.id = c.claimant_user_id \
+             JOIN players p ON p.id = c.player_id \
              WHERE c.owner_user_id = ? AND c.status = 'pending' AND u.disabled_at IS NULL \
+               AND p.linked_user_id IS NULL \
              GROUP BY c.player_id",
         )
         .bind(owner)
