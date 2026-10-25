@@ -948,6 +948,16 @@ impl Store {
         device_code_by_user_code_in(&mut conn, user_code).await
     }
 
+    /// Whether a device code with this raw value exists. A read-only pool query: it takes no
+    /// write lock, so polls with made-up codes cannot queue behind (or ahead of) real writes.
+    pub async fn device_code_exists(&self, raw: &str) -> Result<bool, StoreError> {
+        let row = sqlx::query("SELECT 1 FROM device_codes WHERE device_code_hash = ?")
+            .bind(hash_token(raw))
+            .fetch_optional(self.pool())
+            .await?;
+        Ok(row.is_some())
+    }
+
     /// Approve a pending device code for `user_id`. Unknown or expired is `NotFound`; already
     /// approved or denied is `Conflict("device_code_used")`.
     pub async fn approve_device(

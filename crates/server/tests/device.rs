@@ -531,3 +531,80 @@ async fn revoked_device_stops_streams_on_recheck() {
         assert_eq!(res.status, StatusCode::UNAUTHORIZED, "{path}");
     }
 }
+
+#[tokio::test]
+async fn device_name_strips_control_and_format_chars() {
+    let (state, _, app, _, admin) = with_admin().await;
+    let cases = [
+        // Bidi override, zero-width space, BOM, soft hyphen and a control char are all dropped.
+        (
+            "\u{202E}Gal\u{200B}axy\u{FEFF} W\u{AD}atch\u{7}",
+            "Galaxy Watch",
+        ),
+        ("\u{200B}\u{202E}\n\t", "Watch"),
+        ("  \u{2066}Pixel\u{2069}  ", "Pixel"),
+        ("Wätch é", "Wätch é"),
+    ];
+    for (given, want) in cases {
+        let started = start_with(&app, json!({ "device_name": given })).await;
+        let res = lookup(&state, &app, &admin, &code_of(&started, "user_code")).await;
+        assert_eq!(res.body["device_name"], json!(want), "for {given:?}");
+    }
+}
+
+#[tokio::test]
+async fn device_lookup_is_rate_limited() {
+    let (state, _, app, _, admin) = with_admin().await;
+    for _ in 0..30 {
+        let res = lookup(&state, &app, &admin, "ZZZZ-ZZZZ").await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND);
+    }
+    let res = lookup(&state, &app, &admin, "ZZZZ-ZZZZ").await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(res.body["error"], json!("too_many_requests"));
+    assert!(res.header(header::RETRY_AFTER).is_some());
+    // Another user has their own budget.
+    let (_, bea) = invited_user(&state, &app, &admin, "bea@x.test", "Bea").await;
+    let res = lookup(&state, &app, &bea, "ZZZZ-ZZZZ").await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn device_token_route_is_rate_limited_per_ip() {
+    let (state, _, app, _, _) = with_admin().await;
+    for _ in 0..60 {
+        assert_poll_error(&poll(&app, "unknown").await, "expired_token");
+    }
+    let res = poll(&app, "unknown").await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(res.body["error"], json!("too_many_requests"));
+    assert!(res.header(header::RETRY_AFTER).is_some());
+    // Another address has its own budget.
+    assert_poll_error(
+        &poll(&app_from(&state, 2), "unknown").await,
+        "expired_token",
+    );
+}
+
+#[tokio::test]
+async fn unknown_device_code_skips_write_lock() {
+    let (state, _, app, _, _) = with_admin().await;
+    // Behaviour: unknown is expired_token and leaves no trace.
+    assert_poll_error(&poll(&app, "no-such-code").await, "expired_token");
+    // The read-only existence check the route uses first.
+    assert!(
+        !state
+            .store
+            .device_code_exists("no-such-code")
+            .await
+            .unwrap()
+    );
+    let started = start(&app).await;
+    assert!(
+        state
+            .store
+            .device_code_exists(&code_of(&started, "device_code"))
+            .await
+            .unwrap()
+    );
+}

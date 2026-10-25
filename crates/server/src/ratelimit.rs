@@ -196,6 +196,11 @@ pub struct Limits {
     pub device_approve: RateLimiter,
     /// `GET /api/invites/{code}` per client address: 30 a minute.
     pub invite_lookup: RateLimiter,
+    /// `GET /api/device/{user_code}` per user id: 30 a minute.
+    pub device_lookup: RateLimiter,
+    /// `POST /api/device/token` per client address (a loose brake; the watch polls every 5 s):
+    /// 60 a minute.
+    pub device_token: RateLimiter,
 }
 
 impl Limits {
@@ -206,6 +211,8 @@ impl Limits {
             device_start: RateLimiter::new(10, 60),
             device_approve: RateLimiter::new(10, 60),
             invite_lookup: RateLimiter::new(30, 60),
+            device_lookup: RateLimiter::new(30, 60),
+            device_token: RateLimiter::new(60, 60),
         }
     }
 
@@ -217,6 +224,8 @@ impl Limits {
             &self.device_start,
             &self.device_approve,
             &self.invite_lookup,
+            &self.device_lookup,
+            &self.device_token,
         ] {
             limiter.sweep(now);
         }
@@ -270,6 +279,8 @@ mod tests {
             (&limits.device_start, 10),
             (&limits.device_approve, 10),
             (&limits.invite_lookup, 30),
+            (&limits.device_lookup, 30),
+            (&limits.device_token, 60),
         ];
         for (limiter, limit) in cases {
             assert_eq!(limiter.limit, limit);

@@ -2,21 +2,22 @@
 //!
 //! The watch:
 //!
-//! - `POST /api/device/start` (public) takes `{device_name}`, trimmed and cut to
-//!   [`MAX_DEVICE_NAME_CHARS`] chars, [`DEFAULT_DEVICE_NAME`] when missing or blank. It is 200
+//! - `POST /api/device/start` (public) takes `{device_name}`, stripped of control and format
+//!   characters, trimmed and cut to [`MAX_DEVICE_NAME_CHARS`] chars, [`DEFAULT_DEVICE_NAME`] when missing or blank. It is 200
 //!   `{device_code, user_code: "ABCD-EFGH", verification_uri: "/link", expires_in: 600,
 //!   interval: 5}`. Limited by `device_start`, per client address.
 //! - `POST /api/device/token` (public) takes `{device_code}`. While nothing is issued it is 400
 //!   `{"error": "authorization_pending" | "slow_down" | "expired_token" | "access_denied"}`;
 //!   an unknown, purged or already used code is `expired_token`, never 404. Once approved it is
 //!   200 `{access_token, token_type: "bearer"}`, exactly once: the poll mints the token in the
-//!   transaction that marks the code consumed ([`crate::Store::poll_device`]).
+//!   transaction that marks the code consumed ([`crate::Store::poll_device`]). An unknown code is
+//!   answered before that transaction opens. Limited by `device_token`, per client address.
 //!
 //! The person approving, on a session only (a device token is 403):
 //!
 //! - `GET /api/device/{user_code}` is `{device_name, created_secs_ago, expires_in_secs}` for a
 //!   pending code. Unknown, expired, decided and consumed codes are all 404 `not_found`. The
-//!   typed code is normalized (case, spaces, the dash).
+//!   typed code is normalized (case, spaces, the dash). Limited by `device_lookup`, per user.
 //! - `POST /api/device/{user_code}/approve` and `/deny` are 204. A decided code is 409
 //!   `device_code_used`; unknown or expired, 404. Both count every call against the user's
 //!   `device_approve` budget.
@@ -68,15 +69,26 @@ pub fn routes() -> Router<AppState> {
         .layer(axum::middleware::map_response(secret_headers))
 }
 
-/// The stored name for a requested one: trimmed, cut to [`MAX_DEVICE_NAME_CHARS`], and
-/// [`DEFAULT_DEVICE_NAME`] when nothing is left.
+/// Unicode format characters (category Cf): bidi overrides and isolates, zero-width characters,
+/// the BOM, the soft hyphen and the like. They are invisible, so a name could spoof the
+/// approval page with them.
+fn is_format_char(c: char) -> bool {
+    matches!(u32::from(c),
+        0x00AD | 0x0600..=0x0605 | 0x061C | 0x06DD | 0x070F | 0x0890..=0x0891 | 0x08E2
+        | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F
+        | 0xFEFF | 0xFFF9..=0xFFFB | 0x110BD | 0x110CD | 0x13430..=0x1343F
+        | 0x1BCA0..=0x1BCA3 | 0x1D173..=0x1D17A | 0xE0001 | 0xE0020..=0xE007F)
+}
+
+/// The stored name for a requested one: control and format characters removed, trimmed, cut to
+/// [`MAX_DEVICE_NAME_CHARS`], and [`DEFAULT_DEVICE_NAME`] when nothing is left.
 pub fn device_name(requested: Option<&str>) -> String {
-    let name: String = requested
+    let cleaned: String = requested
         .unwrap_or_default()
-        .trim()
         .chars()
-        .take(MAX_DEVICE_NAME_CHARS)
+        .filter(|&c| !c.is_control() && !is_format_char(c))
         .collect();
+    let name: String = cleaned.trim().chars().take(MAX_DEVICE_NAME_CHARS).collect();
     // Cutting may leave trailing whitespace.
     let name = name.trim_end();
     if name.is_empty() {
@@ -135,9 +147,21 @@ fn poll_error(code: &'static str) -> Response {
 
 async fn token(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     ApiJson(req): ApiJson<TokenRequest>,
 ) -> Result<Response, ApiError> {
-    let outcome = match state.store.poll_device(&req.device_code, now()).await {
+    let t = now();
+    state
+        .limits
+        .device_token
+        .try_acquire(&rate_key(ip), t)
+        .map_err(|retry_after| ApiError::TooMany { retry_after })?;
+    // An unknown code is answered from a read-only query, so made-up codes never queue for the
+    // write lock that real commands and polls need.
+    if !state.store.device_code_exists(&req.device_code).await? {
+        return Ok(poll_error("expired_token"));
+    }
+    let outcome = match state.store.poll_device(&req.device_code, t).await {
         Ok(outcome) => outcome,
         // Unknown or purged; or a poll that lost the race to consume the code.
         Err(StoreError::NotFound | StoreError::Conflict(_)) => PollOutcome::Expired,
@@ -165,10 +189,15 @@ struct PendingDevice {
 
 async fn lookup(
     State(state): State<AppState>,
-    SessionUser(_): SessionUser,
+    SessionUser(user): SessionUser,
     ApiPath(user_code): ApiPath<String>,
 ) -> Result<Json<PendingDevice>, ApiError> {
     let t = now();
+    state
+        .limits
+        .device_lookup
+        .try_acquire(&user.user.id, t)
+        .map_err(|retry_after| ApiError::TooMany { retry_after })?;
     let code = state
         .store
         .device_by_user_code(&user_code)
