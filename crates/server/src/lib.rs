@@ -8,6 +8,7 @@ pub mod config;
 pub mod db;
 pub mod device;
 pub mod hub;
+pub mod linking;
 pub mod owned;
 pub mod players;
 pub mod players_api;
