@@ -5,14 +5,17 @@
 	import { ApiError, getView, streamUrl } from '#lib/api.ts';
 	import { latestView, loadLayout, nextLayout, saveLayout, setsSummary, type Layout } from '#lib/fence.ts';
 	import { loadView, saveView } from '#lib/lastview.ts';
+	import { getSlots } from '#lib/linking.ts';
+	import { session } from '#lib/session.ts';
 	import { matchLabel } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
 	import { openStream, type StreamStatus } from '#lib/stream.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { MatchView } from '#lib/types.ts';
+	import type { MatchView, SlotState } from '#lib/types.ts';
 	import { fenceModel } from '#lib/view.ts';
 	import { keepAwake } from '#lib/wakelock.ts';
 	import BoardView from '#lib/components/BoardView.svelte';
+	import ClaimSheet from '#lib/components/ClaimSheet.svelte';
 	import CourtView from '#lib/components/CourtView.svelte';
 
 	const f = strings.fence;
@@ -84,6 +87,35 @@
 		layoutPref = nextLayout(layoutPref);
 		saveLayout(safeStorage(), layoutPref);
 	}
+
+	// "That's me" on the picked players, only when a session is known. Signed out, or on any
+	// failure (401, 403, 404, offline), there are no slots and the page is unchanged.
+	let slots = $state.raw<SlotState[]>([]);
+	let claiming = $state<SlotState | null>(null);
+	const signedIn = $derived($session.status === 'signed_in');
+
+	async function loadSlots(t: string, live: () => boolean) {
+		try {
+			const list = await getSlots(t);
+			if (live()) slots = list;
+		} catch {
+			if (live()) slots = [];
+		}
+	}
+
+	$effect(() => {
+		const t = token;
+		slots = [];
+		claiming = null;
+		if (!signedIn) return;
+		let live = true;
+		void loadSlots(t, () => live);
+		return () => {
+			live = false;
+		};
+	});
+
+	const claimable = $derived(slots.filter((x) => x.state !== 'linked' && x.state !== 'declined'));
 
 	const title = $derived(view ? matchLabel(view.teams) : strings.appName);
 	const announce = $derived.by(() => {
@@ -159,6 +191,38 @@
 	<p class="visually-hidden" aria-live="polite">{announce}</p>
 </main>
 
+{#if claimable.length > 0}
+	<section class="claims" aria-label={strings.linking.thatsMe}>
+		<ul>
+			{#each claimable as slot (`${slot.team}${slot.position}`)}
+				<li>
+					<span class="who">{slot.name}</span>
+					{#if slot.state === 'claimable'}
+						<button type="button" aria-label={strings.linking.thatsMeLabel(slot.name)} onclick={() => (claiming = slot)}
+							>{strings.linking.thatsMe}</button
+						>
+					{:else if slot.state === 'pending'}
+						<span class="state">{strings.linking.claimSentShort}</span>
+					{:else if slot.state === 'yours'}
+						<span class="state">{strings.linking.you}</span>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+	</section>
+{/if}
+
+{#if claiming}
+	<ClaimSheet
+		{token}
+		slot={claiming}
+		onclose={() => {
+			claiming = null;
+			void loadSlots(token, () => true);
+		}}
+	/>
+{/if}
+
 <style>
 	.fence {
 		position: relative;
@@ -177,6 +241,47 @@
 	}
 	.fence.board > :global(.board) {
 		flex: 1;
+	}
+	.claims {
+		padding: 8px 16px 24px;
+		background: var(--glass);
+		color: var(--ink);
+	}
+	.claims ul {
+		list-style: none;
+		margin: 0 auto;
+		padding: 0;
+		max-width: 28rem;
+		display: grid;
+		gap: 6px;
+	}
+	.claims li {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		min-height: var(--tap);
+		padding: 4px 12px;
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		background: var(--panel);
+	}
+	.who {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	.claims button {
+		min-height: var(--tap);
+		padding: 0 14px;
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		background: transparent;
+		color: var(--ink);
+		font-weight: 650;
+	}
+	.state {
+		color: var(--muted);
+		font-size: 14px;
 	}
 	.message {
 		min-height: 100dvh;

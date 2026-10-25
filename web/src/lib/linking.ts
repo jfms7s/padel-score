@@ -13,6 +13,7 @@ import type {
 	ClaimPreview,
 	ClaimTarget,
 	CreatedLinkCode,
+	LinkedEntry,
 	LinkedHistory,
 	MyClaim,
 	MyLink,
@@ -56,9 +57,8 @@ export function unlink(playerId: string): Promise<void> {
 // ---- claims ------------------------------------------------------------------------------
 
 export async function getSlots(spectatorToken: string): Promise<SlotState[]> {
-	const list = await accountRequest<{ items: SlotState[] }>(`/api/view/${enc(spectatorToken)}/slots`, {
-		signedIn: true
-	});
+	// Not `signedIn`: the spectator page is public, so a 401 must never send the viewer to sign-in.
+	const list = await accountRequest<{ items: SlotState[] }>(`/api/view/${enc(spectatorToken)}/slots`);
 	return list.items;
 }
 
@@ -161,6 +161,16 @@ export function previewText(p: ClaimPreview): string {
 export function linkLabel(p: Player): string | null {
 	if (!p.link) return null;
 	return p.link.is_me ? strings.linking.you : strings.linking.linkedTo(p.link.display_name);
+}
+
+/** Claims waiting on the caller, summed over their player list: the badge on the home link. */
+export function claimBadgeCount(players: Pick<Player, 'pending_claims'>[]): number {
+	return players.reduce((n, p) => n + p.pending_claims, 0);
+}
+
+/** "Won", "Lost" or "Drawn": a linked match from the player's side. */
+export function outcomeText(e: Pick<LinkedEntry, 'outcome'>): string {
+	return strings.history.outcome[e.outcome];
 }
 
 // ---- the link code kept across sign-in ---------------------------------------------------

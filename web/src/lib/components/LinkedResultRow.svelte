@@ -2,27 +2,38 @@
 	// One match of a combined history. The full form names both teams and links to the final
 	// view; the redacted form (another coordinator's match) shows only the date, outcome and score.
 	import { shortDate } from '#lib/auth.ts';
+	import { outcomeText } from '#lib/linking.ts';
 	import { scoreText } from '#lib/players.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { LinkedEntry } from '#lib/types.ts';
+	import type { LinkedEntry, Team } from '#lib/types.ts';
 
 	let { entry }: { entry: LinkedEntry } = $props();
 
 	const t = strings.history;
+	const TEAMS: Team[] = ['a', 'b'];
+	/** The winning side from the player's: their own side on a win, the other on a loss. */
+	const winner = $derived(
+		entry.outcome === 'draw' ? null : entry.outcome === 'win' ? entry.side : entry.side === 'a' ? 'b' : 'a'
+	);
 </script>
 
 <li class="result">
 	<div class="top">
 		<time datetime={new Date(entry.finished_at * 1000).toISOString()}>{shortDate(entry.finished_at)}</time>
-		<span class="outcome {entry.outcome}">{t.outcome[entry.outcome]}</span>
+		<span class="outcome {entry.outcome}">{outcomeText(entry)}</span>
 	</div>
 	{#if entry.redacted}
 		<p class="who hint">{strings.linking.anotherCoordinators}</p>
 	{:else}
-		<p class="who">
-			{strings.linking.matchLine(strings.teamName(...(entry.teams.a as [string, string])), strings.teamName(...(entry.teams.b as [string, string])))}
-			<span class="hint">{strings.linking.byCoordinator(entry.coordinator_name)}</span>
-		</p>
+		<div class="teams">
+			{#each TEAMS as team (team)}
+				<p class="team" class:won={winner === team}>
+					{strings.teamName(...(entry.teams[team] as [string, string]))}
+					{#if winner === team}<span class="visually-hidden">, {t.winner}</span>{/if}
+				</p>
+			{/each}
+		</div>
+		<p class="hint who">{strings.linking.byCoordinator(entry.coordinator_name)}</p>
 	{/if}
 	<div class="bottom">
 		<span class="score">{scoreText(entry.score)}</span>
@@ -55,9 +66,13 @@
 		justify-content: space-between;
 		gap: 4px 12px;
 	}
-	.who {
+	.who,
+	.team {
 		margin: 0;
 		overflow-wrap: anywhere;
+	}
+	.team.won {
+		font-weight: 750;
 	}
 	time {
 		color: var(--muted);
