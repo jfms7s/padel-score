@@ -185,6 +185,14 @@ impl DeviceCode {
     }
 }
 
+/// A device token's owner, as [`Store::token_user`] finds them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenUser {
+    /// The `device_tokens.id` (not the secret), for revoking or naming this device.
+    pub token_id: String,
+    pub user: User,
+}
+
 /// The outcome of one device poll (RFC 8628 §3.5).
 #[derive(Clone, PartialEq, Eq)]
 pub enum PollOutcome {
@@ -1008,9 +1016,10 @@ impl Store {
 
     // Device tokens.
 
-    /// The user behind a device token; `None` when it is unknown or revoked, or the user is
-    /// disabled. Records `last_used_at`, at most once per [`LAST_USED_RESOLUTION_SECS`].
-    pub async fn token_user(&self, raw: &str, now: i64) -> Result<Option<User>, StoreError> {
+    /// The user behind a device token, with the token's id; `None` when it is unknown or
+    /// revoked, or the user is disabled. Records `last_used_at`, at most once per
+    /// [`LAST_USED_RESOLUTION_SECS`].
+    pub async fn token_user(&self, raw: &str, now: i64) -> Result<Option<TokenUser>, StoreError> {
         let row = sqlx::query(concat!(
             "SELECT t.id AS token_id, t.last_used_at, ",
             user_columns!(),
@@ -1024,20 +1033,23 @@ impl Store {
             return Ok(None);
         };
         let last_used_at: Option<i64> = row.try_get("last_used_at")?;
+        let token_id: String = row.try_get("token_id")?;
         if last_used_at.is_none_or(|t| now - t >= LAST_USED_RESOLUTION_SECS) {
-            let token_id: String = row.try_get("token_id")?;
             // Conditional, so concurrent requests write it once.
             sqlx::query(
                 "UPDATE device_tokens SET last_used_at = ? \
                  WHERE id = ? AND (last_used_at IS NULL OR last_used_at <= ?)",
             )
             .bind(now)
-            .bind(token_id)
+            .bind(&token_id)
             .bind(now - LAST_USED_RESOLUTION_SECS)
             .execute(self.pool())
             .await?;
         }
-        Ok(Some(user_from_row(&row)?))
+        Ok(Some(TokenUser {
+            token_id,
+            user: user_from_row(&row)?,
+        }))
     }
 
     /// The user's signed-in (unrevoked) devices, newest first.

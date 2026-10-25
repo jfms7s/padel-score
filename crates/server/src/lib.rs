@@ -1,5 +1,6 @@
 pub mod accounts_store;
 pub mod api;
+pub mod auth;
 pub mod commands;
 pub mod config;
 pub mod db;
@@ -17,6 +18,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 use serde_json::json;
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 pub use config::Config;
@@ -30,6 +32,8 @@ pub struct AppState {
     pub hub: Arc<Hub>,
     /// Cancelled when the server shuts down; every SSE stream ends on it.
     pub shutdown: CancellationToken,
+    /// Bounds concurrent argon2 work to [`auth::HASH_PERMITS`]; see [`auth::hash_password`].
+    pub password_permits: Arc<Semaphore>,
 }
 
 impl AppState {
@@ -39,6 +43,7 @@ impl AppState {
             store,
             hub: Arc::new(Hub::new()),
             shutdown: CancellationToken::new(),
+            password_permits: Arc::new(Semaphore::new(auth::HASH_PERMITS)),
         }
     }
 }

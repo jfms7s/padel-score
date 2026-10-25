@@ -467,7 +467,7 @@ async fn device_poll_lifecycle() {
     };
     assert_eq!(poll(NOW + 30).await.unwrap(), PollOutcome::Consumed);
     let got = s.token_user(&raw_token, NOW + 30).await.unwrap().unwrap();
-    assert_eq!(got.id, user);
+    assert_eq!(got.user.id, user);
     let devices = s.list_devices(&user).await.unwrap();
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0].name, "Ana's watch");

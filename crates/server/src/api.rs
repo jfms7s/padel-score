@@ -69,13 +69,26 @@ pub enum ApiError {
     MethodNotAllowed,
     PayloadTooLarge,
     InvalidMatch(String),
+    /// 401: no credential, or one that is unknown, expired, revoked or a disabled user's.
+    Unauthorized,
+    /// 403: signed in but not allowed (a device token on a session-only route, a non-admin on an
+    /// admin route, or a cross-site unsafe request carrying the session cookie).
+    Forbidden,
+    /// 429 with `Retry-After: {retry_after}` seconds.
+    TooMany {
+        retry_after: u64,
+    },
     /// 409, with the snake_case code from [`StoreError::Conflict`].
     Conflict(&'static str),
+    /// 422: the named request field fails its policy.
+    Validation {
+        field: &'static str,
+    },
     Internal,
 }
 
 /// Log an unexpected failure and hide it behind a 500.
-fn internal(e: impl std::fmt::Display) -> ApiError {
+pub(crate) fn internal(e: impl std::fmt::Display) -> ApiError {
     tracing::error!(error = %e, "request failed");
     ApiError::Internal
 }
@@ -110,7 +123,24 @@ impl IntoResponse for ApiError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 json!({ "error": "invalid_match", "message": message }),
             ),
+            ApiError::Unauthorized => {
+                (StatusCode::UNAUTHORIZED, json!({ "error": "unauthorized" }))
+            }
+            ApiError::Forbidden => (StatusCode::FORBIDDEN, json!({ "error": "forbidden" })),
+            ApiError::TooMany { retry_after } => {
+                let body = json!({ "error": "too_many_requests", "retry_after_secs": retry_after });
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [(header::RETRY_AFTER, retry_after.to_string())],
+                    Json(body),
+                )
+                    .into_response();
+            }
             ApiError::Conflict(code) => (StatusCode::CONFLICT, json!({ "error": code })),
+            ApiError::Validation { field } => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "error": "validation", "field": field }),
+            ),
             ApiError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 json!({ "error": "internal" }),
