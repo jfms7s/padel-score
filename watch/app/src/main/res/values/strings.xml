@@ -14,4 +14,15 @@
     <string name="sign_in_unreachable">Can\'t reach the server</string>
     <string name="sign_in_save_failed">Couldn\'t save the sign-in. Try again.</string>
     <string name="sign_in_new_code">New code</string>
+    <string name="matches_loading">Loading matches…</string>
+    <string name="matches_empty">No live matches. Start one on your phone.</string>
+    <string name="matches_offline">Offline</string>
+    <string name="matches_unreachable">Can\'t reach the server</string>
+    <string name="matches_too_many">Too many tries. Wait a minute.</string>
+    <string name="matches_retry">Try again</string>
+    <string name="sign_out">Sign out</string>
+    <string name="sign_out_title">Sign out?</string>
+    <string name="sign_out_text">Signing out only forgets this watch\'s sign-in. To revoke the watch, use the Account page on the web.</string>
+    <string name="sign_out_confirm">Yes, sign out</string>
+    <string name="sign_out_cancel">Cancel</string>
 </resources>
