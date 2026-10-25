@@ -4,3 +4,4 @@
 /web/node_modules
 /web/.svelte-kit
 /web/src/lib/wasm
+/.quality
