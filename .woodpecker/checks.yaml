@@ -1,0 +1,51 @@
+# Checks for every branch head: Woodpecker is LAN-only with no webhooks, so the
+# woodpecker-poller CronJob starts this as a `manual` pipeline on each new branch head.
+# A release run (RELEASE_TAG set) skips it.
+when:
+  - event: [manual, push, pull_request]
+    evaluate: 'RELEASE_TAG == ""'
+
+# Full history, not the default depth-1 partial clone: commit-subjects walks the branch's commits.
+clone:
+  - name: clone
+    image: docker.io/woodpeckerci/plugin-git:2.6.5
+    settings:
+      partial: false
+
+variables:
+  - &rust_image docker.io/library/rust:1.97-bookworm
+  - &small {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 1Gi}}
+  - &large {requests: {cpu: "1", memory: 2Gi}, limits: {cpu: "3", memory: 3Gi}}
+
+steps:
+  # Conventional Commits subjects on every commit since the rule was adopted (CLAUDE.md).
+  - name: commit-subjects
+    image: docker.io/alpine/git:v2.49.1
+    commands:
+      - sh scripts/ci/commit-subjects.sh
+    backend_options:
+      kubernetes:
+        resources: *small
+
+  - name: ci-scripts
+    image: docker.io/library/debian:bookworm-slim
+    commands:
+      - for t in scripts/ci/*.test.sh; do bash "$t" || exit 1; done
+    backend_options:
+      kubernetes:
+        resources: *small
+
+  - name: checks
+    image: *rust_image
+    environment:
+      CARGO_HOME: /woodpecker/cargo
+    commands:
+      - rustup target add wasm32-unknown-unknown
+      - rustup component add rustfmt clippy
+      - cargo fmt --check
+      - cargo clippy --all-targets -- -D warnings
+      - cargo test
+      - cargo build -p padel-scoring --target wasm32-unknown-unknown
+    backend_options:
+      kubernetes:
+        resources: *large
