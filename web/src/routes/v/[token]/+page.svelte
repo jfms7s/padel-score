@@ -115,6 +115,18 @@
 		};
 	});
 
+	let listEl = $state<HTMLElement | undefined>();
+	/** Slots someone can still claim: only these keep the compact bar on screen. */
+	const open = $derived(slots.filter((x) => x.state === 'claimable'));
+
+	function barAction() {
+		if (open.length === 1) claiming = open[0]!;
+		else {
+			listEl?.scrollIntoView({ block: 'center' });
+			listEl?.focus();
+		}
+	}
+
 	const claimable = $derived(slots.filter((x) => x.state !== 'linked' && x.state !== 'declined'));
 
 	const title = $derived(view ? matchLabel(view.teams) : strings.appName);
@@ -192,7 +204,7 @@
 </main>
 
 {#if claimable.length > 0}
-	<section class="claims" aria-label={strings.linking.thatsMe}>
+	<section class="claims" aria-label={strings.linking.thatsMe} bind:this={listEl} tabindex="-1">
 		<ul>
 			{#each claimable as slot (`${slot.team}${slot.position}`)}
 				<li>
@@ -210,6 +222,14 @@
 			{/each}
 		</ul>
 	</section>
+{/if}
+
+{#if open.length > 0}
+	<div class="bar">
+		<button type="button" onclick={barAction}
+			>{open.length === 1 ? strings.linking.thatsMeLabel(open[0]!.name) : strings.linking.barMany}</button
+		>
+	</div>
 {/if}
 
 {#if claiming}
@@ -242,17 +262,35 @@
 	.fence.board > :global(.board) {
 		flex: 1;
 	}
-	/* Stuck to the bottom of the viewport: the fence fills the screen, so a plain block after it
-	   would sit below the fold, out of sight. */
+	/* In flow below the board: the full list, never over the live score. */
 	.claims {
-		position: sticky;
-		bottom: 0;
-		max-height: 40dvh;
-		overflow-y: auto;
-		border-top: 1px solid var(--line);
-		padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+		padding: 8px 16px 24px;
 		background: var(--glass);
 		color: var(--ink);
+	}
+	.claims:focus {
+		outline: none;
+	}
+	/* One compact row stuck to the bottom while a slot is claimable. */
+	.bar {
+		position: sticky;
+		bottom: 0;
+		padding: 4px 16px calc(4px + env(safe-area-inset-bottom));
+		border-top: 1px solid var(--line);
+		background: var(--panel);
+	}
+	.bar button {
+		display: block;
+		width: 100%;
+		max-width: 28rem;
+		margin: 0 auto;
+		min-height: var(--tap);
+		border: 0;
+		border-radius: 12px;
+		background: var(--ink);
+		color: var(--glass);
+		font-size: 16px;
+		font-weight: 650;
 	}
 	.claims ul {
 		list-style: none;
