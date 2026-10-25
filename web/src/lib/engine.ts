@@ -1,8 +1,8 @@
 // The browser's copy of the scoring engine (crates/scoring-wasm), for scoring while offline.
 // The bindings are generated into ./wasm by scripts/build-wasm.sh.
 
-import init, { initSync, replay } from '#lib/wasm/padel_scoring_wasm.js';
-import type { Event, Format, MatchView, ReplayResult, Start } from './types';
+import init, { initSync, replay, validate_final } from '#lib/wasm/padel_scoring_wasm.js';
+import type { Event, Format, MatchView, ReplayResult, Start, TypedScore, ValidateFinalResult } from './types';
 
 let loading: Promise<void> | null = null;
 let ready = false;
@@ -35,6 +35,15 @@ export function engineReady(): boolean {
 export function replayLocal(format: Format, start: Start, events: Event[]): ReplayResult {
 	if (!ready) throw new Error('the scoring engine is not loaded; call initEngine first');
 	return JSON.parse(replay(JSON.stringify(format), JSON.stringify(start), JSON.stringify(events)));
+}
+
+/**
+ * Judge a typed final score with the engine, as the server will: the winner (null for a draw),
+ * or why it can't be the final score. Call `initEngine` first.
+ */
+export function validateFinal(format: Format, score: TypedScore): ValidateFinalResult {
+	if (!ready) throw new Error('the scoring engine is not loaded; call initEngine first');
+	return JSON.parse(validate_final(JSON.stringify(format), JSON.stringify(score)));
 }
 
 /** The engine's input for a view: its effective events, without the seqs. */

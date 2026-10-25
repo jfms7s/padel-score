@@ -118,7 +118,8 @@ export const strings = {
 		},
 		undoConflict: 'The score changed, so nothing was undone.',
 		nothingToUndo: 'Nothing to undo.',
-		failed: (message: string) => `Couldn't send that. ${message}`
+		failed: (message: string) => `Couldn't send that. ${message}`,
+		lockedDropped: (n: number) => `The coordinator entered the result. ${n} queued point(s) dropped.`
 	},
 
 	// Taps made offline, and the choice when the server moved meanwhile.
@@ -381,6 +382,15 @@ export const strings = {
 		noMatches: 'No finished matches with this player yet.',
 		archived: 'Archived. Their record is kept.',
 		backToPlayers: 'Players'
+	},
+
+	// Events: the coordinator's screens, the court phone and the event's viewing page.
+	events: {
+		versus: (a: string, b: string) => `${a} v ${b}`,
+		unknownTeam: 'Unknown team',
+		phoneConnected: (match: string) => `Phone connected, ${match}`,
+		noPhone: 'No phone yet',
+		waitingForMatch: 'Waiting for a match'
 	},
 
 	// Home, signed in.
