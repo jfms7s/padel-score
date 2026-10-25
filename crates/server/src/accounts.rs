@@ -680,14 +680,19 @@ struct ResetBody {
     password: String,
 }
 
-/// The password is checked and hashed before the code is used, so the transaction stays short;
-/// signs nobody in.
+/// The password policy comes first, then a read-only check of the code, so a bad code costs no
+/// argon2 hash. The password is hashed before the code is used, so the transaction stays short
+/// (and checks the code again). Signs nobody in.
 async fn reset_password(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
     ApiJson(body): ApiJson<ResetBody>,
 ) -> Result<StatusCode, ApiError> {
     limit_code_route(&state, ip)?;
+    check_password(&body.password)?;
+    if !state.store.reset_usable(&body.code, now()).await? {
+        return Err(ApiError::Gone("reset_invalid"));
+    }
     let hash = hash_password(&state.password_permits, &body.password).await?;
     match state.store.consume_reset(&body.code, &hash, now()).await {
         Ok(user_id) => {

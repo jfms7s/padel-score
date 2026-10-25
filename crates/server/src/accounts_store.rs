@@ -572,6 +572,15 @@ impl Store {
                     .execute(&mut *tx)
                     .await?;
                 revoke_credentials_in(&mut tx, id, at).await?;
+                // A disabled user's invites stay dead if they are enabled again.
+                sqlx::query(
+                    "UPDATE invites SET revoked_at = ? \
+                     WHERE created_by = ? AND used_at IS NULL AND revoked_at IS NULL",
+                )
+                .bind(at)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
             }
             None => {
                 sqlx::query("UPDATE users SET disabled_at = NULL WHERE id = ?")
@@ -844,6 +853,19 @@ impl Store {
         .await?;
         tx.commit().await?;
         Ok(raw)
+    }
+
+    /// Whether a reset code is unused and unexpired right now: a read-only pre-check, so a bad
+    /// code costs no password hash. [`Store::consume_reset`] checks again in its transaction.
+    pub async fn reset_usable(&self, raw: &str, now: i64) -> Result<bool, StoreError> {
+        let found: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM password_resets WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?",
+        )
+        .bind(hash_token(raw))
+        .bind(now)
+        .fetch_optional(self.pool())
+        .await?;
+        Ok(found.is_some())
     }
 
     /// Use a reset code: set the new password hash, delete every session and revoke every

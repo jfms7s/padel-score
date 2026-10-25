@@ -26,7 +26,7 @@ macro_rules! select_matches {
     ($rest:literal) => {
         concat!(
             "SELECT id, scorer_token, spectator_token, format, start, teams, revision, \
-             owner_user_id, last_activity_at FROM matches ",
+             owner_user_id, created_at, last_activity_at FROM matches ",
             $rest
         )
     };
@@ -124,6 +124,7 @@ pub struct StoredMatch {
     pub teams: Teams,
     pub revision: i64,
     pub owner_user_id: Option<String>,
+    pub created_at: i64,
     pub last_activity_at: i64,
 }
 
@@ -197,6 +198,7 @@ pub(crate) fn match_from_row(row: &SqliteRow) -> Result<StoredMatch, sqlx::Error
         teams: decode(row.try_get::<&str, _>("teams")?)?,
         revision: row.try_get("revision")?,
         owner_user_id: row.try_get("owner_user_id")?,
+        created_at: row.try_get("created_at")?,
         last_activity_at: row.try_get("last_activity_at")?,
     })
 }
@@ -410,6 +412,7 @@ impl Store {
             teams,
             revision: 0,
             owner_user_id: new.owner_user_id,
+            created_at: now,
             last_activity_at: now,
         };
         sqlx::query(

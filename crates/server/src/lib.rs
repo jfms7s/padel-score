@@ -7,6 +7,7 @@ pub mod commands;
 pub mod config;
 pub mod db;
 pub mod hub;
+pub mod owned;
 pub mod ratelimit;
 pub mod retention;
 pub mod store;
@@ -14,6 +15,7 @@ pub mod tokens;
 pub mod web;
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, MatchedPath, State};
@@ -44,7 +46,14 @@ pub struct AppState {
     /// The one-time setup code while the users table is empty and `SETUP_TOKEN` is unset; set by
     /// [`accounts::init_setup_code`] at startup and cleared by a successful setup.
     pub setup_code: Arc<Mutex<Option<String>>>,
+    /// How often a signed-in SSE stream re-checks its credential, ending once it no longer
+    /// holds (a revoked device, a deleted session, a disabled user). [`CREDENTIAL_RECHECK`] in
+    /// production; tests shorten it.
+    pub credential_recheck: Duration,
 }
+
+/// The default [`AppState::credential_recheck`].
+pub const CREDENTIAL_RECHECK: Duration = Duration::from_secs(30);
 
 impl AppState {
     pub fn new(config: Arc<Config>, store: Store) -> AppState {
@@ -56,6 +65,7 @@ impl AppState {
             password_permits: Arc::new(Semaphore::new(auth::HASH_PERMITS)),
             limits: Arc::new(ratelimit::Limits::new()),
             setup_code: Arc::new(Mutex::new(None)),
+            credential_recheck: CREDENTIAL_RECHECK,
         }
     }
 }
@@ -89,14 +99,17 @@ async fn api_not_found() -> impl IntoResponse {
 /// The request trace layer `main.rs` serves with: tower-http's HTTP defaults, except that each
 /// request's span names its matched route template (`/api/invites/{key}`), never the URI. Paths
 /// can carry secrets (invite codes, phase 2 scorer tokens) and a query string anything, so
-/// neither may reach a log. A request no route matched (the static web files) logs its path,
-/// without the query.
+/// neither may reach a log. A request no route matched (the static web files, and the PWA's
+/// pages such as `/s/{scorer_token}`) logs the fixed label [`STATIC_ROUTE`].
 ///
 /// Add it with [`Router::layer`] on the router from [`router`]: only there do requests already
 /// carry their [`MatchedPath`].
 pub fn trace_layer() -> TraceLayer<SharedClassifier<ServerErrorsAsFailures>, RouteSpan> {
     TraceLayer::new_for_http().make_span_with(RouteSpan)
 }
+
+/// The route [`trace_layer`] logs for a request no route matched.
+pub const STATIC_ROUTE: &str = "<static>";
 
 /// The [`MakeSpan`] of [`trace_layer`]: a `request` span at debug level with the method, the
 /// matched route and the HTTP version.
@@ -108,7 +121,7 @@ impl<B> MakeSpan<B> for RouteSpan {
         let route = request
             .extensions()
             .get::<MatchedPath>()
-            .map_or_else(|| request.uri().path(), MatchedPath::as_str);
+            .map_or(STATIC_ROUTE, MatchedPath::as_str);
         tracing::debug_span!(
             "request",
             method = %request.method(),

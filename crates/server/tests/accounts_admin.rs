@@ -18,7 +18,9 @@ use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Method, StatusCode};
 use padel_score_server::accounts_store::RESET_TTL_SECS;
 use padel_score_server::api::now;
+use padel_score_server::store::Teams;
 use padel_score_server::{AppState, router, trace_layer};
+use padel_scoring::{DecidingSet, DeuceRule, Format, Player, SetRules, SetsFormat, Start, Team};
 use serde_json::{Value, json};
 use support::*;
 
@@ -369,6 +371,81 @@ async fn reset_is_rate_limited() {
 }
 
 #[tokio::test]
+async fn disable_revokes_outstanding_invites() {
+    let (state, pool, app, _, admin) = with_admin().await;
+    let (bea_id, bea) = invited_user(&state, &app, &admin, "bea@x.test", "Bea").await;
+    let (_, code) = create_invite(&state, &app, &bea).await;
+    let (_, admins) = create_invite(&state, &app, &admin).await;
+    assert_eq!(
+        disable(&state, &app, &admin, &bea_id).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let revoked: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invites WHERE created_by = ? AND revoked_at IS NOT NULL",
+    )
+    .bind(&bea_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(revoked, 1);
+    // Enabling her again does not bring the invite back.
+    assert_eq!(
+        enable(&state, &app, &admin, &bea_id).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let res = accept(&app, &code, accept_body("cy@x.test", "Cy")).await;
+    assert_eq!(res.status, StatusCode::GONE, "{}", res.body);
+    // Other users' invites are untouched.
+    let res = accept(&app, &admins, accept_body("dee@x.test", "Dee")).await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
+}
+
+#[tokio::test]
+async fn reset_with_invalid_code_skips_the_hash() {
+    let (state, _, app, _, _) = with_admin().await;
+    // Hold every hash permit: a reset that hashed would wait for one.
+    let permits = state.password_permits.clone();
+    let _held = permits
+        .acquire_many_owned(padel_score_server::auth::HASH_PERMITS as u32)
+        .await
+        .unwrap();
+    let res = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        reset(&app, "not-a-reset-code", NEW_PASSWORD),
+    )
+    .await
+    .expect("an invalid code waited for a hash permit");
+    assert_eq!(res.status, StatusCode::GONE);
+    assert_eq!(res.body, json!({ "error": "reset_invalid" }));
+    // The policy still comes first.
+    let res = reset(&app, "not-a-reset-code", "short").await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn reset_with_used_code_skips_the_hash() {
+    let (state, _, app, _, admin) = with_admin().await;
+    let (bea_id, _) = invited_user(&state, &app, &admin, "bea@x.test", "Bea").await;
+    let code = reset_link(&state, &app, &admin, &bea_id).await;
+    assert_eq!(
+        reset(&app, &code, NEW_PASSWORD).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let permits = state.password_permits.clone();
+    let _held = permits
+        .acquire_many_owned(padel_score_server::auth::HASH_PERMITS as u32)
+        .await
+        .unwrap();
+    let res = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        reset(&app, &code, NEW_PASSWORD),
+    )
+    .await
+    .expect("a used code waited for a hash permit");
+    assert_eq!(res.status, StatusCode::GONE);
+}
+
+#[tokio::test]
 async fn device_token_cannot_use_admin_routes() {
     let (state, _, app, admin_id, _) = with_admin().await;
     let token = device_token(&state.store, &admin_id).await;
@@ -471,6 +548,43 @@ async fn codes_never_appear_in_logs() {
         StatusCode::GONE
     );
 
+    // The PWA's scorer page carries a scorer token in its path; no route matches it.
+    let m = state
+        .store
+        .create_match(
+            padel_score_server::store::NewMatch {
+                format: Format::Sets(SetRules {
+                    deuce: DeuceRule::Advantage,
+                    sets: SetsFormat::One,
+                    deciding: DecidingSet::FullSet,
+                }),
+                start: Start {
+                    first_server: Player {
+                        team: Team::A,
+                        index: 0,
+                    },
+                    other_first_server: 0,
+                },
+                teams: Teams {
+                    a: ["A".to_owned(), "B".to_owned()],
+                    b: ["C".to_owned(), "D".to_owned()],
+                },
+                owner_user_id: None,
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+    let page = format!("/s/{}", m.scorer_token);
+    let _ = tower::ServiceExt::oneshot(
+        app.clone(),
+        axum::http::Request::get(&page)
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
     let text = logs.text();
     assert!(!text.contains(&code), "invite code logged:\n{text}");
     // The capture works: the trace layer logged these requests, by route.
@@ -479,4 +593,9 @@ async fn codes_never_appear_in_logs() {
     assert!(!text.contains(&reset_code), "reset code logged:\n{text}");
     assert!(!text.contains(&admin), "session logged:\n{text}");
     assert!(!text.contains(NEW_PASSWORD) && !text.contains(PASSWORD));
+    assert!(
+        !text.contains(&m.scorer_token),
+        "scorer token logged:\n{text}"
+    );
+    assert!(text.contains("<static>"), "{text}");
 }

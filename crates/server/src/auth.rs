@@ -280,36 +280,88 @@ pub struct SessionUser(pub CurrentUser);
 #[derive(Debug, Clone)]
 pub struct AdminUser(pub CurrentUser);
 
+/// The raw secret a request authenticated with. A long-lived stream keeps it to re-check it
+/// ([`credential_holds`]); its `Debug` never shows the secret.
+#[derive(Clone, PartialEq, Eq)]
+pub enum Credential {
+    /// The `pdl_…` device token from `Authorization: Bearer`.
+    Device(String),
+    /// The session cookie's value.
+    Session(String),
+}
+
+impl std::fmt::Debug for Credential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Credential::Device(_) => f.write_str("Credential::Device(..)"),
+            Credential::Session(_) => f.write_str("Credential::Session(..)"),
+        }
+    }
+}
+
+/// The credential a request offers, in the order [`CurrentUser`] tries them: a `pdl_` bearer
+/// first (the only one tried when present), then the session cookie.
+pub fn credential(headers: &HeaderMap, config: &Config) -> Option<Credential> {
+    if let Some(raw) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(bearer_device_token)
+    {
+        return Some(Credential::Device(raw.to_owned()));
+    }
+    session_token(headers, config).map(|raw| Credential::Session(raw.to_owned()))
+}
+
+/// Whether `cred` still signs in `user_id` now: not revoked, expired or deleted, and the user
+/// not disabled.
+pub async fn credential_holds(
+    state: &AppState,
+    cred: &Credential,
+    user_id: &str,
+) -> Result<bool, ApiError> {
+    let now = now();
+    Ok(match cred {
+        Credential::Device(raw) => state
+            .store
+            .token_user(raw, now)
+            .await?
+            .is_some_and(|t| t.user.id == user_id),
+        Credential::Session(raw) => state
+            .store
+            .session_user(raw, now)
+            .await?
+            .is_some_and(|u| u.id == user_id),
+    })
+}
+
 /// The one credential check behind every extractor. A bad `pdl_` bearer is 401 even next to a
 /// good cookie: the bearer is the only credential tried when present.
 async fn authenticate(parts: &Parts, state: &AppState) -> Result<CurrentUser, ApiError> {
     let now = now();
-    if let Some(raw) = parts
-        .headers
-        .get(header::AUTHORIZATION)
-        .and_then(bearer_device_token)
-    {
-        let found = state.store.token_user(raw, now).await?;
-        return found
-            .map(|t| CurrentUser {
-                user: t.user,
-                via: AuthVia::Device {
-                    token_id: t.token_id,
-                },
+    match credential(&parts.headers, &state.config).ok_or(ApiError::Unauthorized)? {
+        Credential::Device(raw) => {
+            let found = state.store.token_user(&raw, now).await?;
+            found
+                .map(|t| CurrentUser {
+                    user: t.user,
+                    via: AuthVia::Device {
+                        token_id: t.token_id,
+                    },
+                })
+                .ok_or(ApiError::Unauthorized)
+        }
+        Credential::Session(raw) => {
+            check_csrf(&parts.method, &parts.uri, &parts.headers, &state.config)?;
+            let user = state
+                .store
+                .session_user(&raw, now)
+                .await?
+                .ok_or(ApiError::Unauthorized)?;
+            Ok(CurrentUser {
+                user,
+                via: AuthVia::Session,
             })
-            .ok_or(ApiError::Unauthorized);
+        }
     }
-    let raw = session_token(&parts.headers, &state.config).ok_or(ApiError::Unauthorized)?;
-    check_csrf(&parts.method, &parts.uri, &parts.headers, &state.config)?;
-    let user = state
-        .store
-        .session_user(raw, now)
-        .await?
-        .ok_or(ApiError::Unauthorized)?;
-    Ok(CurrentUser {
-        user,
-        via: AuthVia::Session,
-    })
 }
 
 impl FromRequestParts<AppState> for CurrentUser {
