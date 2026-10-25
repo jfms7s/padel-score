@@ -14,8 +14,15 @@
 //! request. A match the caller does not own is 404, as is an unknown one, so existence does not
 //! leak. The two streams also re-check their credential every [`AppState::credential_recheck`]
 //! (30 s) and end once it no longer holds; the client's reconnect then gets 401.
+//!
+//! A user may hold at most [`MAX_LIST_STREAMS`] list streams at once; another is 429
+//! `too_many_requests` with `Retry-After: 30`. Every change re-reads and replays the list once
+//! per stream, so the cap bounds that work. The list stream's re-reads run off the response body
+//! ([`api::detached_reread`]), so a client that stops reading cannot pin a pool connection.
 
+use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::Router;
 use axum::extract::State;
@@ -40,6 +47,62 @@ use crate::store::StoredMatch;
 
 /// The most matches the live list holds.
 pub const LIVE_LIMIT: usize = 20;
+
+/// The most list streams one user may hold open at once.
+pub const MAX_LIST_STREAMS: usize = 5;
+
+/// The `Retry-After` of a list stream refused by [`MAX_LIST_STREAMS`], in seconds.
+pub const LIST_STREAM_RETRY_SECS: u64 = 30;
+
+/// The open list streams per user, for [`MAX_LIST_STREAMS`]. The lock guards map operations
+/// only, never an await.
+#[derive(Debug, Default)]
+pub struct ListStreams {
+    open: Mutex<HashMap<String, usize>>,
+}
+
+impl ListStreams {
+    pub fn new() -> ListStreams {
+        ListStreams::default()
+    }
+
+    /// Take one of the user's slots, or `None` when they hold [`MAX_LIST_STREAMS`] already.
+    /// The slot is given back when the returned guard drops.
+    fn try_open(self: &Arc<Self>, user_id: &str) -> Option<ListStreamSlot> {
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        let count = open.entry(user_id.to_owned()).or_insert(0);
+        if *count >= MAX_LIST_STREAMS {
+            return None;
+        }
+        *count += 1;
+        Some(ListStreamSlot {
+            streams: Arc::clone(self),
+            user_id: user_id.to_owned(),
+        })
+    }
+}
+
+/// One open list stream's slot; dropping it frees the slot.
+struct ListStreamSlot {
+    streams: Arc<ListStreams>,
+    user_id: String,
+}
+
+impl Drop for ListStreamSlot {
+    fn drop(&mut self) {
+        let mut open = self
+            .streams
+            .open
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = open.get_mut(&self.user_id) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                open.remove(&self.user_id);
+            }
+        }
+    }
+}
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -200,7 +263,10 @@ async fn watch_credential(
                 tracing::debug!(user_id = %user_id, "credential lapsed, ending stream");
                 break;
             }
-            Err(_) => break,
+            Err(e) => {
+                tracing::warn!(user_id = %user_id, error = ?e, "credential re-check failed, ending stream");
+                break;
+            }
         }
     }
     done.cancel();
@@ -211,6 +277,12 @@ async fn list_stream(
     user: CurrentUser,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
+    let slot = state
+        .list_streams
+        .try_open(&user.user.id)
+        .ok_or(ApiError::TooMany {
+            retry_after: LIST_STREAM_RETRY_SECS,
+        })?;
     let lapsed = lapsed(&state, &headers, &user)?;
     // Subscribe before the first read so no change can fall between the two.
     let subscription = state.hub.subscribe_user(&user.user.id);
@@ -221,6 +293,7 @@ async fn list_stream(
         state,
         user,
         pending: Some(first),
+        _slot: slot,
     };
     let events = futures_util::stream::unfold(watch, next_list)
         .take_until(api::until_either(shutdown, lapsed));
@@ -234,6 +307,8 @@ struct ListWatch {
     user: CurrentUser,
     /// A list to send before waiting on the channel (the first one).
     pending: Option<Vec<OwnedMatch>>,
+    /// Held for as long as the stream lives.
+    _slot: ListStreamSlot,
 }
 
 impl ListWatch {
@@ -252,7 +327,8 @@ impl ListWatch {
             Err(TryRecvError::Empty | TryRecvError::Closed)
         ) {}
         // A failed read (already logged) ends the stream; the client reconnects.
-        live_list(&self.state, &self.user).await.ok()
+        let (state, user) = (self.state.clone(), self.user.clone());
+        api::detached_reread("list stream", async move { live_list(&state, &user).await }).await
     }
 }
 

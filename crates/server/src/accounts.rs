@@ -104,7 +104,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// `Referrer-Policy: no-referrer` and `Cache-Control: no-store` on every response.
-async fn secret_headers(mut res: Response) -> Response {
+pub(crate) async fn secret_headers(mut res: Response) -> Response {
     let headers = res.headers_mut();
     headers.insert(
         header::REFERRER_POLICY,

@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
@@ -221,5 +222,80 @@ pub async fn device_token(s: &Store, user_id: &str) -> String {
     match s.poll_device(&started.device_code, now()).await.unwrap() {
         PollOutcome::Issued { raw_token } => raw_token,
         _ => panic!("expected a token"),
+    }
+}
+
+/// How long [`Sse`] waits for a frame.
+pub const SSE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// An open SSE response body, read one named event at a time.
+pub struct Sse {
+    pub body: Body,
+    pub buf: String,
+}
+
+impl Sse {
+    pub async fn open(app: &Router, request: Request<Body>) -> Sse {
+        let res = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(
+            res.headers()[header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .starts_with("text/event-stream")
+        );
+        Sse {
+            body: res.into_body(),
+            buf: String::new(),
+        }
+    }
+
+    /// The next chunk, or `None` once the body has ended.
+    pub async fn chunk(&mut self) -> Option<String> {
+        loop {
+            let frame = tokio::time::timeout(SSE_TIMEOUT, self.body.frame())
+                .await
+                .expect("timed out waiting for a frame")?
+                .unwrap();
+            if let Ok(data) = frame.into_data() {
+                return Some(String::from_utf8(data.to_vec()).unwrap());
+            }
+        }
+    }
+
+    /// The next `name` event's data, skipping keep-alives and other events.
+    pub async fn next(&mut self, name: &str) -> Value {
+        loop {
+            if let Some(end) = self.buf.find("\n\n") {
+                let event: String = self.buf.drain(..end + 2).collect();
+                let mut event_name = None;
+                let mut data = String::new();
+                for line in event.lines() {
+                    if let Some(v) = line.strip_prefix("event:") {
+                        event_name = Some(v.trim().to_owned());
+                    } else if let Some(v) = line.strip_prefix("data:") {
+                        data.push_str(v.trim_start());
+                    }
+                }
+                if event_name.as_deref() == Some(name) {
+                    return serde_json::from_str(&data).unwrap();
+                }
+                continue;
+            }
+            let chunk = self.chunk().await.expect("stream ended");
+            self.buf.push_str(&chunk);
+        }
+    }
+
+    /// Whether the body ends within `within`, skipping anything sent before.
+    pub async fn ends_within(&mut self, within: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            match tokio::time::timeout_at(deadline, self.body.frame()).await {
+                Err(_) => return false,
+                Ok(None) => return true,
+                Ok(Some(_)) => {}
+            }
+        }
     }
 }

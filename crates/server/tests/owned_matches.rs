@@ -121,78 +121,6 @@ async fn user_and_device(state: &AppState, app: &Router, admin: &str) -> (String
     (id, raw, token)
 }
 
-/// An open SSE response body, read one named event at a time.
-struct Sse {
-    body: Body,
-    buf: String,
-}
-
-impl Sse {
-    async fn open(app: &Router, request: Request<Body>) -> Sse {
-        let res = app.clone().oneshot(request).await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        assert!(
-            res.headers()[header::CONTENT_TYPE]
-                .to_str()
-                .unwrap()
-                .starts_with("text/event-stream")
-        );
-        Sse {
-            body: res.into_body(),
-            buf: String::new(),
-        }
-    }
-
-    /// The next chunk, or `None` once the body has ended.
-    async fn chunk(&mut self) -> Option<String> {
-        loop {
-            let frame = tokio::time::timeout(TIMEOUT, self.body.frame())
-                .await
-                .expect("timed out waiting for a frame")?
-                .unwrap();
-            if let Ok(data) = frame.into_data() {
-                return Some(String::from_utf8(data.to_vec()).unwrap());
-            }
-        }
-    }
-
-    /// The next `name` event's data, skipping keep-alives and other events.
-    async fn next(&mut self, name: &str) -> Value {
-        loop {
-            if let Some(end) = self.buf.find("\n\n") {
-                let event: String = self.buf.drain(..end + 2).collect();
-                let mut event_name = None;
-                let mut data = String::new();
-                for line in event.lines() {
-                    if let Some(v) = line.strip_prefix("event:") {
-                        event_name = Some(v.trim().to_owned());
-                    } else if let Some(v) = line.strip_prefix("data:") {
-                        data.push_str(v.trim_start());
-                    }
-                }
-                if event_name.as_deref() == Some(name) {
-                    return serde_json::from_str(&data).unwrap();
-                }
-                continue;
-            }
-            let chunk = self.chunk().await.expect("stream ended");
-            self.buf.push_str(&chunk);
-        }
-    }
-
-    /// Whether the body ends within `within`, skipping anything sent before.
-    async fn ends_within(&mut self, within: Duration) -> bool {
-        let deadline = tokio::time::Instant::now() + within;
-        loop {
-            match tokio::time::timeout_at(deadline, self.body.frame()).await {
-                Err(_) => return false,
-                Ok(None) => return true,
-                Ok(Some(_)) => {}
-            }
-        }
-    }
-}
-
 // Ownership on create.
 
 #[tokio::test]
@@ -701,4 +629,93 @@ async fn hub_drops_user_entry_when_list_stream_goes() {
     assert!(state.hub.is_user_watched(&admin_id));
     drop(stream);
     assert!(!state.hub.is_user_watched(&admin_id));
+}
+
+// Stream hardening.
+
+/// The pool's only connection is held while the list re-read starts, so the re-read parks
+/// waiting for it; then the reader stalls (its body is never polled again). Once the hold is
+/// dropped, the stalled stream must not end up pinning the connection.
+#[tokio::test]
+async fn stalled_reread_does_not_hold_pool_connection() {
+    let (state, pool, app, admin_id, admin) = with_admin().await;
+    create_as(&state, &app, &admin, default_body()).await;
+    let mut stream = Sse::open(
+        &app,
+        as_session(&state, &admin, Method::GET, "/api/me/matches/stream", None),
+    )
+    .await;
+    assert_eq!(ids(&stream.next("matches").await).len(), 1);
+
+    let held = pool.acquire().await.unwrap();
+    state.hub.notify_user(&admin_id);
+    // One poll starts the re-read, which waits for the held connection.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), stream.body.frame())
+            .await
+            .is_err()
+    );
+    drop(held);
+    // The stream is never polled again, yet the pool is free for everyone else.
+    let free = tokio::time::timeout(TIMEOUT, pool.acquire()).await;
+    assert!(free.is_ok(), "a stalled list stream pinned the pool");
+    drop(free);
+    drop(stream);
+}
+
+/// The same for the phase 2 per-match stream's re-read after it lags.
+#[tokio::test]
+async fn stalled_lag_reread_does_not_hold_pool_connection() {
+    let (_, pool, app, _, _) = with_admin().await;
+    let m = create_anon(&app).await;
+    let path = format!("/api/view/{}/stream", m.spectator);
+    let mut stream = Sse::open(&app, req(Method::GET, &path, None, &[])).await;
+    assert_eq!(stream.next("state").await["revision"], json!(0));
+    // More publishes than the channel holds, unread: the stream lags.
+    for i in 0..20 {
+        let res = score_by_token(&app, &m.scorer, point(&format!("p{i}"), "a", 1)).await;
+        assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    }
+    let held = pool.acquire().await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), stream.body.frame())
+            .await
+            .is_err()
+    );
+    drop(held);
+    let free = tokio::time::timeout(TIMEOUT, pool.acquire()).await;
+    assert!(free.is_ok(), "a stalled match stream pinned the pool");
+    drop(free);
+    drop(stream);
+}
+
+#[tokio::test]
+async fn sixth_list_stream_is_refused() {
+    let (state, _, app, _, admin) = with_admin().await;
+    let (_, bea, _) = user_and_device(&state, &app, &admin).await;
+    let open = || as_session(&state, &admin, Method::GET, "/api/me/matches/stream", None);
+    let mut streams = Vec::new();
+    for _ in 0..5 {
+        let mut s = Sse::open(&app, open()).await;
+        s.next("matches").await;
+        streams.push(s);
+    }
+    // A 6th would stream forever, hence the timeout.
+    let res = tokio::time::timeout(TIMEOUT, send(&app, open()))
+        .await
+        .expect("a 6th list stream was opened");
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(res.body["error"], json!("too_many_requests"));
+    assert_eq!(res.header(header::RETRY_AFTER), Some("30"));
+    // Another user has their own allowance.
+    let mut other = Sse::open(
+        &app,
+        as_session(&state, &bea, Method::GET, "/api/me/matches/stream", None),
+    )
+    .await;
+    other.next("matches").await;
+    // A closed stream frees its slot.
+    streams.pop();
+    let mut again = Sse::open(&app, open()).await;
+    again.next("matches").await;
 }

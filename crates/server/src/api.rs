@@ -46,6 +46,9 @@ pub const MAX_BODY_BYTES: usize = 64 * 1024;
 /// How often an idle SSE stream sends a keep-alive comment.
 pub const KEEP_ALIVE: Duration = Duration::from_secs(10);
 
+/// The longest a stream's store re-read may take before the stream ends instead.
+pub const REREAD_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// The current time in unix seconds: the one clock read for the whole API.
 pub fn now() -> i64 {
     SystemTime::now()
@@ -64,6 +67,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/view/{token}/stream", get(view_stream))
         .merge(crate::accounts::routes())
         .merge(crate::owned::routes())
+        .merge(crate::device::routes())
 }
 
 #[derive(Debug)]
@@ -461,6 +465,32 @@ pub(crate) async fn until_either(
     }
 }
 
+/// A stream's store re-read, run on its own task and bounded by [`REREAD_TIMEOUT`]; `None`
+/// ends the stream (a failed read, already logged, or one that timed out, logged here).
+///
+/// Its own task because hyper stops polling the body of a client that is not reading: a read
+/// paused inside the body would keep its pool connection (or its place in the pool's queue) for
+/// as long as the client stalls. On a task the read finishes, or times out, and lets go of the
+/// connection whatever the body does.
+pub(crate) async fn detached_reread<T, F>(stream: &'static str, read: F) -> Option<T>
+where
+    T: Send + 'static,
+    F: Future<Output = Result<T, ApiError>> + Send + 'static,
+{
+    let task = tokio::spawn(tokio::time::timeout(REREAD_TIMEOUT, read));
+    match task.await {
+        Ok(Ok(result)) => result.ok(),
+        Ok(Err(_)) => {
+            tracing::warn!(stream, timeout = ?REREAD_TIMEOUT, "stream re-read timed out, ending stream");
+            None
+        }
+        Err(e) => {
+            tracing::warn!(stream, error = %e, "stream re-read task failed, ending stream");
+            None
+        }
+    }
+}
+
 /// One SSE stream's state.
 struct Watch {
     subscription: Subscription,
@@ -483,10 +513,12 @@ impl Watch {
                 Err(RecvError::Lagged(skipped)) => {
                     tracing::debug!(match_id = %self.match_id, skipped, "stream lagged, re-reading");
                     // A purged match or a failed read ends the stream; the client reconnects.
-                    return current_view(&self.store, &self.match_id)
-                        .await
-                        .ok()
-                        .map(Arc::new);
+                    let (store, match_id) = (self.store.clone(), self.match_id.clone());
+                    return detached_reread("match stream", async move {
+                        current_view(&store, &match_id).await
+                    })
+                    .await
+                    .map(Arc::new);
                 }
                 Err(RecvError::Closed) => return None,
             }

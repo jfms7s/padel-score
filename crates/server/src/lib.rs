@@ -6,6 +6,7 @@ pub mod client_ip;
 pub mod commands;
 pub mod config;
 pub mod db;
+pub mod device;
 pub mod hub;
 pub mod owned;
 pub mod ratelimit;
@@ -50,6 +51,8 @@ pub struct AppState {
     /// holds (a revoked device, a deleted session, a disabled user). [`CREDENTIAL_RECHECK`] in
     /// production; tests shorten it.
     pub credential_recheck: Duration,
+    /// The open list streams per user, capped at [`owned::MAX_LIST_STREAMS`].
+    pub list_streams: Arc<owned::ListStreams>,
 }
 
 /// The default [`AppState::credential_recheck`].
@@ -66,6 +69,7 @@ impl AppState {
             limits: Arc::new(ratelimit::Limits::new()),
             setup_code: Arc::new(Mutex::new(None)),
             credential_recheck: CREDENTIAL_RECHECK,
+            list_streams: Arc::new(owned::ListStreams::new()),
         }
     }
 }
