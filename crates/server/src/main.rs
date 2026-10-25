@@ -1,0 +1,104 @@
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use padel_score_server::{AppState, Config, Store, db, router};
+use tower_http::compression::CompressionLayer;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::EnvFilter;
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+#[tokio::main]
+async fn main() -> Result<(), BoxError> {
+    let config = Config::from_env();
+    if let Ok(raw) = std::env::var("PORT")
+        && !raw.trim().is_empty()
+        && raw.trim().parse::<u16>().is_err()
+    {
+        eprintln!(
+            "warning: PORT {raw:?} is not a valid port, using {}",
+            config.port
+        );
+    }
+    // `padel-score healthcheck` is the container HEALTHCHECK (the image has no curl or wget).
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        return match tokio::time::timeout(Duration::from_secs(3), healthcheck(config.port)).await {
+            Ok(result) => result,
+            Err(_) => Err("healthcheck timed out after 3s".into()),
+        };
+    }
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_new(&config.log_level).unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
+
+    let port = config.port;
+    if let Some(dir) = config
+        .database_url
+        .strip_prefix("sqlite://")
+        .and_then(|rest| std::path::Path::new(rest.split('?').next().unwrap_or(rest)).parent())
+        && !dir.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(dir)?;
+    }
+    let store = Store::new(db::connect(&config.database_url).await?);
+    let state = AppState::new(Arc::new(config), store);
+    let streams = state.shutdown.clone();
+    tokio::spawn(padel_score_server::retention::run(state.clone()));
+    let app = router(state)
+        .layer(CompressionLayer::new())
+        .layer(TraceLayer::new_for_http());
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    tracing::info!(%addr, "listening");
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown().await;
+            // End the SSE streams too, or they would hold graceful shutdown open.
+            streams.cancel();
+        })
+        .await?;
+    Ok(())
+}
+
+async fn shutdown() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::error!(error = %e, "cannot install ctrl-c handler");
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(unix)]
+    let term = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "cannot install SIGTERM handler");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! { _ = ctrl_c => {}, _ = term => {} }
+}
+
+async fn healthcheck(port: u16) -> Result<(), BoxError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await?;
+    stream
+        .write_all(b"GET /api/health HTTP/1.0\r\nHost: localhost\r\n\r\n")
+        .await?;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).await?;
+    let head = String::from_utf8_lossy(&buf);
+    if head.starts_with("HTTP/1.0 200") || head.starts_with("HTTP/1.1 200") {
+        Ok(())
+    } else {
+        Err(format!("unhealthy: {}", head.lines().next().unwrap_or("")).into())
+    }
+}

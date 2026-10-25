@@ -1,0 +1,75 @@
+{
+  "id": "03b79bcc-0714-4f6f-88ee-89ee4de7f552",
+  "format": {
+    "sets": {
+      "deuce": "golden_point",
+      "sets": "best_of_3",
+      "deciding": "super_tie_break"
+    }
+  },
+  "start": {
+    "first_server": {
+      "team": "a",
+      "index": 0
+    },
+    "other_first_server": 0
+  },
+  "teams": {
+    "a": [
+      "Ana",
+      "Rui"
+    ],
+    "b": [
+      "João",
+      "Marta"
+    ]
+  },
+  "revision": 2,
+  "head_seq": 2,
+  "events": [
+    {
+      "seq": 1,
+      "event": {
+        "point": "a"
+      }
+    }
+  ],
+  "score": {
+    "sets": [
+      {
+        "a": 0,
+        "b": 0,
+        "tiebreak": null
+      }
+    ],
+    "sets_won": [
+      0,
+      0
+    ],
+    "games": [
+      0,
+      0
+    ],
+    "regulation_games": [
+      0,
+      0
+    ],
+    "current": {
+      "game": {
+        "a": "fifteen",
+        "b": "love",
+        "deuces": 0,
+        "deciding_point": false
+      }
+    },
+    "server": {
+      "team": "a",
+      "index": 0
+    },
+    "side": "left",
+    "change_ends": false,
+    "overtime": false,
+    "time_up": false,
+    "status": "in_progress"
+  }
+}

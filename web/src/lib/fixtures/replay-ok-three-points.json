@@ -1,0 +1,40 @@
+{
+  "ok": {
+    "change_ends": false,
+    "current": {
+      "game": {
+        "a": "forty",
+        "b": "love",
+        "deciding_point": false,
+        "deuces": 0
+      }
+    },
+    "games": [
+      0,
+      0
+    ],
+    "overtime": false,
+    "regulation_games": [
+      0,
+      0
+    ],
+    "server": {
+      "index": 0,
+      "team": "a"
+    },
+    "sets": [
+      {
+        "a": 0,
+        "b": 0,
+        "tiebreak": null
+      }
+    ],
+    "sets_won": [
+      0,
+      0
+    ],
+    "side": "left",
+    "status": "in_progress",
+    "time_up": false
+  }
+}

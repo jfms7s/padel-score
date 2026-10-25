@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/scoring"]
+members = ["crates/scoring", "crates/scoring-wasm", "crates/server"]
 
 [workspace.package]
 edition = "2024"
@@ -11,3 +11,7 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 indexing_slicing = "deny"
+
+# Smaller wasm for the browser; scoped so other crates are unaffected.
+[profile.release.package.padel-scoring-wasm]
+opt-level = "z"

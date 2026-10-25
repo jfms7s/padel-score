@@ -1,0 +1,6 @@
+{
+  "err": {
+    "kind": "bad_json",
+    "message": "format: missing field `deuce` at line 1 column 10"
+  }
+}

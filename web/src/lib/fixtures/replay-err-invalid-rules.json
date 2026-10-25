@@ -1,0 +1,8 @@
+{
+  "err": {
+    "index": 0,
+    "kind": {
+      "invalid_rules": "super_tie_break_needs_multiple_sets"
+    }
+  }
+}
