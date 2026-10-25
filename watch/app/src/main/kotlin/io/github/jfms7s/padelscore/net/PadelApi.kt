@@ -18,6 +18,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 
+/** Stands in for a token in toString, so a logged or crash-reported value never carries it. */
+internal const val REDACTED = "██"
+
 sealed interface ApiResult<out T> {
     data class Ok<T>(val value: T) : ApiResult<T>
     data object Unauthorized : ApiResult<Nothing>
@@ -26,7 +29,9 @@ sealed interface ApiResult<out T> {
 }
 
 sealed interface TokenPoll {
-    data class Granted(val token: String) : TokenPoll
+    data class Granted(val token: String) : TokenPoll {
+        override fun toString() = "Granted(token=$REDACTED)"
+    }
     data object Pending : TokenPoll
     data object SlowDown : TokenPoll
     data object Expired : TokenPoll
@@ -100,7 +105,7 @@ class HttpPadelApi(
     }
 
     override suspend fun myMatches(): ApiResult<List<MyMatch>> {
-        val bearer = token() ?: return ApiResult.Unauthorized
+        val bearer = bearer() ?: return ApiResult.Unauthorized
         val request = Request.Builder()
             .url(url("api", "me", "matches"))
             .header("Authorization", "Bearer $bearer")
@@ -117,7 +122,7 @@ class HttpPadelApi(
     }
 
     override suspend fun send(matchId: String, request: CommandRequest): SendResult {
-        val bearer = token() ?: return SendResult.Unauthorized
+        val bearer = bearer() ?: return SendResult.Unauthorized
         val http = Request.Builder()
             .url(url("api", "me", "matches", matchId, "commands"))
             .header("Authorization", "Bearer $bearer")
@@ -144,10 +149,15 @@ class HttpPadelApi(
     override suspend fun matchStreamRequest(matchId: String): Request =
         streamRequest(url("api", "me", "matches", matchId, "stream"))
 
-    private suspend fun streamRequest(url: HttpUrl): Request =
-        Request.Builder().url(url).header("Accept", "text/event-stream").apply {
-            token()?.let { header("Authorization", "Bearer $it") }
+    private suspend fun streamRequest(url: HttpUrl): Request {
+        val bearer = bearer()
+        return Request.Builder().url(url).header("Accept", "text/event-stream").apply {
+            bearer?.let { header("Authorization", "Bearer $it") }
         }.build()
+    }
+
+    // The lookup may hit the KeyStore and decrypt, so it never runs on the caller's (often the main) thread.
+    private suspend fun bearer(): String? = withContext(Dispatchers.IO) { token() }
 
     private fun jsonBody(body: JsonObject) = body.toString().toRequestBody(JSON_MEDIA)
 

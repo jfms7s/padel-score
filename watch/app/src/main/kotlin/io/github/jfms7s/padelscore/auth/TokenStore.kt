@@ -16,6 +16,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 interface TokenStore {
     /** Never throws (other than cancellation): an unreadable token is cleared and reported as null. */
@@ -86,7 +88,17 @@ class DataStoreTokenStore(
     private val dataStore: DataStore<Preferences>,
     private val cipher: TokenCipher,
 ) : TokenStore {
-    override suspend fun read(): String? =
+    // Every API call and stream reconnect reads the token, so after the first read it comes from memory
+    // instead of a KeyStore load and a GCM decrypt. Only the ciphertext ever reaches disk.
+    @Volatile private var cached: String? = null
+    private val lock = Mutex()
+
+    override suspend fun read(): String? {
+        cached?.let { return it }
+        return lock.withLock { cached ?: load().also { cached = it } }
+    }
+
+    private suspend fun load(): String? =
         try {
             val encoded = dataStore.data.map { it[KEY] }.first()
             encoded?.let { String(cipher.decrypt(Base64.getDecoder().decode(it)), Charsets.UTF_8) }
@@ -101,7 +113,7 @@ class DataStoreTokenStore(
     /** Best effort: read() must stay total even when the file itself is unusable. */
     private suspend fun discard() {
         try {
-            clear()
+            remove()
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -109,11 +121,22 @@ class DataStoreTokenStore(
     }
 
     override suspend fun write(token: String) {
-        val blob = Base64.getEncoder().encodeToString(cipher.encrypt(token.toByteArray(Charsets.UTF_8)))
-        dataStore.edit { it[KEY] = blob }
+        lock.withLock {
+            cached = null
+            val blob = Base64.getEncoder().encodeToString(cipher.encrypt(token.toByteArray(Charsets.UTF_8)))
+            dataStore.edit { it[KEY] = blob }
+            cached = token
+        }
     }
 
     override suspend fun clear() {
+        lock.withLock {
+            cached = null
+            remove()
+        }
+    }
+
+    private suspend fun remove() {
         dataStore.edit { it.remove(KEY) }
     }
 

@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -120,5 +121,11 @@ class WireTest {
             fail("expected SerializationException")
         } catch (_: SerializationException) {
         }
+    }
+
+    @Test fun device_token_to_string_hides_the_token() {
+        val token = WireJson.decodeFromString(DeviceToken.serializer(), resource("fixtures/device-token-200.json"))
+        assertFalse(token.toString().contains(token.accessToken))
+        assertEquals("DeviceToken(accessToken=██)", token.toString())
     }
 }
