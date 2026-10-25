@@ -1,16 +1,16 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { createMatch } from '#lib/api.ts';
+	import { safeStorage } from '#lib/storage.ts';
 	import { strings } from '#lib/strings.ts';
 	import {
 		DECIDING_SETS,
 		DEUCE_RULES,
 		SETS_FORMATS,
-		addRecent,
+		afterCreate,
+		MAX_NAME_LENGTH,
 		defaultSetup,
 		loadLastSetup,
-		matchLabel,
-		saveLastSetup,
 		serveChoices,
 		setSets,
 		toCreateRequest
@@ -20,11 +20,12 @@
 
 	let setup = $state(defaultSetup());
 	$effect(() => {
-		setup = loadLastSetup(localStorage);
+		setup = loadLastSetup(safeStorage());
 	});
 
 	let busy = $state(false);
 	let failure = $state<string | null>(null);
+	let stranded = $state<string | null>(null);
 
 	const oneSet = $derived(setup.sets === 'one');
 	const choices = $derived(serveChoices(setup));
@@ -40,21 +41,26 @@
 		if (busy) return;
 		busy = true;
 		failure = null;
+		let created;
+		const req = toCreateRequest(setup);
 		try {
-			const req = toCreateRequest(setup);
-			const created = await createMatch(req);
-			saveLastSetup(localStorage, setup);
-			addRecent(localStorage, {
-				scorer_token: created.scorer_token,
-				label: matchLabel(req.teams),
-				created_at: Date.now()
-			});
-			await goto(`/s/${encodeURIComponent(created.scorer_token)}`);
+			created = await createMatch(req);
 		} catch (e) {
-			failure = e instanceof Error && e.message ? e.message : t.failed;
-		} finally {
+			failure = e instanceof Error ? e.message : '';
 			busy = false;
+			return;
 		}
+		// The match exists now: nothing below may report a failure or invite a second create.
+		const done = await afterCreate({
+			storage: safeStorage(),
+			setup,
+			scorerToken: created.scorer_token,
+			teams: req.teams,
+			now: Date.now(),
+			go: (path) => goto(path)
+		});
+		if (!done.navigated) stranded = done.path;
+		busy = false;
 	}
 </script>
 
@@ -106,12 +112,12 @@
 			<span class="label" id="l-teams">{t.teams}</span>
 			<div class="teams">
 				<div class="team-in a">
-					<input bind:value={setup.teams.a[0]} placeholder={t.player(1)} aria-label={t.teamPlayer('A', 1)} autocomplete="off" />
-					<input bind:value={setup.teams.a[1]} placeholder={t.player(2)} aria-label={t.teamPlayer('A', 2)} autocomplete="off" />
+					<input bind:value={setup.teams.a[0]} placeholder={t.player(1)} aria-label={t.teamPlayer('A', 1)} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
+					<input bind:value={setup.teams.a[1]} placeholder={t.player(2)} aria-label={t.teamPlayer('A', 2)} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
 				</div>
 				<div class="team-in b">
-					<input bind:value={setup.teams.b[0]} placeholder={t.player(3)} aria-label={t.teamPlayer('B', 1)} autocomplete="off" />
-					<input bind:value={setup.teams.b[1]} placeholder={t.player(4)} aria-label={t.teamPlayer('B', 2)} autocomplete="off" />
+					<input bind:value={setup.teams.b[0]} placeholder={t.player(3)} aria-label={t.teamPlayer('B', 1)} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
+					<input bind:value={setup.teams.b[1]} placeholder={t.player(4)} aria-label={t.teamPlayer('B', 2)} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
 				</div>
 			</div>
 		</div>
@@ -143,9 +149,13 @@
 			</div>
 		</div>
 
+		{#if stranded}
+			<p class="ok" role="status">{t.created} <a href={stranded}>{t.openMatch}</a></p>
+		{/if}
+
 		{#if failure}
 			<div class="error" role="alert">
-				<p>{t.failed} {failure}</p>
+				<p>{failure ? `${t.failed} ${failure}` : t.failed}</p>
 				<button type="submit" class="retry" disabled={busy}>{t.tryAgain}</button>
 			</div>
 		{/if}
@@ -264,6 +274,10 @@
 	}
 	.error p {
 		margin: 0 0 8px;
+	}
+	.ok a {
+		color: var(--ink);
+		font-weight: 650;
 	}
 	.retry {
 		border: 1px solid var(--warn);

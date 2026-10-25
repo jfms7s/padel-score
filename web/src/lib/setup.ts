@@ -130,11 +130,15 @@ export function saveLastSetup(storage: StorageLike, setup: Setup): void {
 	}
 }
 
+const MAX_TIME = 8.64e15; // the largest time a Date can hold
+
 const isRecent = (v: unknown): v is RecentMatch =>
 	isObject(v) &&
 	typeof v.scorer_token === 'string' &&
 	typeof v.label === 'string' &&
-	typeof v.created_at === 'number';
+	typeof v.created_at === 'number' &&
+	Number.isFinite(v.created_at) &&
+	Math.abs(v.created_at) <= MAX_TIME;
 
 /** Recent matches, newest first. */
 export function listRecent(storage: StorageLike): RecentMatch[] {
@@ -153,5 +157,43 @@ export function addRecent(storage: StorageLike, entry: RecentMatch): void {
 		storage.setItem(RECENT_KEY, JSON.stringify([entry, ...rest].slice(0, MAX_RECENT)));
 	} catch {
 		// As above.
+	}
+}
+
+export const MAX_NAME_LENGTH = 40;
+
+export function scorerPath(token: string): string {
+	return `/s/${encodeURIComponent(token)}`;
+}
+
+/**
+ * What happens once the server has created the match: remember it, then go to it. The match
+ * exists whatever happens here, so nothing in this step may fail the creation; if navigation
+ * itself fails the caller gets the path to offer as a link.
+ */
+export async function afterCreate(opts: {
+	storage: StorageLike;
+	setup: Setup;
+	scorerToken: string;
+	teams: Teams;
+	now: number;
+	go: (path: string) => Promise<unknown>;
+}): Promise<{ navigated: boolean; path: string }> {
+	const path = scorerPath(opts.scorerToken);
+	try {
+		saveLastSetup(opts.storage, opts.setup);
+		addRecent(opts.storage, {
+			scorer_token: opts.scorerToken,
+			label: matchLabel(opts.teams),
+			created_at: opts.now
+		});
+	} catch {
+		// Remembering is a convenience.
+	}
+	try {
+		await opts.go(path);
+		return { navigated: true, path };
+	} catch {
+		return { navigated: false, path };
 	}
 }

@@ -6,7 +6,11 @@ import {
 	defaultSetup,
 	listRecent,
 	loadLastSetup,
+	afterCreate,
 	matchLabel,
+	DEUCE_RULES,
+	SETS_FORMATS,
+	DECIDING_SETS,
 	saveLastSetup,
 	serveChoices,
 	setSets,
@@ -14,6 +18,7 @@ import {
 	type Setup,
 	type StorageLike
 } from './setup';
+import { safeStorage } from './storage';
 
 function fakeStorage(initial: Record<string, string> = {}): StorageLike & { data: Record<string, string> } {
 	const data = { ...initial };
@@ -105,7 +110,7 @@ describe('setup', () => {
 		});
 	});
 
-	it('serve choices fall back to Player 1/2 placeholders and follow the first server', () => {
+	it('serve choices fall back to Player 1 to 4 placeholders and follow the first server', () => {
 		const blank = defaultSetup();
 		expect(serveChoices(blank).first.map((c) => c.label)).toEqual([
 			'Player 1',
@@ -140,5 +145,109 @@ describe('recent matches', () => {
 
 	it('labels a match from the team names', () => {
 		expect(matchLabel({ a: ['Ana', 'Rui'], b: ['João', 'Marta'] })).toBe('Ana / Rui v João / Marta');
+	});
+});
+
+describe('option sweep', () => {
+	it('every combination builds a valid request', () => {
+		let n = 0;
+		for (const deuce of DEUCE_RULES)
+			for (const sets of SETS_FORMATS)
+				for (const deciding of DECIDING_SETS)
+					for (const team of ['a', 'b'] as const)
+						for (const index of [0, 1])
+							for (const other of [0, 1] as const) {
+								const r = toCreateRequest(
+									named({ deuce, sets, deciding, firstServer: { team, index }, otherFirstServer: other })
+								);
+								n++;
+								const f = (r.format as { sets: { sets: string; deciding: string } }).sets;
+								expect(f.sets === 'one' && f.deciding === 'super_tie_break').toBe(false);
+								expect([0, 1]).toContain(r.start.first_server.index);
+								expect(['a', 'b']).toContain(r.start.first_server.team);
+								expect([0, 1]).toContain(r.start.other_first_server);
+							}
+		expect(n).toBe(3 * 2 * 2 * 2 * 2 * 2);
+	});
+
+	it('a saved one-set super tie-break loads as full set', () => {
+		const st = fakeStorage();
+		st.setItem(LAST_SETUP_KEY, JSON.stringify({ ...named(), sets: 'one', deciding: 'super_tie_break' }));
+		expect(loadLastSetup(st).deciding).toBe('full_set');
+	});
+
+	it('a saved bad index or team falls back to the default', () => {
+		for (const bad of [
+			{ firstServer: { team: 'a', index: 2 } },
+			{ firstServer: { team: 'c', index: 0 } },
+			{ otherFirstServer: 5 }
+		]) {
+			const st = fakeStorage({ [LAST_SETUP_KEY]: JSON.stringify({ ...named(), ...bad }) });
+			expect(loadLastSetup(st)).toEqual(defaultSetup());
+		}
+	});
+});
+
+describe('recent entries', () => {
+	it('drops entries with a non-finite or out-of-range created_at', () => {
+		const e = (created_at: unknown) => ({ scorer_token: 't', label: 'l', created_at });
+		const raw = JSON.stringify([e(1), e(1e300), e(-1e300), e('x'), e(null)]);
+		expect(listRecent(fakeStorage({ [RECENT_KEY]: raw })).map((r) => r.created_at)).toEqual([1]);
+	});
+});
+
+describe('safeStorage', () => {
+	it('safeStorage falls back when access throws', () => {
+		const orig = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+		Object.defineProperty(globalThis, 'localStorage', {
+			configurable: true,
+			get() {
+				throw new Error('blocked');
+			}
+		});
+		try {
+			const s = safeStorage();
+			expect(s.getItem('x')).toBeNull();
+			expect(() => s.setItem('x', 'y')).not.toThrow();
+		} finally {
+			if (orig) Object.defineProperty(globalThis, 'localStorage', orig);
+			else delete (globalThis as { localStorage?: unknown }).localStorage;
+		}
+	});
+});
+
+describe('afterCreate', () => {
+	const args = (storage: StorageLike, go: (p: string) => Promise<unknown>) => ({
+		storage,
+		setup: named(),
+		scorerToken: 'tok/en',
+		teams: named().teams,
+		now: 5,
+		go
+	});
+
+	it('saves, then navigates', async () => {
+		const st = fakeStorage();
+		const seen: string[] = [];
+		const r = await afterCreate(args(st, async (p) => void seen.push(p)));
+		expect(r).toEqual({ navigated: true, path: '/s/tok%2Fen' });
+		expect(seen).toEqual(['/s/tok%2Fen']);
+		expect(listRecent(st)).toHaveLength(1);
+	});
+
+	it('navigates even when saving throws', async () => {
+		const seen: string[] = [];
+		const r = await afterCreate(args(throwing, async (p) => void seen.push(p)));
+		expect(r.navigated).toBe(true);
+		expect(seen).toHaveLength(1);
+	});
+
+	it('reports the path when navigation rejects', async () => {
+		const r = await afterCreate(
+			args(fakeStorage(), async () => {
+				throw new Error('nav');
+			})
+		);
+		expect(r).toEqual({ navigated: false, path: '/s/tok%2Fen' });
 	});
 });

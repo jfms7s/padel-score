@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { strings } from '#lib/strings.ts';
-	import { listRecent, type RecentMatch } from '#lib/setup.ts';
+	import { listRecent, scorerPath, type RecentMatch } from '#lib/setup.ts';
+	import { safeStorage } from '#lib/storage.ts';
 
 	let recent = $state<RecentMatch[]>([]);
 	$effect(() => {
-		recent = listRecent(localStorage);
+		recent = listRecent(safeStorage());
 	});
 </script>
 
@@ -20,7 +21,7 @@
 		<ul>
 			{#each recent as match (match.scorer_token)}
 				<li>
-					<a href={`/s/${encodeURIComponent(match.scorer_token)}`}>
+					<a href={scorerPath(match.scorer_token)}>
 						<span class="label">{match.label}</span>
 						<time datetime={new Date(match.created_at).toISOString()}>
 							{new Date(match.created_at).toLocaleDateString()}

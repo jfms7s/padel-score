@@ -52,6 +52,8 @@ export const strings = {
 		start: 'Start match',
 		starting: 'Starting…',
 		failed: "Couldn't start the match.",
+		created: 'Your match is ready.',
+		openMatch: 'Open it',
 		tryAgain: 'Try again'
 	},
 
