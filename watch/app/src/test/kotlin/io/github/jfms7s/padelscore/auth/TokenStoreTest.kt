@@ -1,6 +1,8 @@
 package io.github.jfms7s.padelscore.auth
 
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import java.io.File
@@ -114,5 +116,24 @@ class TokenStoreTest {
         store.clear()
         assertFalse(store.signedIn.first())
         assertNull(store.read())
+    }
+
+    @Test
+    fun corrupt_file_reads_as_null() = runTest {
+        file.writeBytes(byteArrayOf(0x0F, 0x7A, 0x01, 0x55, 0x33))
+        assertNull(store.read())
+    }
+
+    @Test
+    fun corruption_handler_makes_signed_in_false_and_allows_new_write() = runTest {
+        file.writeBytes(byteArrayOf(0x0F, 0x7A, 0x01, 0x55, 0x33))
+        val handled = PreferenceDataStoreFactory.create(
+            corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+            scope = scope,
+        ) { file }
+        val recovering = DataStoreTokenStore(handled, cipher)
+        assertFalse(recovering.signedIn.first())
+        recovering.write("pdl_TEST_abc123")
+        assertEquals("pdl_TEST_abc123", recovering.read())
     }
 }

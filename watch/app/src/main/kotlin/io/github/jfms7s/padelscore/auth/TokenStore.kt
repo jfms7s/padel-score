@@ -79,22 +79,32 @@ class KeystoreCipher(private val alias: String = "padel-device-token") : TokenCi
 
 /**
  * The DataStore must be a single instance per process (DataStore enforces one active
- * instance per file), so build it with `preferencesDataStore` or a process-wide singleton.
+ * instance per file), so build it with `preferencesDataStore` or a process-wide singleton,
+ * with `ReplaceFileCorruptionHandler { emptyPreferences() }` so a corrupt file reads as signed out.
  */
 class DataStoreTokenStore(
     private val dataStore: DataStore<Preferences>,
     private val cipher: TokenCipher,
 ) : TokenStore {
-    override suspend fun read(): String? {
-        val encoded = dataStore.data.map { it[KEY] }.first() ?: return null
-        return try {
-            String(cipher.decrypt(Base64.getDecoder().decode(encoded)), Charsets.UTF_8)
+    override suspend fun read(): String? =
+        try {
+            val encoded = dataStore.data.map { it[KEY] }.first()
+            encoded?.let { String(cipher.decrypt(Base64.getDecoder().decode(it)), Charsets.UTF_8) }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            // Key lost after a reset, corrupt data, bad Base64: sign in again. Never log the blob.
-            clear()
+            // Key lost after a reset, corrupt data or file, bad Base64: sign in again. Never log the blob.
+            discard()
             null
+        }
+
+    /** Best effort: read() must stay total even when the file itself is unusable. */
+    private suspend fun discard() {
+        try {
+            clear()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
     }
 
