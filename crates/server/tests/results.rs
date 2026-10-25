@@ -755,11 +755,23 @@ async fn player_history_marks_side_and_outcome() {
 async fn placings_are_returned() {
     let (s, pool) = setup().await;
     let ana = player(&s, OWNER, "Ana").await;
-    assert!(s.placings(&ana).await.unwrap().is_empty());
+    assert!(s.placings(OWNER, &ana).await.unwrap().is_empty());
     for (event, kind, place, place_to, field, at) in [
         ("ev-old", "tournament", 1, 1, 8, NOW),
         ("ev-new", "non_stop", 3, 4, 12, NOW + 50),
     ] {
+        sqlx::query(
+            "INSERT INTO competitions (id, owner_user_id, name, kind, format, spectator_token, \
+             created_at) VALUES (?, ?, ?, ?, '{}', ?, 1)",
+        )
+        .bind(event)
+        .bind(OWNER)
+        .bind(format!("Event {event}"))
+        .bind(kind)
+        .bind(format!("tok-{event}"))
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query(
             "INSERT INTO placings (player_id, event_id, event_kind, place, place_to, field_size, \
              finished_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -775,9 +787,10 @@ async fn placings_are_returned() {
         .await
         .unwrap();
     }
-    let placings = s.placings(&ana).await.unwrap();
+    let placings = s.placings(OWNER, &ana).await.unwrap();
     assert_eq!(placings.len(), 2);
     assert_eq!(placings[0].event_id, "ev-new");
+    assert_eq!(placings[0].event_name, "Event ev-new");
     assert_eq!(placings[0].event_kind, "non_stop");
     assert_eq!(placings[0].place, 3);
     assert_eq!(placings[0].place_to, 4);

@@ -196,7 +196,7 @@ async fn page(
         .player_history(owner, &player.id, page.before.as_ref(), page.limit)
         .await?
         .ok_or(ApiError::NotFound)?;
-    let placings = state.store.placings(&player.id).await?;
+    let placings = state.store.placings(owner, &player.id).await?;
     Ok(Json(PlayerPage {
         player: with_record(&state, owner, player).await?,
         placings,

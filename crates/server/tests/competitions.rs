@@ -1,12 +1,21 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 
+use padel_score_server::commands::{
+    Authority, Command, CommandOutcome, CommandRequest, apply_command,
+};
+use padel_score_server::competitions::places::{Place, places, validate_places};
 use padel_score_server::competitions::{
     Competition, Kind, MAX_TEAMS, NewCompetition, Status, TeamChange,
 };
 use padel_score_server::db;
 use padel_score_server::players::PlayerChange;
 use padel_score_server::store::{Store, StoreError};
-use padel_scoring::{DeuceRule, Format, SetRules};
+use padel_scoring::{DeuceRule, Format, SetRules, Team};
 use serde_json::json;
 use sqlx::SqlitePool;
 
@@ -492,4 +501,469 @@ async fn existing_matches_load_with_lock_column() {
     .unwrap();
     let m = s.by_scorer_token("st").await.unwrap().unwrap();
     assert_eq!(m.result_locked_at, None);
+}
+
+// ---- lifecycle, placings and history context ----
+
+fn place(team: &str, place: u32, place_to: u32) -> Place {
+    Place {
+        team_id: team.to_owned(),
+        place,
+        place_to,
+    }
+}
+
+fn ids(n: usize) -> Vec<String> {
+    (1..=n).map(|i| format!("t{i}")).collect()
+}
+
+fn ranges(spec: &[(u32, u32)]) -> Vec<Place> {
+    spec.iter()
+        .enumerate()
+        .map(|(i, (p, to))| place(&format!("t{}", i + 1), *p, *to))
+        .collect()
+}
+
+#[test]
+fn places_must_tile_the_field() {
+    let teams = ids(8);
+    let valid: [&[(u32, u32)]; 3] = [
+        &[
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+            (5, 5),
+            (6, 6),
+            (7, 7),
+            (8, 8),
+        ],
+        &[
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+            (5, 8),
+            (5, 8),
+            (5, 8),
+            (5, 8),
+        ],
+        &[
+            (1, 1),
+            (2, 2),
+            (3, 4),
+            (3, 4),
+            (5, 8),
+            (5, 8),
+            (5, 8),
+            (5, 8),
+        ],
+    ];
+    for spec in valid {
+        validate_places(&teams, &ranges(spec)).unwrap();
+    }
+    let invalid: [&[(u32, u32)]; 6] = [
+        // a gap
+        &[
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (5, 5),
+            (6, 6),
+            (7, 7),
+            (8, 8),
+            (8, 8),
+        ],
+        // an overlap
+        &[
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+            (5, 5),
+            (6, 6),
+            (7, 7),
+            (7, 7),
+        ],
+        // a tie with the wrong number of teams
+        &[
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+            (5, 8),
+            (5, 8),
+            (5, 8),
+            (1, 1),
+        ],
+        // place_to below place
+        &[
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+            (5, 5),
+            (6, 6),
+            (7, 7),
+            (8, 7),
+        ],
+        // place_to past the field
+        &[
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+            (5, 5),
+            (6, 6),
+            (7, 7),
+            (8, 9),
+        ],
+        // three teams at 5..8
+        &[
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+            (5, 8),
+            (5, 8),
+            (5, 8),
+            (4, 4),
+        ],
+    ];
+    for spec in invalid {
+        let err = validate_places(&teams, &ranges(spec)).unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidField("places")),
+            "{spec:?}"
+        );
+    }
+    // a team missing, a team twice, an unknown team
+    let mut full = ranges(invalid_free());
+    full.pop();
+    assert!(validate_places(&teams, &full).is_err());
+    let mut twice = ranges(invalid_free());
+    twice[7].team_id = "t1".into();
+    assert!(validate_places(&teams, &twice).is_err());
+    let mut unknown = ranges(invalid_free());
+    unknown[7].team_id = "nobody".into();
+    assert!(validate_places(&teams, &unknown).is_err());
+}
+
+fn invalid_free() -> &'static [(u32, u32)] {
+    &[
+        (1, 1),
+        (2, 2),
+        (3, 3),
+        (4, 4),
+        (5, 5),
+        (6, 6),
+        (7, 7),
+        (8, 8),
+    ]
+}
+
+async fn event_of(s: &Store, owner: &str, pairs: &[[&str; 2]]) -> (Competition, Vec<String>) {
+    let ev = s
+        .create_competition(owner, new_event("Sunday cup"), 10)
+        .await
+        .unwrap();
+    let mut teams = Vec::new();
+    for [p1, p2] in pairs {
+        let players = [player(s, owner, p1).await, player(s, owner, p2).await];
+        teams.push(
+            s.add_team(owner, &ev.id, players, None, 10)
+                .await
+                .unwrap()
+                .id,
+        );
+    }
+    (ev, teams)
+}
+
+const FOUR: [[&str; 2]; 4] = [
+    ["Ana", "Marta"],
+    ["Rui", "Joao"],
+    ["Eva", "Ines"],
+    ["Tiago", "Luis"],
+];
+
+/// A running event of four teams with one court.
+async fn running_event(s: &Store) -> (Competition, Vec<String>) {
+    let (ev, teams) = event_of(s, A, &FOUR).await;
+    s.add_court(A, &ev.id, None).await.unwrap();
+    let ev = s.start_competition(A, &ev.id, 20).await.unwrap();
+    (ev, teams)
+}
+
+fn one_set() -> Format {
+    Format::Sets(SetRules {
+        deuce: DeuceRule::Advantage,
+        sets: padel_scoring::SetsFormat::One,
+        deciding: padel_scoring::DecidingSet::FullSet,
+    })
+}
+
+async fn one_set_event(s: &Store, pool: &SqlitePool) -> (Competition, Vec<String>) {
+    let (ev, teams) = running_event(s).await;
+    sqlx::query("UPDATE competitions SET format = ? WHERE id = ?")
+        .bind(serde_json::to_string(&one_set()).unwrap())
+        .bind(&ev.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    (ev, teams)
+}
+
+#[tokio::test]
+async fn start_needs_teams_and_courts() {
+    let (s, _) = setup().await;
+    let (ev, _) = event_of(&s, A, &[["Ana", "Marta"]]).await;
+    let err = s.start_competition(A, &ev.id, 20).await.unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("too_few_teams")),
+        "{err:?}"
+    );
+    let (ev, _) = event_of(&s, A, &[["Eva", "Ines"], ["Tiago", "Luis"]]).await;
+    let err = s.start_competition(A, &ev.id, 20).await.unwrap_err();
+    assert!(matches!(err, StoreError::Conflict("no_courts")), "{err:?}");
+    s.add_court(A, &ev.id, None).await.unwrap();
+    let started = s.start_competition(A, &ev.id, 20).await.unwrap();
+    assert_eq!(started.status, Status::Running);
+    assert_eq!(started.started_at, Some(20));
+    let err = s.start_competition(B, &ev.id, 20).await.unwrap_err();
+    assert!(matches!(err, StoreError::NotFound), "{err:?}");
+}
+
+#[tokio::test]
+async fn start_only_from_setup() {
+    let (s, _) = setup().await;
+    let (ev, _) = running_event(&s).await;
+    let err = s.start_competition(A, &ev.id, 30).await.unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("event_started")),
+        "{err:?}"
+    );
+    let got = s.competition(A, &ev.id).await.unwrap().unwrap();
+    assert_eq!(got.started_at, Some(20));
+}
+
+fn four_places(spec: [(u32, u32); 4], teams: &[String]) -> Vec<Place> {
+    spec.iter()
+        .zip(teams)
+        .map(|((p, to), t)| place(t, *p, *to))
+        .collect()
+}
+
+#[tokio::test]
+async fn finish_writes_two_placings_per_team() {
+    let (s, pool) = setup().await;
+    let (ev, teams) = running_event(&s).await;
+    let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
+    let (done, rotated) = s
+        .finish_competition(A, &ev.id, Some(given.clone()), 90)
+        .await
+        .unwrap();
+    assert_eq!(done.status, Status::Finished);
+    assert_eq!(done.finished_at, Some(90));
+    assert!(rotated.is_empty());
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM placings WHERE event_id = ?")
+        .bind(&ev.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 8);
+    let ana = s.list_players(A).await.unwrap();
+    let ana = ana.iter().find(|p| p.name == "Ana").unwrap();
+    let placings = s.placings(A, &ana.id).await.unwrap();
+    assert_eq!(placings.len(), 1);
+    assert_eq!(placings[0].place, 1);
+    assert_eq!(placings[0].field_size, 4);
+    assert_eq!(placings[0].event_name, "Sunday cup");
+    assert_eq!(placings[0].event_kind, "tournament");
+    assert_eq!(placings[0].finished_at, 90);
+    let mut conn = pool.acquire().await.unwrap();
+    assert_eq!(places(&mut conn, &ev.id).await.unwrap(), given);
+}
+
+#[tokio::test]
+async fn finish_shared_place() {
+    let (s, pool) = setup().await;
+    let (ev, teams) = running_event(&s).await;
+    let given = four_places([(1, 1), (2, 2), (3, 4), (3, 4)], &teams);
+    s.finish_competition(A, &ev.id, Some(given), 90)
+        .await
+        .unwrap();
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT p.name, pl.place, pl.place_to FROM placings pl \
+         JOIN players p ON p.id = pl.player_id WHERE pl.event_id = ? ORDER BY p.name",
+    )
+    .bind(&ev.id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    for name in ["Eva", "Ines", "Tiago", "Luis"] {
+        let row = rows.iter().find(|r| r.0 == name).unwrap();
+        assert_eq!((row.1, row.2), (3, 4), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn finish_without_places_is_422() {
+    let (s, _) = setup().await;
+    let (ev, teams) = running_event(&s).await;
+    let err = s.finish_competition(A, &ev.id, None, 90).await.unwrap_err();
+    assert!(matches!(err, StoreError::InvalidField("places")), "{err:?}");
+    let bad = four_places([(1, 1), (2, 2), (3, 3), (3, 3)], &teams);
+    let err = s
+        .finish_competition(A, &ev.id, Some(bad), 90)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StoreError::InvalidField("places")), "{err:?}");
+    let ev = s.competition(A, &ev.id).await.unwrap().unwrap();
+    assert_eq!(ev.status, Status::Running);
+    let err = s.finish_competition(B, &ev.id, None, 90).await.unwrap_err();
+    assert!(matches!(err, StoreError::NotFound), "{err:?}");
+}
+
+async fn scorer_token(pool: &SqlitePool, match_id: &str) -> String {
+    sqlx::query_scalar("SELECT scorer_token FROM matches WHERE id = ?")
+        .bind(match_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// 24 points for team A: a 6-0 one-set match.
+async fn win_for_a(s: &Store, match_id: &str) {
+    let (m, _) = s.snapshot(match_id).await.unwrap().unwrap();
+    let req = CommandRequest {
+        client_id: "finish".into(),
+        batch: false,
+        base_revision: 0,
+        commands: vec![Command::Point { team: Team::A }; 24],
+    };
+    match apply_command(s, &m, req, 50, Authority::Scorer)
+        .await
+        .unwrap()
+    {
+        CommandOutcome::Applied(_) => {}
+        other => panic!("expected Applied, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn finish_rotates_match_tokens_and_clears_courts() {
+    let (s, pool) = setup().await;
+    let (ev, teams) = one_set_event(&s, &pool).await;
+    let court = padel_score_server::competitions::courts::courts_in(
+        &mut pool.acquire().await.unwrap(),
+        &ev.id,
+    )
+    .await
+    .unwrap()
+    .remove(0);
+    let m1 = s
+        .create_event_match(A, &ev.id, &teams[0], &teams[1], None, Some(&court.id), 30)
+        .await
+        .unwrap();
+    let m2 = s
+        .create_event_match(A, &ev.id, &teams[2], &teams[3], None, None, 30)
+        .await
+        .unwrap();
+    let before = (
+        scorer_token(&pool, &m1.match_id).await,
+        scorer_token(&pool, &m2.match_id).await,
+    );
+    let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
+    let (_, mut rotated) = s
+        .finish_competition(A, &ev.id, Some(given), 90)
+        .await
+        .unwrap();
+    rotated.sort();
+    let mut expected = vec![m1.match_id.clone(), m2.match_id.clone()];
+    expected.sort();
+    assert_eq!(rotated, expected);
+    assert_ne!(scorer_token(&pool, &m1.match_id).await, before.0);
+    assert_ne!(scorer_token(&pool, &m2.match_id).await, before.1);
+    let current: Option<String> =
+        sqlx::query_scalar("SELECT current_match_id FROM courts WHERE id = ?")
+            .bind(&court.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(current, None);
+}
+
+#[tokio::test]
+async fn event_match_in_history_has_event_context() {
+    let (s, pool) = setup().await;
+    let (ev, teams) = one_set_event(&s, &pool).await;
+    let m = s
+        .create_event_match(A, &ev.id, &teams[0], &teams[1], None, None, 30)
+        .await
+        .unwrap();
+    win_for_a(&s, &m.match_id).await;
+    let quick = s
+        .create_match(
+            padel_score_server::store::NewMatch {
+                format: one_set(),
+                start: padel_scoring::Start {
+                    first_server: padel_scoring::Player {
+                        team: Team::A,
+                        index: 0,
+                    },
+                    other_first_server: 0,
+                },
+                teams: padel_score_server::store::Teams {
+                    a: ["Ana".into(), "Rui".into()],
+                    b: ["Eva".into(), "Tiago".into()],
+                },
+                owner_user_id: Some(A.to_owned()),
+                players: Default::default(),
+            },
+            40,
+        )
+        .await
+        .unwrap();
+    win_for_a(&s, &quick.id).await;
+    let (items, _) = s.history(A, None, 30).await.unwrap();
+    assert_eq!(items.len(), 2);
+    let with = items.iter().find(|e| e.match_id == m.match_id).unwrap();
+    let json = serde_json::to_value(with).unwrap();
+    assert_eq!(
+        json["event"],
+        json!({"id": ev.id, "name": "Sunday cup", "kind": "tournament", "label": "Match 1"})
+    );
+    let without = items.iter().find(|e| e.match_id == quick.id).unwrap();
+    assert!(
+        serde_json::to_value(without)
+            .unwrap()
+            .get("event")
+            .is_none()
+    );
+    // and on a player's page
+    let ana = s.list_players(A).await.unwrap();
+    let ana = ana.iter().find(|p| p.name == "Ana").unwrap();
+    let (page, _) = s
+        .player_history(A, &ana.id, None, 30)
+        .await
+        .unwrap()
+        .unwrap();
+    let json = serde_json::to_value(&page).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 1);
+    assert_eq!(json[0]["event"]["name"], "Sunday cup");
+}
+
+#[tokio::test]
+async fn placings_are_owner_filtered() {
+    let (s, _) = setup().await;
+    let (ev, teams) = running_event(&s).await;
+    let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
+    s.finish_competition(A, &ev.id, Some(given), 90)
+        .await
+        .unwrap();
+    let ana = s.list_players(A).await.unwrap();
+    let ana = ana.iter().find(|p| p.name == "Ana").unwrap();
+    assert_eq!(s.placings(A, &ana.id).await.unwrap().len(), 1);
+    assert!(s.placings(B, &ana.id).await.unwrap().is_empty());
 }

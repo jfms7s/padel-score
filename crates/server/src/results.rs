@@ -209,6 +209,19 @@ pub struct HistoryEntry {
     pub winner: Option<Team>,
     pub score: FinalScore,
     pub spectator_token: String,
+    /// The event the match was played in, for an event match only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event: Option<EventContext>,
+}
+
+/// The event an event match belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EventContext {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    /// The match's label in the event, e.g. "Match 3".
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -232,6 +245,7 @@ pub struct PlayerHistoryEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Placing {
     pub event_id: String,
+    pub event_name: String,
     pub event_kind: String,
     pub place: i64,
     /// Equal to `place` unless the place is shared (e.g. 3rd–4th).
@@ -264,7 +278,16 @@ fn count(row: &SqliteRow, column: &str) -> Result<u32, StoreError> {
 /// The columns every history page selects, from `match_results r JOIN matches m`.
 macro_rules! history_columns {
     () => {
-        "r.match_id, r.finished_at, r.winner, r.score, m.teams, m.spectator_token"
+        "r.match_id, r.finished_at, r.winner, r.score, m.teams, m.spectator_token, \
+         c.id AS event_id, c.name AS event_name, c.kind AS event_kind, cm.label AS event_label"
+    };
+}
+
+/// The joins that give an event match its context; a quick match gets NULLs.
+macro_rules! event_joins {
+    () => {
+        " LEFT JOIN competition_matches cm ON cm.match_id = r.match_id \
+         LEFT JOIN competitions c ON c.id = cm.event_id"
     };
 }
 
@@ -284,6 +307,16 @@ fn push_page(q: &mut QueryBuilder<Sqlite>, before: Option<&Cursor>, limit: u32) 
 
 fn entry_from_row(row: &SqliteRow) -> Result<HistoryEntry, StoreError> {
     let winner: Option<String> = row.try_get("winner")?;
+    let event_id: Option<String> = row.try_get("event_id")?;
+    let event = match event_id {
+        Some(id) => Some(EventContext {
+            id,
+            name: row.try_get("event_name")?,
+            kind: row.try_get("event_kind")?,
+            label: row.try_get("event_label")?,
+        }),
+        None => None,
+    };
     Ok(HistoryEntry {
         match_id: row.try_get("match_id")?,
         finished_at: row.try_get("finished_at")?,
@@ -292,6 +325,7 @@ fn entry_from_row(row: &SqliteRow) -> Result<HistoryEntry, StoreError> {
         winner: winner.as_deref().map(parse_team).transpose()?,
         score: json(row.try_get::<&str, _>("score")?)?,
         spectator_token: row.try_get("spectator_token")?,
+        event,
     })
 }
 
@@ -384,7 +418,9 @@ impl Store {
         let mut q = QueryBuilder::<Sqlite>::new(concat!(
             "SELECT ",
             history_columns!(),
-            " FROM match_results r JOIN matches m ON m.id = r.match_id WHERE r.owner_user_id = "
+            " FROM match_results r JOIN matches m ON m.id = r.match_id",
+            event_joins!(),
+            " WHERE r.owner_user_id = "
         ));
         q.push_bind(owner.to_owned());
         push_page(&mut q, before, limit);
@@ -417,7 +453,9 @@ impl Store {
             history_columns!(),
             ", mp.team AS side FROM match_players mp \
              JOIN match_results r ON r.match_id = mp.match_id \
-             JOIN matches m ON m.id = r.match_id WHERE mp.player_id = "
+             JOIN matches m ON m.id = r.match_id",
+            event_joins!(),
+            " WHERE mp.player_id = "
         ));
         q.push_bind(player_id.to_owned())
             .push(" AND r.owner_user_id = ")
@@ -485,20 +523,24 @@ impl Store {
             .map(Option::unwrap_or_default)
     }
 
-    /// The player's placings, newest first. Call only once the player is known to be the
-    /// caller's: this does not check the owner.
-    pub async fn placings(&self, player_id: &str) -> Result<Vec<Placing>, StoreError> {
+    /// The player's placings in the owner's events, newest first.
+    pub async fn placings(&self, owner: &str, player_id: &str) -> Result<Vec<Placing>, StoreError> {
         let rows = sqlx::query(
-            "SELECT event_id, event_kind, place, place_to, field_size, finished_at FROM placings \
-             WHERE player_id = ? ORDER BY finished_at DESC, event_id DESC",
+            "SELECT p.event_id, c.name AS event_name, p.event_kind, p.place, p.place_to, \
+             p.field_size, p.finished_at FROM placings p \
+             JOIN competitions c ON c.id = p.event_id \
+             WHERE p.player_id = ? AND c.owner_user_id = ? \
+             ORDER BY p.finished_at DESC, p.event_id DESC",
         )
         .bind(player_id)
+        .bind(owner)
         .fetch_all(self.pool())
         .await?;
         rows.iter()
             .map(|row| {
                 Ok(Placing {
                     event_id: row.try_get("event_id")?,
+                    event_name: row.try_get("event_name")?,
                     event_kind: row.try_get("event_kind")?,
                     place: row.try_get("place")?,
                     place_to: row.try_get("place_to")?,
