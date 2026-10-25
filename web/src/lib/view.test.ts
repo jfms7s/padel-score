@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fenceModel, pointLabel } from './view';
+import { fenceModel, pageMode, pointLabel } from './view';
 import { asView as v } from './fixtures/load';
 import { strings } from './strings';
 import goldenPoint from './fixtures/view-golden-point-40-40.json';
@@ -235,5 +235,21 @@ describe('fenceModel', () => {
 		expect(m.a.setDetails[0]?.superTieBreak).toBe(false);
 		const sup = fenceModel(v(superTiebreakFinished));
 		expect(sup.a.setDetails.map((d) => d.superTieBreak)).toEqual([false, false, true]);
+	});
+});
+
+describe('pageMode', () => {
+	it('readonly fence model hides controls on the spectator route', () => {
+		expect(pageMode('/v/abc123')).toEqual({ controls: false });
+		expect(pageMode('/v/abc123/')).toEqual({ controls: false });
+	});
+	it('gives the scorer route its controls', () => {
+		expect(pageMode('/s/abc123')).toEqual({ controls: true });
+		expect(pageMode('/s/abc123/')).toEqual({ controls: true });
+	});
+	it('defaults to read-only for anything that is not the scorer route', () => {
+		expect(pageMode('/')).toEqual({ controls: false });
+		expect(pageMode('/v/s/x')).toEqual({ controls: false });
+		expect(pageMode('/new')).toEqual({ controls: false });
 	});
 });

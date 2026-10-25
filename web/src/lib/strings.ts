@@ -80,6 +80,8 @@ export const strings = {
 		undoLabel: 'Undo last point',
 		undoHint: 'Press and hold to undo',
 		synced: 'Synced',
+		live: 'Live',
+		offlineView: 'Offline',
 		offline: 'Offline, will sync',
 		connecting: 'Connecting',
 		sending: 'Sending',

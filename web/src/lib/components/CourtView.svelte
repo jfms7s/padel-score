@@ -15,8 +15,9 @@
 		banner
 	}: {
 		model: FenceModel;
-		onpoint: (team: Team) => void;
-		controls: Snippet;
+		/** Absent on the spectator view: the halves are then plain, not tappable. */
+		onpoint?: (team: Team) => void;
+		controls?: Snippet;
 		banner?: Snippet;
 	} = $props();
 
@@ -38,12 +39,14 @@
 <div class="court">
 	{#each ['a', 'b'] as const as t (t)}
 		{@const team = model[t]}
-		<button
-			type="button"
+		<svelte:element
+			this={onpoint ? 'button' : 'div'}
+			type={onpoint ? 'button' : undefined}
 			class="side {t}"
-			aria-label={f.pointTo(team.name)}
-			disabled={model.finished !== null}
-			onclick={() => onpoint(t)}
+			role={onpoint ? undefined : 'group'}
+			aria-label={onpoint ? f.pointTo(team.name) : team.name}
+			disabled={onpoint ? model.finished !== null : undefined}
+			onclick={onpoint ? () => onpoint(t) : undefined}
 		>
 			<span class="box-line" aria-hidden="true"></span>
 			<span class="team">{team.name}</span>
@@ -59,7 +62,7 @@
 					title={f.ballTitle(model.servingPlayerName ?? '', ball.side)}
 				></span>
 			{/if}
-		</button>
+		</svelte:element>
 		{#if t === 'a'}<div class="net" aria-hidden="true"></div>{/if}
 	{/each}
 
@@ -69,7 +72,7 @@
 		<span class="callout ends" role="status">{strings.changeEnds.short}</span>
 	{/if}
 
-	<div class="controls">{@render controls()}</div>
+	{#if controls}<div class="controls">{@render controls()}</div>{/if}
 
 	{#if banner}<div class="banner">{@render banner()}</div>{/if}
 </div>
@@ -105,7 +108,7 @@
 	.side.b {
 		background: var(--b);
 	}
-	.side:active:not(:disabled) {
+	button.side:active:not(:disabled) {
 		filter: brightness(1.08);
 	}
 	.side:disabled {

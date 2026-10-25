@@ -141,3 +141,13 @@ function rulesLine(view: MatchView, inTieBreak: boolean, superTieBreak: boolean,
 	const set = strings.setNumber(Math.max(view.score.sets.length, 1));
 	return `${set}, ${inTieBreak ? strings.tieBreak : deuce}`;
 }
+
+export interface PageMode {
+	/** Whether the page may score: tap buttons, undo, share, the offline queue. Spectators never can. */
+	controls: boolean;
+}
+
+/** What a fence page may do, from its route. Only the scorer route (/s/…) has controls. */
+export function pageMode(route: string): PageMode {
+	return { controls: /^\/s\/[^/]+\/?$/.test(route) };
+}

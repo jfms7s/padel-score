@@ -16,9 +16,10 @@
 		banner
 	}: {
 		model: FenceModel;
-		onpoint: (team: Team) => void;
+		/** Absent on the spectator view: no tap buttons, no undo. */
+		onpoint?: (team: Team) => void;
 		meta: Snippet;
-		undo: Snippet;
+		undo?: Snippet;
 		banner?: Snippet;
 	} = $props();
 
@@ -96,17 +97,19 @@
 		<div class="banner">{@render banner()}</div>
 	{/if}
 
-	<div class="foot">
-		{@render undo()}
-		{#if !model.finished}
-			<button type="button" class="btn a" onclick={() => onpoint('a')}>
-				{pointButtonLabel(model.a)}
-			</button>
-			<button type="button" class="btn b" onclick={() => onpoint('b')}>
-				{pointButtonLabel(model.b)}
-			</button>
-		{/if}
-	</div>
+	{#if onpoint}
+		<div class="foot">
+			{@render undo?.()}
+			{#if !model.finished}
+				<button type="button" class="btn a" onclick={() => onpoint('a')}>
+					{pointButtonLabel(model.a)}
+				</button>
+				<button type="button" class="btn b" onclick={() => onpoint('b')}>
+					{pointButtonLabel(model.b)}
+				</button>
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>

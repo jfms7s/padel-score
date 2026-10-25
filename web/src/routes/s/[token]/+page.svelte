@@ -180,7 +180,13 @@
 
 	$effect(() => {
 		initEngine().then(
-			() => (engine = true),
+			() => {
+				engine = true;
+				// A conflict sheet opened before the engine loaded has no preview of this phone's
+				// score: look again, so "Keep this phone's score" works.
+				if (sender) sending = sender.state();
+				sender?.viewArrived();
+			},
 			() => {
 				// No local engine: taps still score, without the instant preview.
 			}
@@ -299,7 +305,11 @@
 			<a class="new" href="/">{f.home}</a>
 		</div>
 	{:else if !model}
-		<div class="message"><p>{f.loading}</p></div>
+		<div class="message">
+			<p>{f.loading}</p>
+			<!-- Opened from the cached shell with no line: the score can't load until it is back. -->
+			{#if offline}<p class="sync board off" role="status">{f.offline}</p>{/if}
+		</div>
 	{:else if layout === 'court'}
 		<CourtView {model} onpoint={point} banner={model.finished ? banner : undefined}>
 			{#snippet controls()}

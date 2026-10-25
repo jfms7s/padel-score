@@ -4,6 +4,7 @@
 		"strict": true
 	},
 	"include": ["src", "vite.config.ts"],
-	// The wasm-bindgen glue is generated JS; its sibling .d.ts types it.
-	"exclude": ["src/lib/wasm"]
+	// The wasm-bindgen glue is generated JS; its sibling .d.ts types it. The service worker has
+	// its own tsconfig (a worker global scope, not the DOM).
+	"exclude": ["src/lib/wasm", "src/service-worker"]
 }
