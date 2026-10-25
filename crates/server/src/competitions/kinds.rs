@@ -46,7 +46,8 @@ pub async fn on_start(
     }
 }
 
-/// Runs in the transaction that records a match's result.
+/// Runs after every applied command on an event match (points, undos that un-finish it,
+/// typed results), inside its transaction; read `match_results` to know whether it is finished.
 pub async fn on_result(
     kind: Kind,
     tx: &mut Tx<'_>,
@@ -57,6 +58,15 @@ pub async fn on_result(
     match kind {
         Kind::Tournament => tournament::on_result(tx, ev, match_id, now).await,
         Kind::NonStop => non_stop::on_result(tx, ev, match_id, now).await,
+    }
+}
+
+/// Whether the kind works out the final places itself, so the coordinator's Finish screen
+/// sends none. Must agree with [`computed_places`] returning `Some` once the event can finish.
+pub fn computes_places(kind: Kind) -> bool {
+    match kind {
+        Kind::Tournament => tournament::computes_places(),
+        Kind::NonStop => non_stop::computes_places(),
     }
 }
 

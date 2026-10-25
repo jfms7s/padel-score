@@ -225,6 +225,7 @@ async fn create_event_round_trip() {
     assert_eq!(d["teams"].as_array().unwrap().len(), 4);
     assert_eq!(d["kind_data"], Value::Null);
     assert_eq!(d["places"], json!([]));
+    assert_eq!(d["places_computed"], json!(false));
     let court = court_in(&d, &courts[0]);
     assert_eq!(court["name"], json!("Court 1"));
     assert_eq!(court["current"], json!(match_id));
@@ -542,6 +543,47 @@ async fn other_users_event_is_404() {
             ),
         ),
         (Method::GET, format!("/api/events/{id}/stream"), None),
+        (Method::POST, format!("/api/events/{id}/start"), None),
+        (
+            Method::POST,
+            format!("/api/events/{id}/finish"),
+            Some(json!({ "places": [
+                { "team_id": teams[0], "place": 1, "place_to": 1 },
+                { "team_id": teams[1], "place": 2, "place_to": 2 },
+                { "team_id": teams[2], "place": 3, "place_to": 3 },
+                { "team_id": teams[3], "place": 4, "place_to": 4 },
+            ] })),
+        ),
+        (
+            Method::POST,
+            format!("/api/events/{id}/courts/{}/advance", courts[0]),
+            None,
+        ),
+        (
+            Method::PATCH,
+            format!("/api/events/{id}/teams/{}", teams[0]),
+            Some(json!({ "name": "Mine" })),
+        ),
+        (
+            Method::DELETE,
+            format!("/api/events/{id}/teams/{}", teams[0]),
+            None,
+        ),
+        (
+            Method::PATCH,
+            format!("/api/events/{id}/courts/{}", courts[0]),
+            Some(json!({ "name": "Mine" })),
+        ),
+        (
+            Method::DELETE,
+            format!("/api/events/{id}/courts/{}", courts[1]),
+            None,
+        ),
+        (
+            Method::PATCH,
+            format!("/api/events/{id}/matches/{match_id}"),
+            Some(json!({ "court_id": courts[1], "label": "Mine" })),
+        ),
         (Method::GET, "/api/events/nope".to_owned(), None),
     ];
     for (method, path, body) in attempts {
@@ -554,7 +596,17 @@ async fn other_users_event_is_404() {
     assert_eq!(list.body["items"], json!([]));
     let d = detail(&state, &app, &raw, &id).await;
     assert_eq!(d["event"]["name"], json!("Sunday cup"));
-    assert_eq!(match_in(&d, &match_id)["state"], json!("waiting"));
+    assert_eq!(d["event"]["status"], json!("running"));
+    assert_eq!(d["teams"].as_array().unwrap().len(), 4);
+    assert_eq!(d["teams"][0]["custom_name"], Value::Null);
+    assert_eq!(d["courts"].as_array().unwrap().len(), 2);
+    assert_eq!(court_in(&d, &courts[0])["name"], json!("Court 1"));
+    assert_eq!(court_in(&d, &courts[0])["current"], json!(match_id));
+    let m = match_in(&d, &match_id);
+    assert_eq!(m["state"], json!("waiting"));
+    assert_eq!(m["label"], json!("Match 1"));
+    assert_eq!(m["court_id"], json!(courts[0]));
+    assert_eq!(d["places"], json!([]));
 }
 
 #[tokio::test]

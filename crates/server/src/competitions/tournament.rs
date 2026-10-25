@@ -34,6 +34,11 @@ pub async fn on_result(
     Ok(())
 }
 
+/// Whether this kind works out the final places itself (`computed_places` returns `Some`).
+pub fn computes_places() -> bool {
+    false
+}
+
 pub async fn computed_places(
     _conn: &mut SqliteConnection,
     _ev: &Competition,

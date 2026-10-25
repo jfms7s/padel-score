@@ -113,6 +113,8 @@ pub struct EventDetail {
     pub courts: Vec<CourtOut>,
     pub matches: Vec<EventMatch>,
     pub places: Vec<Place>,
+    /// The kind works out the places itself: the Finish screen sends none.
+    pub places_computed: bool,
     pub kind_data: Option<serde_json::Value>,
 }
 
@@ -312,6 +314,7 @@ async fn detail_for_in(
         courts: court_out,
         matches,
         places,
+        places_computed: kinds::computes_places(ev.kind),
         kind_data,
     })
 }
