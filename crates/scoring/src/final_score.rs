@@ -1,6 +1,6 @@
 use crate::state::set_won;
 use crate::tiebreak::{SUPER_TIEBREAK_TO, TIEBREAK_TO, tiebreak_won};
-use crate::{DecidingSet, Format, RulesError, SetRules, SetScore, SetsFormat, Team};
+use crate::{DecidingSet, Event, Format, RulesError, SetRules, SetScore, SetsFormat, Team};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -57,6 +57,95 @@ pub fn validate_final(format: &Format, score: &FinalScore) -> Result<Option<Team
         ) => validate_timed(*draws_allowed, *a, *b, *overtime_winner),
         _ => Err(InvalidScore::WrongFormat),
     }
+}
+
+/// The canonical point events that replay to `score` under `format`.
+///
+/// Within each unit (a set's games, a tie-break's points) the teams alternate, A then B, up to the
+/// loser's count, and the winner takes the rest, so no set, game or tie-break ends early. Every
+/// game is four straight points, which wins it under every deuce rule. A timed score is `a` games
+/// to A, `b` games to B, `TimeUp`, then one overtime game if there is an overtime winner.
+///
+/// Validates first, so anything `validate_final` rejects is rejected here. A finished 7-6 set
+/// without tie-break points is `MissingTieBreak`: the points cannot be made up.
+pub fn events_for_final(format: &Format, score: &FinalScore) -> Result<Vec<Event>, InvalidScore> {
+    validate_final(format, score)?;
+    let mut events = Vec::new();
+    match (format, score) {
+        (Format::Sets(rules), FinalScore::Sets(sets)) => sets_events(rules, sets, &mut events)?,
+        (
+            _,
+            FinalScore::Timed {
+                a,
+                b,
+                overtime_winner,
+            },
+        ) => {
+            for _ in 0..*a {
+                push_game(&mut events, Team::A);
+            }
+            for _ in 0..*b {
+                push_game(&mut events, Team::B);
+            }
+            events.push(Event::TimeUp);
+            if let Some(w) = overtime_winner {
+                push_game(&mut events, *w);
+            }
+        }
+        _ => return Err(InvalidScore::WrongFormat),
+    }
+    Ok(events)
+}
+
+fn sets_events(
+    rules: &SetRules,
+    sets: &[SetScore],
+    events: &mut Vec<Event>,
+) -> Result<(), InvalidScore> {
+    let mut won = [0u8; 2];
+    for (index, set) in sets.iter().enumerate() {
+        let missing = InvalidScore::MissingTieBreak { index };
+        let deciding_super = rules.sets == SetsFormat::BestOf3
+            && rules.deciding == DecidingSet::SuperTieBreak
+            && won == [1, 1];
+        if deciding_super {
+            let (x, y) = set.tiebreak.ok_or(missing)?;
+            events.extend(alternation(x, y).map(Event::Point));
+        } else if set.a.max(set.b) == 7 && set.a.min(set.b) == 6 {
+            // Played to 6-6; the tie-break is the deciding game.
+            let (x, y) = set.tiebreak.ok_or(missing)?;
+            for team in alternation(6, 6) {
+                push_game(events, team);
+            }
+            events.extend(alternation(x, y).map(Event::Point));
+        } else {
+            for team in alternation(u16::from(set.a), u16::from(set.b)) {
+                push_game(events, team);
+            }
+        }
+        if let Some(w) = won.get_mut(usize::from(set.a < set.b)) {
+            *w = w.saturating_add(1);
+        }
+    }
+    Ok(())
+}
+
+fn push_game(events: &mut Vec<Event>, winner: Team) {
+    events.extend([Event::Point(winner); 4]);
+}
+
+/// Who wins each unit when A takes `a` and B takes `b`: alternate A, B up to the smaller count,
+/// then the larger side takes the rest.
+fn alternation(a: u16, b: u16) -> impl Iterator<Item = Team> {
+    let level = a.min(b);
+    let (rest, rest_team) = if a >= b {
+        (a - b, Team::A)
+    } else {
+        (b - a, Team::B)
+    };
+    (0..level)
+        .flat_map(|_| [Team::A, Team::B])
+        .chain((0..rest).map(move |_| rest_team))
 }
 
 fn validate_timed(

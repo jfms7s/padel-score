@@ -1,6 +1,6 @@
 //! WASM bindings for the scoring engine, so the browser can compute the score offline.
 
-use padel_scoring::{Event, Format, Score, Start};
+use padel_scoring::{Event, FinalScore, Format, Score, Start};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
@@ -27,6 +27,27 @@ fn run(format: &str, start: &str, events: &str) -> Result<Score, Value> {
 fn parse<T: DeserializeOwned>(what: &str, input: &str) -> Result<T, Value> {
     serde_json::from_str(input)
         .map_err(|e| json!({ "kind": "bad_json", "message": format!("{what}: {e}") }))
+}
+
+/// Validates a typed final score (JSON) under `format` (JSON) and returns JSON:
+/// `{"winner": "a" | "b" | null}` or `{"error": InvalidScore}`; bad JSON gives
+/// `{"error": "wrong_format"}`. Never panics.
+pub fn validate_final_json(format: &str, score: &str) -> String {
+    let parsed = serde_json::from_str::<Format>(format)
+        .and_then(|f| serde_json::from_str::<FinalScore>(score).map(|s| (f, s)));
+    let value = match parsed {
+        Ok((f, s)) => match padel_scoring::validate_final(&f, &s) {
+            Ok(winner) => json!({ "winner": winner }),
+            Err(e) => json!({ "error": e }),
+        },
+        Err(_) => json!({ "error": "wrong_format" }),
+    };
+    value.to_string()
+}
+
+#[wasm_bindgen]
+pub fn validate_final(format: &str, score: &str) -> String {
+    validate_final_json(format, score)
 }
 
 #[wasm_bindgen]
@@ -81,5 +102,32 @@ mod tests {
             assert_eq!(out["err"]["kind"], "bad_json", "{out}");
             assert!(out["err"]["message"].is_string());
         }
+    }
+
+    #[test]
+    fn validate_final_json_reports_winner_and_errors() {
+        let ok = parse(&validate_final_json(
+            SETS,
+            r#"{"sets":[{"a":6,"b":4,"tiebreak":null}]}"#,
+        ));
+        assert_eq!(ok, serde_json::json!({"winner": "a"}));
+        let draw = r#"{"timed":{"deuce":"advantage","draws_allowed":true}}"#;
+        let ok = parse(&validate_final_json(
+            draw,
+            r#"{"timed":{"a":2,"b":2,"overtime_winner":null}}"#,
+        ));
+        assert_eq!(ok, serde_json::json!({"winner": null}));
+        let bad = parse(&validate_final_json(
+            SETS,
+            r#"{"sets":[{"a":6,"b":5,"tiebreak":null}]}"#,
+        ));
+        assert_eq!(
+            bad,
+            serde_json::json!({"error": {"impossible_set": {"index": 0}}})
+        );
+        let bad = parse(&validate_final_json(TIMED, r#"{"sets":[]}"#));
+        assert_eq!(bad, serde_json::json!({"error": "wrong_format"}));
+        let bad = parse(&validate_final_json("nope", "{"));
+        assert_eq!(bad, serde_json::json!({"error": "wrong_format"}));
     }
 }

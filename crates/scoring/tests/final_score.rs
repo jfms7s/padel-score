@@ -290,3 +290,128 @@ fn final_score_round_trips_through_validate_final() {
     assert_eq!(play(&f, "aaaa").final_score(), None);
     assert_eq!(play(&timed(false), "aaaa bbbb t").final_score(), None);
 }
+
+fn start() -> Start {
+    Start {
+        first_server: Player {
+            team: Team::A,
+            index: 0,
+        },
+        other_first_server: 0,
+    }
+}
+
+/// Events for `score`, replayed: the result must give the same typed score back.
+fn round_trip(format: &Format, score: &FinalScore) -> (Vec<Event>, Score) {
+    let events = events_for_final(format, score).unwrap();
+    let replayed = replay(format, &start(), &events).unwrap();
+    assert_eq!(replayed.final_score().as_ref(), Some(score));
+    (events, replayed)
+}
+
+#[test]
+fn events_for_final_one_set() {
+    let f = fmt(One, FullSet);
+    let (events, score) = round_trip(&f, &Sets(vec![s(6, 4)]));
+    assert_eq!(events.len(), 40);
+    assert_eq!(
+        score.status,
+        Status::Finished {
+            winner: Some(Team::A)
+        }
+    );
+}
+
+#[test]
+fn events_for_final_tiebreak_and_super() {
+    let f = fmt(BestOf3, SuperTieBreak);
+    let input = Sets(vec![stb(7, 6, (7, 5)), s(3, 6), stb(1, 0, (10, 7))]);
+    round_trip(&f, &input);
+    round_trip(
+        &f,
+        &Sets(vec![s(6, 7).tb((5, 7)), s(6, 3), stb(0, 1, (8, 10))]),
+    );
+    round_trip(
+        &fmt(BestOf3, FullSet),
+        &Sets(vec![s(7, 5), s(5, 7), s(6, 0)]),
+    );
+}
+
+trait Tb {
+    fn tb(self, tb: (u16, u16)) -> SetScore;
+}
+impl Tb for SetScore {
+    fn tb(self, tb: (u16, u16)) -> SetScore {
+        SetScore {
+            tiebreak: Some(tb),
+            ..self
+        }
+    }
+}
+
+#[test]
+fn events_for_final_timed_overtime() {
+    let (_, score) = round_trip(
+        &timed(false),
+        &Timed {
+            a: 5,
+            b: 5,
+            overtime_winner: Some(Team::B),
+        },
+    );
+    assert_eq!(
+        score.status,
+        Status::Finished {
+            winner: Some(Team::B)
+        }
+    );
+    assert!(score.overtime);
+    assert_eq!(score.regulation_games, [5, 5]);
+}
+
+#[test]
+fn events_for_final_timed_draw() {
+    let (_, score) = round_trip(
+        &timed(true),
+        &Timed {
+            a: 3,
+            b: 3,
+            overtime_winner: None,
+        },
+    );
+    assert_eq!(score.status, Status::Finished { winner: None });
+}
+
+#[test]
+fn events_for_final_needs_tiebreak_points() {
+    let f = fmt(One, FullSet);
+    assert_eq!(
+        events_for_final(&f, &Sets(vec![s(7, 6)])),
+        Err(InvalidScore::MissingTieBreak { index: 0 })
+    );
+}
+
+#[test]
+fn events_for_final_rejects_invalid() {
+    let f = fmt(One, FullSet);
+    assert_eq!(
+        events_for_final(&f, &Sets(vec![s(6, 5)])),
+        Err(InvalidScore::ImpossibleSet { index: 0 })
+    );
+    let t = Timed {
+        a: 1,
+        b: 0,
+        overtime_winner: None,
+    };
+    assert_eq!(events_for_final(&f, &t), Err(InvalidScore::WrongFormat));
+}
+
+#[test]
+fn events_for_final_star_point() {
+    let f = Format::Sets(SetRules {
+        deuce: StarPoint,
+        sets: One,
+        deciding: FullSet,
+    });
+    round_trip(&f, &Sets(vec![s(6, 0)]));
+}
