@@ -9,7 +9,7 @@ import { authMessage } from './auth';
 import { isHistoryPage, isPlayer, isPlayerList, isPlayerPage } from './guards';
 import { MAX_NAME_LENGTH } from './setup';
 import { strings } from './strings';
-import type { HistoryEntry, Page, Player, PlayerChange, PlayerPage, PlayerRecord } from './types';
+import type { FinalScore, HistoryEntry, Page, Player, PlayerChange, PlayerPage, PlayerRecord, SetScore } from './types';
 
 const enc = encodeURIComponent;
 
@@ -106,4 +106,27 @@ export function suggest(players: Player[], query: string, taken: string[]): Sugg
 /** "3 W · 1 L · 0 D". */
 export function recordText(r: PlayerRecord): string {
 	return strings.players.record(r.wins, r.losses, r.draws);
+}
+
+/**
+ * A finished match's score on one line: "6-4 3-6 10-7" for sets, "7-5" timed.
+ * A set won on a tie-break adds the loser's tie-break points, "7-6(5)"; a deciding super
+ * tie-break (its games are 1-0, its points in `tiebreak`) reads as its points. A timed match
+ * that went to overtime shows the tied games before the overtime game: "5-5, overtime".
+ */
+export function scoreText(score: FinalScore): string {
+	if (score.timed || score.sets.length === 0) {
+		if (score.overtime) return strings.history.overtimeScore(pair(score.regulation_games));
+		return pair(score.games);
+	}
+	return score.sets.map(setText).join(' ');
+}
+
+const pair = ([a, b]: readonly [number, number]) => `${a}-${b}`;
+
+function setText(set: SetScore): string {
+	const tb = set.tiebreak;
+	if (!tb) return pair([set.a, set.b]);
+	if (set.a + set.b === 1) return pair(tb);
+	return `${pair([set.a, set.b])}(${Math.min(tb[0], tb[1])})`;
 }

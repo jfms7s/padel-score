@@ -351,7 +351,39 @@ export const strings = {
 		}
 	},
 
+	// The history page, a player's page, and the result row they share.
+	history: {
+		title: 'Past matches',
+		link: 'History',
+		back: 'Home',
+		empty: 'Finished matches you started while signed in show up here.',
+		loadMore: 'Load more',
+		/** A timed match that went to overtime: the tied games, then this. */
+		overtimeScore: (games: string) => `${games}, overtime`,
+		winner: 'winner',
+		draw: 'Draw',
+		finalView: 'Final view',
+		finalViewLabel: (a: string, b: string) => `Final view of ${a} v ${b}`,
+		outcome: { win: 'Won', loss: 'Lost', draw: 'Drawn' },
+		record: 'Record',
+		/** The record's three numbers: the short label shown, and the word read out. */
+		recordParts: [
+			{ key: 'wins', short: 'W', long: 'Won' },
+			{ key: 'losses', short: 'L', long: 'Lost' },
+			{ key: 'draws', short: 'D', long: 'Drawn' }
+		],
+		placings: 'Placings',
+		/** "3rd–4th of 12, tournament". */
+		placing: (place: number, to: number, size: number, kind: 'tournament' | 'non_stop') =>
+			`${to > place ? `${ordinal(place)}–${ordinal(to)}` : ordinal(place)} of ${size}, ${kind === 'tournament' ? 'tournament' : 'non-stop'}`,
+		matches: 'Matches',
+		noMatches: 'No finished matches with this player yet.',
+		archived: 'Archived. Their record is kept.',
+		backToPlayers: 'Players'
+	},
+
 	// Home, signed in.
+	yourPages: 'Your players and history',
 	myMatches: 'My matches',
 	noMyMatches: 'Matches you start while signed in show up here, on any device.',
 
@@ -359,3 +391,10 @@ export const strings = {
 	networkError: "Can't reach the server.",
 	serverError: (status: number) => `The server answered ${status}.`
 } as const;
+
+/** 1st, 2nd, 3rd, 4th, 11th, 21st. */
+function ordinal(n: number): string {
+	const tens = n % 100;
+	if (tens >= 11 && tens <= 13) return `${n}th`;
+	return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}

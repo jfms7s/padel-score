@@ -47,6 +47,17 @@ Or set `SETUP_TOKEN` and use that value as the setup code. The setup creates the
 
 Expired sessions, invites, device codes and reset codes are deleted hourly, together with anonymous matches idle for 30 days. Owned matches are never purged.
 
+## Players and history
+
+Signed in, you also get:
+
+- **Players** (`/players`): a list of the people you play with. Add, rename, archive and restore them; archived players keep their record. Nothing is ever deleted.
+- **Picking players for a match**: on New match, each name field suggests players from your list, or adds the typed name to it. A typed name that isn't picked stays free text and is never added on its own.
+- **History** (`/history`): your finished matches, newest first, with the winner, the score and a link to the final view.
+- **Player pages** (`/players/{id}`): a player's wins, losses and draws, any placings, and their matches, each marked won, lost or drawn.
+
+Records come from the match's own score, so an undo that un-finishes a match takes it out of history and the records again. Anonymous matches are in no one's history.
+
 Environment variables:
 
 | Variable | Default | Meaning |

@@ -41,6 +41,10 @@
 	<a class="primary" href="/new">{strings.newMatch}</a>
 
 	{#if signedIn}
+		<nav class="links" aria-label={strings.yourPages}>
+			<a href="/players">{strings.players.title}</a>
+			<a href="/history">{strings.history.link}</a>
+		</nav>
 		<h2>{strings.myMatches}</h2>
 		{#if mineFailure}
 			<p class="hint" role="alert">{mineFailure}</p>
@@ -119,6 +123,25 @@
 		background: var(--ink);
 		color: var(--glass);
 		font-size: 17px;
+		font-weight: 650;
+		text-decoration: none;
+	}
+	.links {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 8px;
+		margin-top: 8px;
+	}
+	.links a {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: var(--tap);
+		border: 1px solid var(--line);
+		border-radius: 14px;
+		background: var(--panel);
+		color: var(--ink);
+		font-size: 16px;
 		font-weight: 650;
 		text-decoration: none;
 	}
