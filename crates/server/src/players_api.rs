@@ -84,14 +84,14 @@ struct CreatePlayer {
 
 /// `?before=&limit=` as sent; an empty value is the same as none.
 #[derive(Debug, Default, Deserialize)]
-struct PageQuery {
+pub(crate) struct PageQuery {
     before: Option<String>,
     limit: Option<String>,
 }
 
-struct Page {
-    before: Option<Cursor>,
-    limit: u32,
+pub(crate) struct Page {
+    pub(crate) before: Option<Cursor>,
+    pub(crate) limit: u32,
 }
 
 impl PageQuery {
@@ -116,7 +116,7 @@ impl PageQuery {
 }
 
 /// The page query, with any rejection (e.g. a repeated key) as a JSON 400.
-fn page_of(query: Result<Query<PageQuery>, QueryRejection>) -> Result<Page, ApiError> {
+pub(crate) fn page_of(query: Result<Query<PageQuery>, QueryRejection>) -> Result<Page, ApiError> {
     let Ok(Query(query)) = query else {
         return Err(ApiError::BadRequest);
     };

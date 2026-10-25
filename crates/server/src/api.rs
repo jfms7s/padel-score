@@ -101,6 +101,8 @@ pub enum ApiError {
     Validation {
         field: &'static str,
     },
+    /// 403 `history_private`: the player's combined history is not shared with the caller.
+    HistoryPrivate,
     /// 422 `invalid_player`: a player name that is blank or too long.
     InvalidPlayer,
     Internal,
@@ -152,6 +154,9 @@ impl IntoResponse for ApiError {
                 json!({ "error": "invalid_credentials" }),
             ),
             ApiError::Forbidden => (StatusCode::FORBIDDEN, json!({ "error": "forbidden" })),
+            ApiError::HistoryPrivate => {
+                (StatusCode::FORBIDDEN, json!({ "error": "history_private" }))
+            }
             ApiError::TooMany { retry_after } => {
                 let body = json!({ "error": "too_many_requests", "retry_after_secs": retry_after });
                 return (

@@ -25,10 +25,23 @@
 //!   409 `claim_decided`.
 //! - `GET /api/me/links` is `{items: [MyLink]}`; `DELETE /api/me/links/{player_id}` is 204 or 404.
 //!
+//! Combined history and privacy (see [`crate::privacy`], [`crate::linked_history`]):
+//!
+//! - `GET /api/me/results?before=&limit=` is the caller's `LinkedHistory`, all in full form.
+//! - `GET /api/me/privacy` and `PUT /api/me/privacy` `{visibility}` are the `Privacy`; a missing
+//!   or unknown visibility is 422 `validation` on `visibility`. `POST /api/me/privacy/rotate`
+//!   makes a new profile link, or is 409 `not_public`.
+//! - `GET /api/players/{id}/linked-history?before=&limit=` is the `LinkedHistory` of the account
+//!   an entry is linked to, for the entry's coordinator: 404 unless the entry is theirs, 409
+//!   `player_not_linked`, 403 `history_private`. Matches of other coordinators are redacted.
+//! - `GET /api/profiles/{token}?before=&limit=` needs no credential: the fully redacted
+//!   `LinkedHistory` of a public profile, or 404.
+//!
 //! Lookups, accepts, claim previews and claim creates count against the caller's `claims` budget.
 
 use axum::Router;
-use axum::extract::State;
+use axum::extract::rejection::QueryRejection;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use axum::routing::{delete, get, post};
@@ -40,7 +53,11 @@ use crate::accounts::{self, fragment_url};
 use crate::api::{ApiError, ApiJson, ApiPath, now};
 use crate::auth::SessionUser;
 use crate::claims::{Claim, ClaimTarget, MyClaim, SlotState};
+use crate::linked_history::LinkedEntry;
 use crate::linking::{ClaimPreview, MyLink};
+use crate::players_api::{Page, PageQuery, page_of};
+use crate::privacy::{Viewer, Visibility, redact, viewer_of};
+use crate::results::{Placing, Record};
 
 /// Where the PWA's link page lives; the code follows in the fragment.
 const LINK_PAGE: &str = "/link-player";
@@ -63,6 +80,11 @@ pub fn routes() -> Router<AppState> {
         .route("/api/me/claims/{id}", delete(withdraw))
         .route("/api/me/links", get(my_links))
         .route("/api/me/links/{player_id}", delete(unlink_self))
+        .route("/api/me/results", get(my_results))
+        .route("/api/me/privacy", get(privacy).put(set_privacy))
+        .route("/api/me/privacy/rotate", post(rotate_privacy))
+        .route("/api/players/{id}/linked-history", get(linked_history))
+        .route("/api/profiles/{token}", get(profile))
         .layer(axum::middleware::map_response(accounts::secret_headers))
 }
 
@@ -252,4 +274,150 @@ async fn unlink_self(
 ) -> Result<StatusCode, ApiError> {
     state.store.unlink_self(&user.user.id, &player_id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A combined history page: `/api/me/results`, `/api/players/{id}/linked-history` and
+/// `/api/profiles/{token}`.
+#[derive(Debug, Serialize)]
+struct LinkedHistory {
+    display_name: String,
+    record: Record,
+    placings: Vec<Placing>,
+    items: Vec<LinkedEntry>,
+    next: Option<String>,
+}
+
+/// `subject`'s combined history as `viewer` may see it.
+async fn history_for(
+    state: &AppState,
+    subject: &str,
+    display_name: String,
+    viewer: &Viewer,
+    page: Page,
+) -> Result<LinkedHistory, ApiError> {
+    let (items, next) = state
+        .store
+        .linked_history(subject, page.before.as_ref(), page.limit)
+        .await?;
+    Ok(LinkedHistory {
+        display_name,
+        record: state.store.linked_record(subject).await?,
+        placings: state.store.linked_placings(subject).await?,
+        items: items.into_iter().map(|e| redact(e, viewer)).collect(),
+        next: next.map(|c| c.to_string()),
+    })
+}
+
+async fn my_results(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Result<Json<LinkedHistory>, ApiError> {
+    let page = page_of(query)?;
+    let viewer = viewer_of(&state.store, &user.user.id, Some(&user.user.id), false)
+        .await?
+        .ok_or(ApiError::HistoryPrivate)?;
+    let name = user.user.display_name.clone();
+    Ok(Json(
+        history_for(&state, &user.user.id, name, &viewer, page).await?,
+    ))
+}
+
+async fn linked_history(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath(id): ApiPath<String>,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Result<Json<LinkedHistory>, ApiError> {
+    let page = page_of(query)?;
+    let owner = &user.user.id;
+    state
+        .store
+        .player(owner, &id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    let link = state
+        .store
+        .links(owner)
+        .await?
+        .remove(&id)
+        .ok_or(ApiError::Conflict("player_not_linked"))?;
+    let viewer = viewer_of(&state.store, &link.user_id, Some(owner), false)
+        .await?
+        .ok_or(ApiError::HistoryPrivate)?;
+    Ok(Json(
+        history_for(&state, &link.user_id, link.display_name, &viewer, page).await?,
+    ))
+}
+
+async fn profile(
+    State(state): State<AppState>,
+    ApiPath(token): ApiPath<String>,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Result<Json<LinkedHistory>, ApiError> {
+    let page = page_of(query)?;
+    let subject = state
+        .store
+        .user_by_profile_token(&token)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    let viewer = viewer_of(&state.store, &subject.id, None, true)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    Ok(Json(
+        history_for(&state, &subject.id, subject.display_name, &viewer, page).await?,
+    ))
+}
+
+/// The privacy setting and, while public, the profile link.
+#[derive(Debug, Serialize)]
+struct Privacy {
+    visibility: Visibility,
+    profile_url: Option<String>,
+}
+
+impl Privacy {
+    fn new(visibility: Visibility, token: Option<String>) -> Privacy {
+        Privacy {
+            visibility,
+            profile_url: token
+                .filter(|_| visibility == Visibility::Public)
+                .map(|t| format!("/p/{t}")),
+        }
+    }
+}
+
+async fn privacy(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+) -> Result<Json<Privacy>, ApiError> {
+    let (visibility, token) = state.store.visibility(&user.user.id).await?;
+    Ok(Json(Privacy::new(visibility, token)))
+}
+
+async fn set_privacy(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiJson(body): ApiJson<Value>,
+) -> Result<Json<Privacy>, ApiError> {
+    let visibility = body
+        .get("visibility")
+        .and_then(Value::as_str)
+        .and_then(Visibility::parse)
+        .ok_or(ApiError::Validation {
+            field: "visibility",
+        })?;
+    let token = state
+        .store
+        .set_visibility(&user.user.id, visibility)
+        .await?;
+    Ok(Json(Privacy::new(visibility, token)))
+}
+
+async fn rotate_privacy(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+) -> Result<Json<Privacy>, ApiError> {
+    let token = state.store.rotate_profile_token(&user.user.id).await?;
+    Ok(Json(Privacy::new(Visibility::Public, Some(token))))
 }
