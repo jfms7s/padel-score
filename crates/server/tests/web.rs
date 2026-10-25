@@ -12,7 +12,7 @@ use tower::ServiceExt;
 async fn app() -> axum::Router {
     let store = Store::new(db::connect("sqlite::memory:").await.unwrap());
     router(AppState::new(
-        Arc::new(Config::from_map(&HashMap::new())),
+        Arc::new(Config::from_map(&HashMap::new()).unwrap()),
         store,
     ))
 }
@@ -103,7 +103,7 @@ async fn non_get_page_is_405() {
 
 #[test]
 fn config_defaults() {
-    let c = Config::from_map(&HashMap::new());
+    let c = Config::from_map(&HashMap::new()).unwrap();
     assert_eq!(c.port, 8080);
     assert_eq!(c.data_dir, std::path::PathBuf::from("/data"));
     assert_eq!(c.database_url, "sqlite:///data/padel-score.db?mode=rwc");
@@ -116,7 +116,7 @@ fn config_blank_values_count_as_unset() {
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-    let c = Config::from_map(&map);
+    let c = Config::from_map(&map).unwrap();
     assert_eq!(c.port, 8080);
     assert_eq!(c.database_url, "sqlite:///tmp/x/padel-score.db?mode=rwc");
 }

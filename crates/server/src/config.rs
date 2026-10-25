@@ -1,5 +1,8 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
+
+use ipnet::IpNet;
 
 /// Runtime configuration, read from the environment. Blank values count as unset.
 ///
@@ -20,6 +23,50 @@ pub struct Config {
     pub public_origin: Option<String>,
     /// `SETUP_TOKEN`: the code that creates the first admin. Unset, a one-time code is logged.
     pub setup_token: Option<String>,
+    /// `TRUSTED_PROXIES`: comma-separated CIDRs or bare IPs of the reverse proxies whose
+    /// `X-Forwarded-For` is believed (see [`crate::client_ip`]). Empty by default: the TCP peer
+    /// is the client.
+    pub trusted_proxies: Vec<IpNet>,
+}
+
+/// A configuration value that cannot be used. Startup stops on it rather than guess.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigError {
+    /// A `TRUSTED_PROXIES` entry that is neither a CIDR nor an IP address.
+    TrustedProxy(String),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::TrustedProxy(entry) => write!(
+                f,
+                "TRUSTED_PROXIES entry {entry:?} is not a CIDR or an IP address"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
+/// Parse `TRUSTED_PROXIES`: comma-separated CIDRs (`10.42.0.0/16`) or bare IPs (`192.0.2.1`,
+/// taken as a /32 or /128). Blank entries are skipped; any other bad entry is an error.
+pub fn parse_trusted_proxies(raw: &str) -> Result<Vec<IpNet>, ConfigError> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| {
+            entry
+                .parse::<IpNet>()
+                .or_else(|_| {
+                    entry
+                        .parse::<IpAddr>()
+                        .map(|ip| IpNet::from(ip.to_canonical()))
+                })
+                .map(|net| net.trunc())
+                .map_err(|_| ConfigError::TrustedProxy(entry.to_owned()))
+        })
+        .collect()
 }
 
 impl std::fmt::Debug for Config {
@@ -33,6 +80,7 @@ impl std::fmt::Debug for Config {
             .field("commit", &self.commit)
             .field("secure_cookies", &self.secure_cookies)
             .field("public_origin", &self.public_origin)
+            .field("trusted_proxies", &self.trusted_proxies)
             .field(
                 "setup_token",
                 &self.setup_token.as_ref().map(|_| "<redacted>"),
@@ -42,12 +90,15 @@ impl std::fmt::Debug for Config {
 }
 
 impl Config {
-    pub fn from_env() -> Config {
+    pub fn from_env() -> Result<Config, ConfigError> {
         let map: HashMap<String, String> = std::env::vars().collect();
         Config::from_map(&map)
     }
 
-    pub fn from_map(map: &HashMap<String, String>) -> Config {
+    /// Read the configuration from `map`. Unparseable optional values fall back to their
+    /// defaults, except a bad `TRUSTED_PROXIES` entry, which is an error: silently trusting fewer
+    /// proxies than intended would key every client behind the proxy as one address.
+    pub fn from_map(map: &HashMap<String, String>) -> Result<Config, ConfigError> {
         let get = |key: &str| {
             map.get(key)
                 .map(|v| v.trim())
@@ -61,7 +112,8 @@ impl Config {
                 data_dir.join("padel-score.db").display()
             )
         });
-        Config {
+        let trusted_proxies = parse_trusted_proxies(&get("TRUSTED_PROXIES").unwrap_or_default())?;
+        Ok(Config {
             data_dir,
             database_url,
             port: get("PORT").and_then(|p| p.parse().ok()).unwrap_or(8080),
@@ -74,12 +126,13 @@ impl Config {
                 .map(|v| v.trim_end_matches('/').to_owned())
                 .filter(|v| !v.is_empty()),
             setup_token: get("SETUP_TOKEN"),
-        }
+            trusted_proxies,
+        })
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -88,7 +141,50 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
-        Config::from_map(&map)
+        Config::from_map(&map).unwrap()
+    }
+
+    #[test]
+    fn trusted_proxies_default_empty_and_accept_cidrs_and_bare_ips() {
+        assert!(config(&[]).trusted_proxies.is_empty());
+        assert!(
+            config(&[("TRUSTED_PROXIES", "  ")])
+                .trusted_proxies
+                .is_empty()
+        );
+        let c = config(&[(
+            "TRUSTED_PROXIES",
+            "10.42.0.0/16, 192.0.2.1 ,2001:db8::/32,::1,",
+        )]);
+        let shown: Vec<String> = c.trusted_proxies.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            shown,
+            ["10.42.0.0/16", "192.0.2.1/32", "2001:db8::/32", "::1/128"]
+        );
+    }
+
+    #[test]
+    fn bad_trusted_proxies_entry_is_a_config_error() {
+        for bad in [
+            "10.42.0.0/33",
+            "not-a-net",
+            "10.42.0.0/16, 300.1.1.1",
+            "10.0.0.1:80",
+        ] {
+            let map = HashMap::from([("TRUSTED_PROXIES".to_owned(), bad.to_owned())]);
+            let Err(error) = Config::from_map(&map) else {
+                panic!("{bad:?} was accepted");
+            };
+            let shown = error.to_string();
+            assert!(shown.contains("TRUSTED_PROXIES"), "{shown}");
+            let offending = bad.split(',').next_back().unwrap().trim();
+            let offending = if bad.starts_with("10.42.0.0/16,") {
+                offending
+            } else {
+                bad
+            };
+            assert!(shown.contains(offending), "{shown}");
+        }
     }
 
     #[test]

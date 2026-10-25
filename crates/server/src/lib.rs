@@ -1,10 +1,12 @@
 pub mod accounts_store;
 pub mod api;
 pub mod auth;
+pub mod client_ip;
 pub mod commands;
 pub mod config;
 pub mod db;
 pub mod hub;
+pub mod ratelimit;
 pub mod retention;
 pub mod store;
 pub mod tokens;
@@ -34,6 +36,8 @@ pub struct AppState {
     pub shutdown: CancellationToken,
     /// Bounds concurrent argon2 work to [`auth::HASH_PERMITS`]; see [`auth::hash_password`].
     pub password_permits: Arc<Semaphore>,
+    /// The named rate limiters (`state.limits.login_ip`, ...); see [`ratelimit::Limits`].
+    pub limits: Arc<ratelimit::Limits>,
 }
 
 impl AppState {
@@ -44,6 +48,7 @@ impl AppState {
             hub: Arc::new(Hub::new()),
             shutdown: CancellationToken::new(),
             password_permits: Arc::new(Semaphore::new(auth::HASH_PERMITS)),
+            limits: Arc::new(ratelimit::Limits::new()),
         }
     }
 }

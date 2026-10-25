@@ -350,7 +350,7 @@ mod tests {
 
     fn config(secure: &str) -> Config {
         let map = HashMap::from([("SECURE_COOKIES".to_owned(), secure.to_owned())]);
-        Config::from_map(&map)
+        Config::from_map(&map).unwrap()
     }
 
     #[tokio::test]

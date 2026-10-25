@@ -11,7 +11,14 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    let config = Config::from_env();
+    let config = match Config::from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            // Logging is configured from the config, so this goes straight to stderr.
+            eprintln!("error: {error}");
+            std::process::exit(1);
+        }
+    };
     if let Ok(raw) = std::env::var("PORT")
         && !raw.trim().is_empty()
         && raw.trim().parse::<u16>().is_err()
@@ -47,19 +54,27 @@ async fn main() -> Result<(), BoxError> {
     let state = AppState::new(Arc::new(config), store);
     let streams = state.shutdown.clone();
     tokio::spawn(padel_score_server::retention::run(state.clone()));
+    tokio::spawn(padel_score_server::ratelimit::run_sweeper(
+        state.limits.clone(),
+        state.shutdown.clone(),
+    ));
     let app = router(state)
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http());
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!(%addr, "listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown().await;
-            // End the SSE streams too, or they would hold graceful shutdown open.
-            streams.cancel();
-        })
-        .await?;
+    // Connect info gives the handlers the TCP peer, the base of the client IP (`client_ip`).
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        shutdown().await;
+        // End the SSE streams too, or they would hold graceful shutdown open.
+        streams.cancel();
+    })
+    .await?;
     Ok(())
 }
 

@@ -122,7 +122,7 @@ async fn purge_once_closes_hub_entries_of_purged_matches() {
     let (store, _) = setup().await;
     let old = idle_match(&store, 31 * DAY).await;
     let recent = idle_match(&store, DAY).await;
-    let state = AppState::new(Arc::new(Config::from_map(&HashMap::new())), store);
+    let state = AppState::new(Arc::new(Config::from_map(&HashMap::new()).unwrap()), store);
     let _old_sub = state.hub.subscribe(&old.id);
     let _recent_sub = state.hub.subscribe(&recent.id);
     assert_eq!(purge_once(&state, NOW).await, 1);
@@ -135,7 +135,10 @@ async fn run_purges_at_startup_and_stops_on_shutdown() {
     let (store, _) = setup().await;
     // Real time: a match idle since the epoch is far past retention.
     let old = store.create_match(new_match(), 1).await.unwrap();
-    let state = AppState::new(Arc::new(Config::from_map(&HashMap::new())), store.clone());
+    let state = AppState::new(
+        Arc::new(Config::from_map(&HashMap::new()).unwrap()),
+        store.clone(),
+    );
     let task = tokio::spawn(padel_score_server::retention::run(state.clone()));
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
     while exists(&store, &old).await {

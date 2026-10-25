@@ -34,7 +34,7 @@ async fn state_with(env: &[(&str, &str)]) -> AppState {
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
         .collect();
     let store = Store::new(db::connect("sqlite::memory:").await.unwrap());
-    AppState::new(Arc::new(Config::from_map(&map)), store)
+    AppState::new(Arc::new(Config::from_map(&map).unwrap()), store)
 }
 
 fn via_json(via: &AuthVia) -> Value {
