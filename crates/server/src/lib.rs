@@ -10,6 +10,7 @@ pub mod device;
 pub mod hub;
 pub mod owned;
 pub mod players;
+pub mod players_api;
 pub mod ratelimit;
 pub mod retention;
 pub mod store;

@@ -67,6 +67,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/view/{token}/stream", get(view_stream))
         .merge(crate::accounts::routes())
         .merge(crate::owned::routes())
+        .merge(crate::players_api::routes())
         .merge(crate::device::routes())
 }
 
@@ -98,6 +99,8 @@ pub enum ApiError {
     Validation {
         field: &'static str,
     },
+    /// 422 `invalid_player`: a player name that is blank or too long.
+    InvalidPlayer,
     Internal,
 }
 
@@ -114,7 +117,7 @@ impl From<StoreError> for ApiError {
             StoreError::InvalidRules(_) | StoreError::InvalidTeams => {
                 ApiError::InvalidMatch(e.to_string())
             }
-            StoreError::InvalidPlayerName => ApiError::Validation { field: "name" },
+            StoreError::InvalidPlayerName => ApiError::InvalidPlayer,
             StoreError::Conflict(code) => ApiError::Conflict(code),
             StoreError::Corrupt(_) | StoreError::Db(_) => internal(e),
         }
@@ -160,6 +163,10 @@ impl IntoResponse for ApiError {
             ApiError::Validation { field } => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 json!({ "error": "validation", "field": field }),
+            ),
+            ApiError::InvalidPlayer => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "error": "invalid_player" }),
             ),
             ApiError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
