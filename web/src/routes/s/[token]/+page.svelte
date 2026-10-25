@@ -43,7 +43,8 @@
 		offline: false,
 		conflict: null,
 		resolving: false,
-		problem: null
+		problem: null,
+		unsaved: false
 	};
 	let sending = $state.raw<QueueState>(idle);
 	let engine = $state(engineReady());
@@ -77,6 +78,7 @@
 
 	function accept(incoming: MatchView) {
 		view = latestView(view, incoming);
+		sender?.viewArrived();
 	}
 
 	function say(message: string) {
@@ -237,7 +239,7 @@
 	onbeforeunload={(e) => {
 		// Taps not yet on the server are kept on this device and sent after a reload, but warn
 		// before the page goes with any still waiting.
-		if (sending.pending.length > 0 || sending.queued.length > 0) {
+		if (sending.unsaved) {
 			e.preventDefault();
 			e.returnValue = '';
 		}

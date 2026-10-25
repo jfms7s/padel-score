@@ -87,6 +87,8 @@ export interface QueueState {
 	/** "Keep this phone's score" is on its way. */
 	resolving: boolean;
 	problem: Problem | null;
+	/** Something here isn't settled on the server yet (kept in the store; warn on unload). */
+	unsaved: boolean;
 }
 
 export type FlushOutcome =
@@ -243,7 +245,7 @@ interface StoredJob {
 	after: number | null;
 	target: number | 'none' | null;
 	conflicts: number;
-	offline: boolean;
+	offline?: boolean;
 }
 
 interface Outstanding {
@@ -301,7 +303,8 @@ const job: Check = (v) =>
 	nul(int)(v.after) &&
 	(v.target === null || v.target === 'none' || int(v.target)) &&
 	int(v.conflicts) &&
-	typeof v.offline === 'boolean';
+	// Missing in queues stored before the flag existed: not offline.
+	(v.offline === undefined || typeof v.offline === 'boolean');
 const stored: Check = (v) =>
 	obj(v) &&
 	v.v === 1 &&
@@ -375,7 +378,12 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		const s = loaded.value;
 		const byId = new Map<number, Job>();
 		jobs = s.jobs.map((j) => {
-			const restored: Job = { ...j, after: j.after === null ? null : (byId.get(j.after) ?? null), attempt: 0 };
+			const restored: Job = {
+				...j,
+				after: j.after === null ? null : (byId.get(j.after) ?? null),
+				attempt: 0,
+				offline: j.offline ?? false
+			};
 			byId.set(j.id, restored);
 			return restored;
 		});
@@ -384,7 +392,10 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		base = s.base;
 		outstanding = s.outstanding;
 		nextId = Math.max(s.next, ...s.jobs.map((j) => j.id + 1));
-		if (queued.length > 0 || outstanding !== null) mode = 'offline';
+		// Anything that can still end in the choice keeps the queue out of live sending.
+		if (queued.length > 0 || outstanding !== null || carried.length > 0 || jobs.some((j) => j.offline)) {
+			mode = 'offline';
+		}
 	} else if (loaded.kind === 'discarded') {
 		forget();
 	}
@@ -399,7 +410,7 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 	}
 
 	function persist() {
-		if (jobs.length === 0 && queued.length === 0 && outstanding === null) return forget();
+		if (!unsaved()) return forget();
 		const s: Stored = {
 			v: 1,
 			next: nextId,
@@ -430,6 +441,9 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		return { server: conflictView, mine: mineView(conflictView, base ?? snapshot(conflictView), mine(), replay) };
 	}
 
+	/** Taps not settled on the server yet: worth keeping in the store, and a warning on unload. */
+	const unsaved = () => jobs.length > 0 || queued.length > 0 || carried.length > 0 || outstanding !== null;
+
 	const mine = (): Intent[] => [...carried, ...queued.map((q) => q.intent)];
 
 	const state = (): QueueState => ({
@@ -440,7 +454,8 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		offline: mode !== 'live',
 		conflict: conflictOf(),
 		resolving: outstanding?.kind === 'replace',
-		problem
+		problem,
+		unsaved: unsaved()
 	});
 
 	/** After every change: keep it, tell the page. */
@@ -863,6 +878,10 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 			changed();
 		},
 		reconnect,
+		/** The page has a new server view: a choice that waited for one can open now. */
+		viewArrived() {
+			if (!stopped && !busy) void pump();
+		},
 		/** Send the queue now; resolves with what came of it. */
 		flush(): Promise<FlushOutcome> {
 			if (mode === 'conflict') {

@@ -522,6 +522,76 @@ describe('review fixes', () => {
 	});
 });
 
+describe('review fixes, round 2', () => {
+	it('reload_with_flagged_inflight_job_still_asks', async () => {
+		const storage = new MemoryStorage();
+		const h = harness([offline], { view: seen, storage });
+		h.queue.point('a');
+		await tick();
+		h.queue.stop();
+		// Reloaded before the tap was answered; the watch scored B, B meanwhile.
+		const landed = grow(grow(seen, ['b', 'b']), ['a']);
+		const r = harness([applied(landed)], { view: null, storage, idsFrom: 50 });
+		expect(r.queue.state().offline).toBe(true);
+		await tick();
+		expect(r.sent).toEqual(h.sent);
+		const c = r.queue.state().conflict;
+		expect(c?.server).toEqual(landed);
+		expect(points(c?.mine ?? null)).toEqual(['a', 'a']);
+	});
+
+	it('reload_with_carried_only_conflict_restores_sheet', async () => {
+		const storage = new MemoryStorage();
+		const landed = grow(grow(seen, ['b', 'b']), ['a']);
+		const h = harness([offline, applied(landed)], { view: seen, storage });
+		h.queue.point('a');
+		await tick();
+		h.queue.reconnect();
+		await tick();
+		expect(h.queue.state().conflict).not.toBeNull();
+		// Only a carried tap is left, and it is still worth keeping (and warning about).
+		expect(h.queue.state().unsaved).toBe(true);
+		expect(storage.getItem(KEY)).not.toBeNull();
+		h.queue.stop();
+
+		const r = harness([], { view: null, storage, idsFrom: 50, replace: [hang] });
+		expect(r.queue.state()).toMatchObject({ offline: true, unsaved: true });
+		r.queue.connection('live');
+		await tick();
+		// The page's first view arrives after the queue exists.
+		r.setView(landed);
+		r.queue.viewArrived();
+		await tick();
+		const c = r.queue.state().conflict;
+		expect(c?.server).toEqual(landed);
+		expect(points(c?.mine ?? null)).toEqual(['a', 'a']);
+		// A carried-only replace on its way is still unsaved work.
+		void r.queue.keepMine();
+		expect(r.queue.state()).toMatchObject({ resolving: true, unsaved: true });
+		expect(storage.getItem(KEY)).not.toBeNull();
+	});
+
+	it('a stored v1 job without the offline flag loads as not offline', () => {
+		const storage = new MemoryStorage();
+		const req = { client_id: 'c1', batch: false, base_revision: 1, commands: [{ kind: 'point', team: 'a' }] };
+		storage.setItem(
+			KEY,
+			JSON.stringify({
+				v: 1,
+				next: 2,
+				jobs: [{ id: 1, intent: { kind: 'point', team: 'a' }, base: 1, req, after: null, target: null, conflicts: 0 }],
+				queued: [],
+				carried: [],
+				base: null,
+				outstanding: null
+			})
+		);
+		const r = harness([hang], { view: seen, storage });
+		expect(r.queue.discardedOnLoad).toBe(false);
+		expect(r.queue.state()).toMatchObject({ offline: false, pending: [{ sent: true }] });
+	});
+});
+
 describe('local views', () => {
 	const state = (over: Partial<QueueState>): QueueState => ({
 		pending: [],
@@ -532,6 +602,7 @@ describe('local views', () => {
 		conflict: null,
 		resolving: false,
 		problem: null,
+		unsaved: false,
 		...over
 	});
 
