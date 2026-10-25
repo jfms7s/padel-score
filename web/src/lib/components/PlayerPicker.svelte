@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
 	import { MAX_NAME_LENGTH } from '#lib/setup.ts';
-	import { addPlayer, playerMessage, recordText, suggest } from '#lib/players.ts';
+	import { addPlayer, nameKey, playerMessage, recordText, suggest } from '#lib/players.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { Player } from '#lib/types.ts';
 
@@ -71,7 +71,8 @@
 		try {
 			const player = await addPlayer(name);
 			onadd(player);
-			pick(player);
+			// Bind it only if the field still holds that name (it may have been edited meanwhile).
+			if (nameKey(value) === nameKey(name)) pick(player);
 		} catch (e) {
 			failure = playerMessage(e);
 		} finally {
@@ -112,8 +113,11 @@
 		}
 	}
 
-	// A choice made by pointer must not blur the field first (that would close the list).
-	const keepFocus = (event: PointerEvent) => event.preventDefault();
+	let listEl = $state<HTMLUListElement | null>(null);
+
+	// A press on the list must not blur the field first (that would close the list before the
+	// click). Cancelling mousedown is what keeps focus in Chromium and Firefox; pointerdown too.
+	const keepFocus = (event: Event) => event.preventDefault();
 </script>
 
 <div class="picker">
@@ -122,7 +126,11 @@
 			bind:value
 			oninput={typed}
 			onfocus={() => (open = true)}
-			onblur={() => {
+			onblur={(event) => {
+				// A press on the list keeps focus here (see keepFocus); if focus went into it anyway,
+				// leave it open so the click still lands.
+				const to = event.relatedTarget;
+				if (to instanceof Node && listEl?.contains(to)) return;
 				open = false;
 				active = -1;
 			}}
@@ -143,18 +151,24 @@
 			<span class="visually-hidden" id={pickedId}>{t.fromList}</span>
 		{/if}
 	</div>
-	<ul class="list" id={listId} role="listbox" aria-label={t.suggestions(label)} hidden={!expanded}>
+	<ul
+		bind:this={listEl}
+		class="list"
+		id={listId}
+		role="listbox" aria-label={t.suggestions(label)}
+		hidden={!expanded}
+		onmousedown={keepFocus}
+		onpointerdown={keepFocus}
+	>
 		{#each options as option, i (option.kind === 'player' ? option.player.id : 'add')}
 			<!-- The keys are the combobox's: focus stays in the field (aria-activedescendant). -->
 			<!-- svelte-ignore a11y_click_events_have_key_events -->
 			<li
 				id={optionId(i)}
 				role="option"
-				tabindex="-1"
 				aria-selected={i === active}
 				class:active={i === active}
 				class:add={option.kind === 'add'}
-				onpointerdown={keepFocus}
 				onclick={() => choose(i)}
 			>
 				{#if option.kind === 'player'}

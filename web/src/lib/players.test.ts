@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setUnauthorizedHandler } from './api';
 import { addPlayer, getHistory, getPlayerPage, listPlayers, recordText, suggest, updatePlayer } from './players';
 import type { Player } from './types';
 
@@ -130,6 +131,20 @@ describe('players api', () => {
 		calls = serve(200, page);
 		expect(await getPlayerPage('p-ana', '1.x')).toEqual(page);
 		expect(calls[0]?.url).toBe('/api/players/p-ana?before=1.x');
+	});
+
+	it('list_players_quiet_does_not_redirect_on_401', async () => {
+		const redirect = vi.fn();
+		const restore = setUnauthorizedHandler(redirect);
+		try {
+			serve(401, { error: 'unauthorized' });
+			await expect(listPlayers({ quiet: true })).rejects.toMatchObject({ status: 401 });
+			expect(redirect).not.toHaveBeenCalled();
+			await expect(listPlayers()).rejects.toMatchObject({ status: 401 });
+			expect(redirect).toHaveBeenCalledOnce();
+		} finally {
+			restore();
+		}
 	});
 
 	it('a_malformed_player_list_is_a_server_error', async () => {

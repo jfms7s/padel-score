@@ -343,7 +343,6 @@ export const strings = {
 		suggestions: (slot: string) => `Players for ${slot}`,
 		addToList: (name: string) => `Add ‘${name}’ to my players`,
 		fromList: 'From your players',
-		picked: (name: string) => `${name}, from your players`,
 		listFailed: "Couldn't load your players, so names are typed only.",
 		errors: {
 			invalid_player: 'Enter a name of 1 to 40 characters.',

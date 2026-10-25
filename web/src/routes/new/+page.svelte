@@ -45,7 +45,7 @@
 		const s = await bootSession();
 		if (s.status !== 'signed_in') return;
 		try {
-			players = await listPlayers();
+			players = await listPlayers({ quiet: true });
 		} catch {
 			playersFailed = true;
 		}

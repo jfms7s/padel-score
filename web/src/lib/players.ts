@@ -13,9 +13,15 @@ import type { HistoryEntry, Page, Player, PlayerChange, PlayerPage, PlayerRecord
 
 const enc = encodeURIComponent;
 
-/** Every player, archived included, ordered by name. */
-export async function listPlayers(): Promise<Player[]> {
-	const list = await accountRequest<{ items: Player[] }>('/api/players', { signedIn: true, guard: isPlayerList });
+/**
+ * Every player, archived included, ordered by name. `quiet` turns off the 401 redirect to
+ * sign-in, for a page that works signed out too (new match), where a failure just means no list.
+ */
+export async function listPlayers(opts: { quiet?: boolean } = {}): Promise<Player[]> {
+	const list = await accountRequest<{ items: Player[] }>('/api/players', {
+		signedIn: !opts.quiet,
+		guard: isPlayerList
+	});
 	return list.items;
 }
 
