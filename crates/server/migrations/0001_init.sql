@@ -14,7 +14,7 @@ CREATE TABLE events (
 );
 CREATE INDEX events_client ON events(match_id, client_id);
 CREATE TABLE command_results (
-  match_id TEXT NOT NULL,
+  match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
   client_id TEXT NOT NULL, status INTEGER NOT NULL, body TEXT NOT NULL,
   PRIMARY KEY (match_id, client_id)
 );

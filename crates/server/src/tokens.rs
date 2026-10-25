@@ -5,7 +5,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 /// A fresh random token.
 ///
-/// Aborting on a missing OS randomness source is deliberate: the server must never hand out a
+/// Panicking on a missing OS randomness source is deliberate: the server must never hand out a
 /// predictable token, and cannot do anything useful without one.
 #[allow(clippy::expect_used)]
 pub fn new_token() -> String {

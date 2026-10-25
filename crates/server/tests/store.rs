@@ -269,3 +269,57 @@ async fn file_database_uses_wal_and_foreign_keys() {
         let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
     }
 }
+
+#[tokio::test]
+async fn deleting_a_match_removes_events_and_results() {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    let s = Store::new(pool.clone());
+    let m = s.create_match(new_match(), 1).await.unwrap();
+    let mut tx = s.begin().await.unwrap();
+    append(&mut tx, &m.id, 1, Event::TimeUp, "c", 1)
+        .await
+        .unwrap();
+    save_result(&mut tx, &m.id, "c", 200, "{}").await.unwrap();
+    tx.commit().await.unwrap();
+    sqlx::query("DELETE FROM matches WHERE id = ?")
+        .bind(&m.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(s.events(&m.id).await.unwrap().is_empty());
+    assert!(s.find_result(&m.id, "c").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn mark_unknown_seq_errors() {
+    let s = store().await;
+    let m = s.create_match(new_match(), 1).await.unwrap();
+    let mut tx = s.begin().await.unwrap();
+    append(&mut tx, &m.id, 1, Event::TimeUp, "c", 1)
+        .await
+        .unwrap();
+    let r = mark(&mut tx, &m.id, &[1, 9], EventState::Undone).await;
+    assert!(matches!(r, Err(StoreError::NotFound)));
+}
+
+#[tokio::test]
+async fn touch_unknown_match_errors() {
+    let s = store().await;
+    let mut tx = s.begin().await.unwrap();
+    assert!(matches!(
+        touch(&mut tx, "missing", 1).await,
+        Err(StoreError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn duplicate_seq_append_is_refused() {
+    let s = store().await;
+    let m = s.create_match(new_match(), 1).await.unwrap();
+    let mut tx = s.begin().await.unwrap();
+    append(&mut tx, &m.id, 1, Event::TimeUp, "c", 1)
+        .await
+        .unwrap();
+    let r = append(&mut tx, &m.id, 1, Event::TimeUp, "d", 1).await;
+    assert!(matches!(r, Err(StoreError::Db(_))));
+}

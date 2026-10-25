@@ -24,6 +24,7 @@ const MAX_NAME_CHARS: usize = 40;
 pub enum StoreError {
     InvalidRules(RulesError),
     InvalidTeams,
+    NotFound,
     Db(sqlx::Error),
 }
 
@@ -32,6 +33,7 @@ impl fmt::Display for StoreError {
         match self {
             StoreError::InvalidRules(e) => write!(f, "invalid rules: {e}"),
             StoreError::InvalidTeams => write!(f, "invalid team names"),
+            StoreError::NotFound => write!(f, "not found"),
             StoreError::Db(e) => write!(f, "database error: {e}"),
         }
     }
@@ -199,6 +201,20 @@ pub async fn match_by_scorer_token_in(
     Ok(row.as_ref().map(match_from_row).transpose()?)
 }
 
+pub async fn match_by_id_in(
+    conn: &mut SqliteConnection,
+    id: &str,
+) -> Result<Option<StoredMatch>, StoreError> {
+    let row = sqlx::query(
+        "SELECT id, scorer_token, spectator_token, format, start, teams, revision, \
+         last_activity_at FROM matches WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.as_ref().map(match_from_row).transpose()?)
+}
+
 /// Every event of the match in seq order, whatever its state.
 pub async fn events_in(
     conn: &mut SqliteConnection,
@@ -280,23 +296,31 @@ pub async fn mark(
     state: EventState,
 ) -> Result<(), StoreError> {
     for seq in seqs {
-        sqlx::query("UPDATE events SET state = ? WHERE match_id = ? AND seq = ?")
+        let done = sqlx::query("UPDATE events SET state = ? WHERE match_id = ? AND seq = ?")
             .bind(state.as_str())
             .bind(match_id)
             .bind(seq)
             .execute(&mut **tx)
             .await?;
+        if done.rows_affected() != 1 {
+            return Err(StoreError::NotFound);
+        }
     }
     Ok(())
 }
 
 /// Record that a command was applied: bump the revision and the last activity.
 pub async fn touch(tx: &mut Tx<'_>, match_id: &str, now: i64) -> Result<(), StoreError> {
-    sqlx::query("UPDATE matches SET revision = revision + 1, last_activity_at = ? WHERE id = ?")
-        .bind(now)
-        .bind(match_id)
-        .execute(&mut **tx)
-        .await?;
+    let done = sqlx::query(
+        "UPDATE matches SET revision = revision + 1, last_activity_at = ? WHERE id = ?",
+    )
+    .bind(now)
+    .bind(match_id)
+    .execute(&mut **tx)
+    .await?;
+    if done.rows_affected() != 1 {
+        return Err(StoreError::NotFound);
+    }
     Ok(())
 }
 
@@ -329,7 +353,8 @@ impl Store {
         Store { pool }
     }
 
-    pub fn pool(&self) -> &SqlitePool {
+    #[allow(dead_code)] // used by later tasks (retention, SSE)
+    pub(crate) fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
