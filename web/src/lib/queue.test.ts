@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type CommandOutcome } from './api';
 import { replayLocal } from './engine';
-import { localView, MAX_COMMANDS, mineView, type QueueState } from './queue';
+import { localView, MAX_COMMANDS, mineView, takeAbandoned, type QueueState } from './queue';
 import { asView } from './fixtures/load';
 import {
 	applied,
@@ -15,6 +15,7 @@ import {
 	offline,
 	points,
 	tick,
+	TOKEN,
 	undone
 } from './fixtures/queue-harness';
 import onePoint from './fixtures/view-one-point.json';
@@ -689,6 +690,55 @@ describe('locked by the coordinator', () => {
 		empty.queue.locked(server);
 		expect(empty.dropped).toEqual([]);
 		expect(empty.views).toEqual([server]);
+	});
+});
+
+describe('taps left behind by a match that left the court', () => {
+	it('take_abandoned_counts_and_clears_unsent_taps', async () => {
+		// Offline: two taps waiting, then an undo of the last; the match leaves the court.
+		const h = offlineWith(['a', 'b']);
+		h.queue.undo();
+		h.queue.point('a');
+		await tick();
+		h.queue.stop();
+		const n = stored(h.storage).queued.length;
+		expect(n).toBeGreaterThan(0);
+		expect(takeAbandoned(h.storage, TOKEN)).toBe(n);
+		expect(h.storage.getItem(KEY)).toBeNull();
+		// Once taken there is nothing more to report.
+		expect(takeAbandoned(h.storage, TOKEN)).toBe(0);
+	});
+
+	it('take_abandoned_counts_a_live_tap_never_answered', async () => {
+		const h = harness([hang], { view: seen });
+		h.queue.point('a');
+		await tick();
+		h.queue.stop();
+		expect(takeAbandoned(h.storage, TOKEN)).toBe(1);
+		expect(h.storage.getItem(KEY)).toBeNull();
+	});
+
+	it('take_abandoned_is_zero_for_nothing_stored_and_clears_unreadable', () => {
+		const storage = new MemoryStorage();
+		expect(takeAbandoned(storage, TOKEN)).toBe(0);
+		storage.setItem(KEY, '{not json');
+		expect(takeAbandoned(storage, TOKEN)).toBe(0);
+		expect(storage.getItem(KEY)).toBeNull();
+		// Another match's queue is left alone.
+		storage.setItem('padel-score:queue:other', 'x');
+		takeAbandoned(storage, TOKEN);
+		expect(storage.getItem('padel-score:queue:other')).toBe('x');
+		// A store that throws reports nothing rather than crashing.
+		const broken = {
+			getItem: () => {
+				throw new Error('blocked');
+			},
+			setItem: () => {},
+			removeItem: () => {
+				throw new Error('blocked');
+			}
+		};
+		expect(takeAbandoned(broken, TOKEN)).toBe(0);
 	});
 });
 

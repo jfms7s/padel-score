@@ -346,6 +346,25 @@ function load(storage: StorageLike, key: string): Loaded {
 	return { kind: 'discarded' };
 }
 
+/**
+ * The taps a stopped queue left in `storage` for `token`, whose match has left this court (its
+ * old scorer token now answers 404, so they can never be sent). Removes them and returns how
+ * many there were: live ones never answered and queued ones. 0 when nothing (or nothing
+ * readable) was stored, or the store can't be read. Never throws.
+ */
+export function takeAbandoned(storage: StorageLike, token: string): number {
+	const key = queueKey(token);
+	const loaded = load(storage, key);
+	if (loaded.kind === 'none') return 0;
+	try {
+		storage.removeItem(key);
+	} catch {
+		// Blocked: nothing to report either way.
+		return 0;
+	}
+	return loaded.kind === 'ok' ? loaded.value.jobs.length + loaded.value.queued.length : 0;
+}
+
 // ---- the queue ---------------------------------------------------------------------------
 
 interface Job {

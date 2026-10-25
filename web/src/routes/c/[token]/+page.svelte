@@ -3,15 +3,17 @@
 	// unlocks audio and the wake lock), then follow the court: waiting, choosing who serves, the
 	// fence for the current match, and its final score with the next match. The fence is keyed
 	// by the current match's scorer token, so a new match gets a new queue and an old match's
-	// waiting taps never reach it.
+	// waiting taps never reach it: when the token moves on, those taps are cleared from the
+	// phone and a note says how many were lost.
 	import { page } from '$app/state';
 	import { ApiError, getView, postFinal, putStart, streamUrl } from '#lib/api.ts';
 	import { unlockAudio } from '#lib/audio.ts';
 	import { courtMatchText, courtScreen, finalRefusal, goneReason, isCourtState, loadJoined, saveJoined } from '#lib/court.ts';
 	import { advanceByCourt, courtStreamUrl, getCourt } from '#lib/events.ts';
 	import { latestView } from '#lib/fence.ts';
-	import { newClientId } from '#lib/ids.ts';
-	import { safeSessionStorage } from '#lib/storage.ts';
+	import { stickyClientId } from '#lib/ids.ts';
+	import { takeAbandoned } from '#lib/queue.ts';
+	import { safeSessionStorage, safeStorage } from '#lib/storage.ts';
 	import { openSseStream, openStream } from '#lib/stream.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { CourtState, MatchView, Start, TypedScore } from '#lib/types.ts';
@@ -39,6 +41,12 @@
 	let advanceFailure = $state<string | null>(null);
 	let fence = $state<ReturnType<typeof Fence> | undefined>();
 	let awake: Awake | null = null;
+	/** One client id per typed score while the sheet is open, so a retry is replayed. */
+	const finalIds = stickyClientId();
+	/** Taps lost with a match that left this court before they were sent. */
+	let abandoned = $state<string | null>(null);
+	/** The scorer token the fence last ran on (not reactive: only compared). */
+	let lastScorerToken: string | null = null;
 
 	const current = $derived(court?.current ?? null);
 	const next = $derived(court?.next ?? null);
@@ -145,6 +153,29 @@
 		};
 	});
 
+	// A match that left the court (advanced, moved, or its link rotated) takes its scorer token
+	// with it: taps still waiting for that token can never be sent, so clear them and say so.
+	$effect(() => {
+		const st = scorerToken;
+		const old = lastScorerToken;
+		if (st === null || st === old) return;
+		lastScorerToken = st;
+		if (old === null) return;
+		const n = takeAbandoned(safeStorage(), old);
+		if (n > 0) abandoned = t.abandoned(n);
+	});
+
+	// Each opening of the result sheet is a new request; retries inside it reuse its id.
+	$effect(() => {
+		if (sheetOpen) finalIds.reset();
+	});
+
+	// A reload restores the join from this tab: keep the screen on again (the join tap did it
+	// the first time). Released when the page goes.
+	$effect(() => {
+		if (joined) awake ??= keepAwake(navigator, document);
+	});
+
 	$effect(() => () => awake?.release());
 
 	function join() {
@@ -179,7 +210,7 @@
 		const st = scorerToken;
 		const v = view;
 		if (!st || !v) throw new ApiError(0, 'network', strings.networkError, true);
-		const out = await postFinal(st, { client_id: newClientId(), base_revision: v.revision, score });
+		const out = await postFinal(st, { client_id: finalIds.for(score), base_revision: v.revision, score });
 		if (out.status !== 'invalid_score') view = latestView(view, out.view);
 		// The coordinator's result stands: this phone's waiting taps go too.
 		if (out.status === 'locked') fence?.lockedOut(out.view);
@@ -305,7 +336,48 @@
 	</div>
 {/if}
 
+{#if abandoned}
+	<div class="abandoned" role="status">
+		<p>{abandoned}</p>
+		<button type="button" class="dismiss" onclick={() => (abandoned = null)}>{t.dismiss}</button>
+	</div>
+{/if}
+
 <style>
+	.abandoned {
+		position: fixed;
+		left: 16px;
+		right: 16px;
+		bottom: 16px;
+		z-index: 30;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		max-width: 28rem;
+		margin: 0 auto;
+		padding: 10px 12px 10px 16px;
+		border: 1px solid var(--warn);
+		border-radius: 14px;
+		background: var(--panel);
+		color: var(--ink);
+		box-shadow: 0 6px 24px rgb(0 0 0 / 0.25);
+	}
+	.abandoned p {
+		flex: 1;
+		margin: 0;
+		font-size: 15px;
+	}
+	.dismiss {
+		flex: none;
+		min-height: var(--tap);
+		padding: 0 14px;
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		background: transparent;
+		color: var(--ink);
+		font: inherit;
+		font-weight: 650;
+	}
 	.court-screen {
 		min-height: 100vh;
 		min-height: 100dvh;

@@ -120,7 +120,7 @@ export const strings = {
 		nothingToUndo: 'Nothing to undo.',
 		failed: (message: string) => `Couldn't send that. ${message}`,
 		lockedDropped: (n: number) =>
-			`The coordinator entered the result. ${n} queued ${n === 1 ? 'point' : 'points'} dropped.`
+			`The coordinator entered the result. ${n} queued ${n === 1 ? 'tap' : 'taps'} dropped.`
 	},
 
 	// Taps made offline, and the choice when the server moved meanwhile.
@@ -599,6 +599,11 @@ export const strings = {
 		changeServer: 'Change who serves',
 		startFailed: 'Couldn’t save who serves. Try again.',
 		advanceFailed: 'Couldn’t move to the next match. Try again.',
+		abandoned: (n: number) =>
+			n === 1
+				? "1 tap for the last match wasn't sent: the match left this court."
+				: `${n} taps for the last match weren't sent: the match left this court.`,
+		dismiss: 'Dismiss',
 		matchLabel: (label: string, match: string) => `${label}: ${match}`,
 		// The court viewer.
 		viewerLoading: 'Loading the court…',

@@ -203,8 +203,8 @@ describe('overlayTaps', () => {
 });
 
 describe('locked note', () => {
-	it('locked_dropped_note_counts_points', () => {
-		expect(strings.fence.lockedDropped(2)).toBe('The coordinator entered the result. 2 queued points dropped.');
-		expect(strings.fence.lockedDropped(1)).toBe('The coordinator entered the result. 1 queued point dropped.');
+	it('locked_dropped_note_counts_taps', () => {
+		expect(strings.fence.lockedDropped(2)).toBe('The coordinator entered the result. 2 queued taps dropped.');
+		expect(strings.fence.lockedDropped(1)).toBe('The coordinator entered the result. 1 queued tap dropped.');
 	});
 });

@@ -16,6 +16,7 @@ import finishedJson from './fixtures/view-finished.json';
 import newJson from './fixtures/view-new.json';
 import onePointJson from './fixtures/view-one-point.json';
 import type { StorageLike } from './setup';
+import { strings } from './strings';
 import type { CourtMatch, CourtState, EventTeam, EventViewMatch, MatchView } from './types';
 
 const fresh = asView(newJson);
@@ -173,5 +174,12 @@ describe('matchResultText', () => {
 		expect(matchResultText({ ...base, state: 'finished', winner: 'b', result }, teams)).toBe('6-4 · Winner: Rui / João');
 		const live = onePoint.score;
 		expect(matchResultText({ ...base, state: 'live', live }, teams)).toMatch(/^0-0, 15-0$/);
+	});
+});
+
+describe('abandoned taps note', () => {
+	it('abandoned_note_counts_taps', () => {
+		expect(strings.court.abandoned(2)).toBe("2 taps for the last match weren't sent: the match left this court.");
+		expect(strings.court.abandoned(1)).toBe("1 tap for the last match wasn't sent: the match left this court.");
 	});
 });
