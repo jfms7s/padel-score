@@ -242,8 +242,15 @@
 	.fence.board > :global(.board) {
 		flex: 1;
 	}
+	/* Stuck to the bottom of the viewport: the fence fills the screen, so a plain block after it
+	   would sit below the fold, out of sight. */
 	.claims {
-		padding: 8px 16px 24px;
+		position: sticky;
+		bottom: 0;
+		max-height: 40dvh;
+		overflow-y: auto;
+		border-top: 1px solid var(--line);
+		padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
 		background: var(--glass);
 		color: var(--ink);
 	}
