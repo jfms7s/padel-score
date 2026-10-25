@@ -67,6 +67,12 @@ async fn main() -> Result<(), BoxError> {
         tracing::error!(%error, "cannot start");
         std::process::exit(1);
     }
+    // History reads `match_results`; fill it for matches finished before it existed. A failure
+    // only leaves those old matches out of history until the next boot.
+    match padel_score_server::results::backfill(&state.store).await {
+        Ok(inserted) => tracing::info!(inserted, "match results backfilled"),
+        Err(error) => tracing::error!(%error, "match results backfill failed"),
+    }
     let streams = state.shutdown.clone();
     tokio::spawn(padel_score_server::retention::run(state.clone()));
     tokio::spawn(padel_score_server::ratelimit::run_sweeper(
