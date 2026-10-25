@@ -2,30 +2,29 @@
 	// The fence screen for the scorer: the live score, big enough to read from 10 m, with the
 	// whole team half (sideways) or the point buttons (upright) as the scoring remote.
 	import { page } from '$app/state';
-	import { ApiError, getScore, postCommands, streamUrl } from '#lib/api.ts';
+	import { ApiError, getScore, postCommands, replace, streamUrl } from '#lib/api.ts';
 	import { unlockAudio } from '#lib/audio.ts';
 	import { engineReady, initEngine, replayLocal } from '#lib/engine.ts';
 	import {
 		latestView,
 		loadLayout,
 		nextLayout,
-		optimisticView,
-		overlayTaps,
 		saveLayout,
 		setsSummary,
 		shareLinks,
 		spectatorFromHash,
 		type Layout
 	} from '#lib/fence.ts';
-	import { createSender, type Dropped, type SenderState } from '#lib/sender.ts';
+	import { createQueue, localView, type Dropped, type Problem, type Queue, type QueueState } from '#lib/queue.ts';
 	import { matchLabel, recentSpectator } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
 	import { openStream, type StreamStatus } from '#lib/stream.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { MatchView, Team } from '#lib/types.ts';
+	import type { ErrorKind, MatchView, Team } from '#lib/types.ts';
 	import { fenceModel } from '#lib/view.ts';
 	import { keepAwake, type Awake } from '#lib/wakelock.ts';
 	import BoardView from '#lib/components/BoardView.svelte';
+	import ConflictSheet from '#lib/components/ConflictSheet.svelte';
 	import CourtView from '#lib/components/CourtView.svelte';
 	import ShareSheet from '#lib/components/ShareSheet.svelte';
 	import UndoButton from '#lib/components/UndoButton.svelte';
@@ -36,7 +35,17 @@
 	let view = $state.raw<MatchView | null>(null);
 	let loadError = $state<string | null>(null);
 	let stream = $state<StreamStatus | null>(null);
-	let sending = $state.raw<SenderState>({ pending: [], offline: false });
+	const idle: QueueState = {
+		pending: [],
+		queued: [],
+		sending: 0,
+		base: null,
+		offline: false,
+		conflict: null,
+		resolving: false,
+		problem: null
+	};
+	let sending = $state.raw<QueueState>(idle);
 	let engine = $state(engineReady());
 	let notice = $state<string | null>(null);
 	let layoutPref = $state<Layout>('auto');
@@ -45,27 +54,26 @@
 	let spectator = $state<string | null>(null);
 	let origin = $state('');
 
-	let sender: ReturnType<typeof createSender> | null = null;
+	let sender: Queue | null = null;
 	let awake: Awake | null = null;
 	let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// Optimistic taps: the points still on their way, laid over the server's view until a newer
-	// view comes in (which already holds them, or tells otherwise).
-	const overlay = $derived(view ? overlayTaps(view, sending.pending) : []);
-	const shown = $derived.by(() => {
-		if (!view || overlay.length === 0 || !engine) return view;
-		return optimisticView(view, overlay, replayLocal) ?? view;
-	});
+	// Optimistic taps: the points still on their way, and the ones queued offline, laid over the
+	// server's view until a newer view comes in (which already holds them, or tells otherwise).
+	const shown = $derived(view && engine ? localView(view, sending, replayLocal) : view);
 	const model = $derived(shown ? fenceModel(shown) : null);
 	const layout = $derived(layoutPref === 'auto' ? (landscape ? 'court' : 'board') : layoutPref);
 	const offline = $derived(sending.offline || stream === 'offline');
-	const pending = $derived(sending.pending.length > 0);
+	const pending = $derived(sending.pending.length > 0 || sending.queued.length > 0);
 	const syncLabel = $derived(offline ? f.offline : stream === null ? f.connecting : f.synced);
 	const links = $derived(shareLinks(origin, token, spectator));
 	// A pending tap can always be taken back (locally, if it hasn't gone yet).
 	const canUndo = $derived(
-		(!!view && view.events.length > 0) || sending.pending.some((p) => p.intent.kind === 'point')
+		(!!shown && shown.events.length > 0) ||
+			sending.pending.some((p) => p.intent.kind === 'point') ||
+			sending.queued.some((p) => p.kind === 'point')
 	);
+	const problemText = $derived(sending.problem ? problemLine(sending.problem) : null);
 
 	function accept(incoming: MatchView) {
 		view = latestView(view, incoming);
@@ -77,13 +85,19 @@
 		noticeTimer = setTimeout(() => (notice = null), 3500);
 	}
 
+	function rejectedLine(e: ErrorKind) {
+		return typeof e === 'string' ? f.rejected[e] : f.rejected.invalid_rules;
+	}
+
+	function problemLine(p: Problem): string {
+		return strings.queue.failed(p.kind === 'rejected' ? rejectedLine(p.error) : p.message);
+	}
+
 	function dropped(d: Dropped) {
 		switch (d.reason.kind) {
-			case 'rejected': {
-				const e = d.reason.error;
-				say(typeof e === 'string' ? f.rejected[e] : f.rejected.invalid_rules);
+			case 'rejected':
+				say(rejectedLine(d.reason.error));
 				break;
-			}
 			case 'conflict':
 				say(f.undoConflict);
 				break;
@@ -112,6 +126,8 @@
 				if (!live) return;
 				stream = st;
 				if (st === 'gone') loadError = f.gone;
+				// The stream back means the line is: send what was queued.
+				else sender?.connection(st);
 			}
 		);
 		getScore(t).then(
@@ -124,8 +140,7 @@
 				s.close();
 			}
 		);
-		sender = createSender({
-			post: (req) => postCommands(t, req),
+		const q = createQueue(t, safeStorage(), { post: postCommands, replace }, replayLocal, {
 			view: () => view,
 			newClientId: () => crypto.randomUUID(),
 			setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -136,16 +151,25 @@
 				if (live) sending = st;
 			}
 		});
+		sender = q;
+		sending = q.state();
+		if (q.discardedOnLoad) say(strings.queue.lost);
+		const online = () => q.reconnect();
+		const offline = () => q.connection('offline');
+		addEventListener('online', online);
+		addEventListener('offline', offline);
 		const lock = keepAwake(navigator, document);
 		awake = lock;
 		return () => {
 			live = false;
 			s.close();
-			sender?.stop();
+			removeEventListener('online', online);
+			removeEventListener('offline', offline);
+			q.stop();
 			sender = null;
 			lock.release();
 			awake = null;
-			sending = { pending: [], offline: false };
+			sending = idle;
 		};
 	});
 
@@ -184,6 +208,14 @@
 		sender?.undo();
 	}
 
+	function keepServer() {
+		sender?.keepServer();
+	}
+
+	function keepMine() {
+		void sender?.keepMine();
+	}
+
 	function toggleLayout() {
 		layoutPref = nextLayout(layoutPref);
 		saveLayout(safeStorage(), layoutPref);
@@ -200,7 +232,8 @@
 
 <svelte:window
 	onbeforeunload={(e) => {
-		// Taps not yet on the server would be lost with the page.
+		// Taps not yet on the server are kept on this device and sent after a reload, but a live
+		// tap still on its way is worth a warning before the page goes.
 		if (sending.pending.length > 0) {
 			e.preventDefault();
 			e.returnValue = '';
@@ -283,10 +316,22 @@
 	{/if}
 
 	{#if notice}<p class="notice" role="alert">{notice}</p>{/if}
+	{#if problemText}
+		<div class="problem" role="alert">
+			<p>{problemText}</p>
+			<button type="button" onclick={() => sender?.discard()}>{strings.queue.discard}</button>
+		</div>
+	{/if}
 	<p class="visually-hidden" aria-live="polite">{announce}</p>
 </main>
 
 <ShareSheet bind:open={shareOpen} scoring={links.scoring} viewing={links.viewing} />
+<ConflictSheet
+	conflict={sending.conflict}
+	resolving={sending.resolving}
+	onkeepserver={keepServer}
+	onkeepmine={keepMine}
+/>
 
 <style>
 	.fence {
@@ -412,6 +457,36 @@
 		color: var(--glass);
 		font-weight: 650;
 		text-decoration: none;
+	}
+	.problem {
+		position: fixed;
+		left: 16px;
+		right: 16px;
+		bottom: 16px;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 10px;
+		margin: 0 auto;
+		max-width: 40rem;
+		padding: 12px 14px;
+		border-radius: 14px;
+		background: var(--warn);
+		color: #fff;
+		z-index: 2;
+	}
+	.problem p {
+		flex: 1 1 14rem;
+		margin: 0;
+	}
+	.problem button {
+		min-height: var(--tap);
+		padding: 0 16px;
+		border-radius: 12px;
+		border: 0;
+		background: #fff;
+		color: var(--ink);
+		font-weight: 650;
 	}
 	.notice {
 		position: fixed;

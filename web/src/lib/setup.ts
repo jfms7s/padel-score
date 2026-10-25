@@ -9,6 +9,8 @@ import type { CreateMatchRequest, DecidingSet, DeuceRule, Player, SetsFormat, Te
 export interface StorageLike {
 	getItem(key: string): string | null;
 	setItem(key: string, value: string): void;
+	/** `localStorage` has it; a store without it gets a `null` written instead. */
+	removeItem?(key: string): void;
 }
 
 export interface Setup {

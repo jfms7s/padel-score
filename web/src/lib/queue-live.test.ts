@@ -1,49 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { overlayTaps } from './fence';
-import { createSender, type Dropped, type SenderState } from './sender';
+import { createQueue } from './queue';
+import { replayLocal } from './engine';
 import { ApiError, postCommands, REQUEST_TIMEOUT_MS, type CommandOutcome } from './api';
 import type { CommandRequest, MatchView } from './types';
 import { asView } from './fixtures/load';
+import { grow } from './fixtures/queue-harness';
+import {
+	applied as appliedWith,
+	harness as base,
+	MemoryStorage,
+	offline,
+	tick,
+	type Answer
+} from './fixtures/queue-harness';
 import onePoint from './fixtures/view-one-point.json';
 import newMatch from './fixtures/view-new.json';
+
+// Task 9's live sending, now inside the queue: online, each tap is its own live command.
 
 const start = asView(newMatch);
 const after = asView(onePoint);
 
-function harness(answers: ((req: CommandRequest) => Promise<CommandOutcome>)[]) {
-	let view: MatchView | null = start;
-	const sent: CommandRequest[] = [];
-	const views: MatchView[] = [];
-	const dropped: Dropped[] = [];
-	const states: SenderState[] = [];
-	let ids = 0;
-	const post = vi.fn(async (req: CommandRequest) => {
-		sent.push(structuredClone(req));
-		const answer = answers.shift();
-		if (!answer) throw new Error('no answer queued');
-		return answer(req);
-	});
-	const sender = createSender({
-		post,
-		view: () => view,
-		newClientId: () => `id-${++ids}`,
-		setTimeout: (f, ms) => setTimeout(f, ms),
-		clearTimeout: (t) => clearTimeout(t),
-		onView: (v2) => {
-			views.push(v2);
-			view = v2;
-		},
-		onDropped: (d) => dropped.push(d),
-		onState: (s) => states.push(s)
-	});
-	return { sender, sent, views, dropped, states, post, setView: (v2: MatchView) => (view = v2) };
-}
-
-const applied = (view: MatchView) => async (): Promise<CommandOutcome> => ({ status: 'applied', view });
-const offline = async (): Promise<CommandOutcome> => {
-	throw new ApiError(0, 'network', 'down', true);
-};
-const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms);
+const harness = (answers: Answer<CommandRequest>[]) => base(answers, { view: start });
+const applied = appliedWith;
 
 beforeEach(() => {
 	vi.useFakeTimers();
@@ -52,7 +32,7 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-describe('createSender', () => {
+describe('live sending', () => {
 	it('sends a live point and reports the applied view', async () => {
 		const h = harness([applied(after)]);
 		h.sender.point('a');
@@ -151,7 +131,7 @@ describe('createSender', () => {
 		await tick(5000);
 		expect(h.post).toHaveBeenCalledTimes(4);
 		expect(new Set(h.sent.map((r) => JSON.stringify(r))).size).toBe(1);
-		expect(h.sender.state()).toEqual({ pending: [], offline: false });
+		expect(h.sender.state()).toMatchObject({ pending: [], queued: [], offline: false });
 	});
 
 	it('keeps an undo target fixed across retries', async () => {
@@ -233,19 +213,27 @@ describe('createSender', () => {
 		try {
 			const sent: CommandRequest[] = [];
 			let view: MatchView = start;
-			const sender = createSender({
-				post: (req) => {
-					sent.push(structuredClone(req));
-					return postCommands('t', req);
+			const sender = createQueue(
+				't',
+				new MemoryStorage(),
+				{
+					post: (_t, req) => {
+						sent.push(structuredClone(req));
+						return postCommands('t', req);
+					},
+					replace: () => Promise.reject(new Error('unused'))
 				},
-				view: () => view,
-				newClientId: () => crypto.randomUUID(),
-				setTimeout: (f, ms) => setTimeout(f, ms),
-				clearTimeout: (t) => clearTimeout(t),
-				onView: (v2) => (view = v2),
-				onDropped: () => {},
-				onState: () => {}
-			});
+				replayLocal,
+				{
+					view: () => view,
+					newClientId: () => crypto.randomUUID(),
+					setTimeout: (f, ms) => setTimeout(f, ms),
+					clearTimeout: (t) => clearTimeout(t),
+					onView: (v2) => (view = v2),
+					onDropped: () => {},
+					onState: () => {}
+				}
+			);
 			sender.point('a');
 			await tick(REQUEST_TIMEOUT_MS);
 			expect(sender.state().offline).toBe(true);
@@ -331,5 +319,38 @@ describe('undo binding', () => {
 		// The second undo found nothing left to undo once the first landed (start has no events).
 		expect(h.post).toHaveBeenCalledTimes(1);
 		expect(h.dropped.map((d) => d.reason.kind)).toEqual(['nothing']);
+	});
+
+	it('an undo bound behind a live point targets that point, not a later event', async () => {
+		let release!: (o: CommandOutcome) => void;
+		const h = harness([() => new Promise<CommandOutcome>((r) => (release = r)), hang]);
+		h.sender.point('a');
+		h.sender.undo();
+		await tick();
+		release({ status: 'applied', view: after });
+		// The watch scores before the undo goes: the stream shows its point as the latest event.
+		h.setView(grow(after, ['b']));
+		await tick();
+		expect(h.sent[1]?.commands).toEqual([{ kind: 'undo', target_seq: after.events.at(-1)?.seq }]);
+	});
+});
+
+describe('overlay base', () => {
+	it("a live tap's overlay base is its request's base_revision", async () => {
+		let release!: (o: CommandOutcome) => void;
+		const h = harness([() => new Promise<CommandOutcome>((r) => (release = r)), () => new Promise(() => {})]);
+		h.sender.point('a');
+		h.sender.point('b');
+		await tick();
+		// The stream brings a newer view (another device scored) before A's answer comes back.
+		const newer = grow(after, ['a'], 3);
+		h.setView(newer);
+		release({ status: 'applied', view: after });
+		await tick();
+		expect(h.sent[1]?.base_revision).toBe(newer.revision);
+		expect(h.sender.state().pending).toEqual([{ intent: { kind: 'point', team: 'b' }, base: newer.revision, sent: true }]);
+		// So the echo of B (one revision past the request's base) hides the overlay.
+		expect(overlayTaps(grow(newer, ['b']), h.sender.state().pending)).toEqual([]);
+		expect(overlayTaps(newer, h.sender.state().pending)).toEqual(['b']);
 	});
 });

@@ -5,7 +5,7 @@ import { strings } from './strings';
 import type { FenceModel, TeamModel } from './view';
 import type { Event, Format, MatchView, ReplayResult, Start, Team } from './types';
 import type { StorageLike } from './setup';
-import type { Pending } from './sender';
+import type { Pending } from './queue';
 
 /**
  * The view to show next. Revisions only grow, so an incoming view older than the one shown is

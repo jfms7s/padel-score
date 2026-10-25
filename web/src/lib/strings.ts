@@ -119,6 +119,21 @@ export const strings = {
 		failed: (message: string) => `Couldn't send that. ${message}`
 	},
 
+	// Taps made offline, and the choice when the server moved meanwhile.
+	queue: {
+		conflictTitle: 'Two different scores',
+		conflictHint: 'This phone scored while offline, and the score on the server changed too. Pick the one to keep.',
+		server: 'Score on the server',
+		mine: 'Score on this phone',
+		keepServer: "Keep the server's score",
+		keepMine: "Keep this phone's score",
+		saving: 'Saving…',
+		mineUnknown: "This phone's taps can't be scored here.",
+		discard: 'Discard these taps',
+		lost: "Taps saved on this phone couldn't be read, so they were dropped.",
+		failed: (message: string) => `The server didn't take the taps made offline. ${message}`
+	},
+
 	// The share sheet.
 	share: {
 		title: 'Share this match',
