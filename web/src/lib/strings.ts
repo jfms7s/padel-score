@@ -402,11 +402,63 @@ export const strings = {
 		allMatches: 'All their matches',
 		allMatchesHint: 'Every match across all coordinators. Other coordinators’ matches show no names.',
 		noAllMatches: 'No finished matches yet.',
-		matchLine: (a: string, b: string) => `${a} v ${b}`,
-		byCoordinator: (name: string) => `· ${name}`,
+		byCoordinator: (name: string) => `Coordinator: ${name}`,
 		anotherCoordinators: 'Another coordinator’s match',
 		private: 'Their wider history is private.',
 		loadFailed: 'Couldn’t load their wider history.',
+		// Claims from a match (the spectator page and the claim sheet).
+		thatsMe: 'That’s me',
+		thatsMeLabel: (name: string) => `That’s me: ${name}`,
+		claimSentShort: 'Claim sent',
+		sheet: {
+			title: 'Is this you?',
+			is: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
+			needsApproval: (coordinator: string) =>
+				`${coordinator} has to approve before you are linked. You see no scores until then.`,
+			send: 'Send claim',
+			sending: 'Sending…',
+			sent: (coordinator: string) => `Sent. ${coordinator} will see it next time they open their players.`,
+			linked: 'Linked.',
+			close: 'Close',
+			loading: 'Loading…'
+		},
+		// My results and the privacy setting (/profile).
+		profile: {
+			title: 'My results',
+			link: 'My results',
+			back: 'Home',
+			empty: 'Ask a coordinator to show you the link QR for your name, or tap ‘That’s me’ on a match you played in.',
+			linkedEntries: 'Linked entries',
+			linkedEntry: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
+			unlinkLabel: (name: string, coordinator: string) => `Unlink ${name} from ${coordinator}’s players`,
+			unlinkConfirm: (name: string) => `Unlink ${name}? Their matches stay in that coordinator’s history, and leave yours.`,
+			claimsTitle: 'My claims',
+			claimStatus: { pending: 'Waiting for approval', approved: 'Approved', declined: 'Declined', withdrawn: 'Withdrawn' },
+			claimLine: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
+			withdraw: 'Withdraw',
+			withdrawLabel: (name: string) => `Withdraw your claim on ${name}`,
+			privacyTitle: 'Who can see my history',
+			privacyOptions: {
+				private: { label: 'Private', hint: 'Only you' },
+				coordinators: { label: 'Coordinators', hint: 'Coordinators you’ve played for (default)' },
+				public: { label: 'Public', hint: 'Anyone with your profile link' }
+			},
+			profileLink: 'Your profile link',
+			profileLinkHint: 'Anyone with this link sees your record and results, without other people’s names.',
+			newLink: 'Make a new link',
+			newLinkConfirm: 'Make a new link? The old one stops working.',
+			newLinkYes: 'Yes, make a new link',
+			keepLink: 'Keep the old link',
+			privacySaved: 'Saved.',
+			loadMore: 'Load more',
+			loadFailed: 'Couldn’t load this part.'
+		},
+		// The public profile (/p/{token}).
+		publicProfile: {
+			title: (name: string) => `${name}’s results`,
+			notPublic: 'This profile isn’t public.',
+			note: 'Only dates, outcomes and scores are shown. No names.'
+		},
 		errors: {
 			link_code_invalid: 'This link has expired or was already used. Ask for a new one.',
 			link_overlaps: 'Two entries of one account can’t share a match or an event, and these do.',
@@ -417,7 +469,7 @@ export const strings = {
 			claim_declined: 'This claim was declined, so it can’t be made again.',
 			claim_status: 'This claim has changed. Reload and try again.',
 			not_public: 'This profile isn’t public.',
-			too_many_claims: 'Too many tries. Wait a little and try again.',
+			too_many_claims: 'You have too many open claims. Withdraw one first, then try again.',
 			history_private: 'Their wider history is private.'
 		}
 	},

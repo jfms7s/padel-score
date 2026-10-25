@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { authMessage, listMyMatches } from '#lib/auth.ts';
+	import { claimBadgeCount } from '#lib/linking.ts';
+	import { listPlayers } from '#lib/players.ts';
 	import { session } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
 	import { listRecent, scorerPath, type RecentMatch } from '#lib/setup.ts';
@@ -31,6 +33,22 @@
 		};
 	});
 
+	// Claims waiting on the coordinator, summed over the player list. Best effort: no badge on failure.
+	let claimCount = $state(0);
+	$effect(() => {
+		if (!signedIn) return;
+		let live = true;
+		listPlayers({ quiet: true }).then(
+			(list) => {
+				if (live) claimCount = claimBadgeCount(list);
+			},
+			() => {}
+		);
+		return () => {
+			live = false;
+		};
+	});
+
 	/** Only a session gets the tokens; without them there is no page to open. */
 	const openable = (m: MyMatch): m is MyMatch & { scorer_token: string } => typeof m.scorer_token === 'string';
 </script>
@@ -42,8 +60,11 @@
 
 	{#if signedIn}
 		<nav class="links" aria-label={strings.yourPages}>
-			<a href="/players">{strings.players.title}</a>
+			<a href="/players"
+				>{strings.players.title}{#if claimCount > 0}<span class="badge">{strings.linking.claimBadge(claimCount)}</span>{/if}</a
+			>
 			<a href="/history">{strings.history.link}</a>
+			<a class="wide" href="/profile">{strings.linking.profile.link}</a>
 		</nav>
 		<h2>{strings.myMatches}</h2>
 		{#if mineFailure}
@@ -144,6 +165,18 @@
 		font-size: 16px;
 		font-weight: 650;
 		text-decoration: none;
+	}
+	.links .wide {
+		grid-column: 1 / -1;
+	}
+	.badge {
+		margin-left: 8px;
+		padding: 0 8px;
+		border-radius: 999px;
+		background: var(--a-soft);
+		font-size: 12px;
+		font-weight: 650;
+		line-height: 22px;
 	}
 	ul {
 		list-style: none;

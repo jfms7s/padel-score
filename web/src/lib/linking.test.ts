@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	PENDING_LINK_KEY,
+	claimBadgeCount,
 	linkLabel,
+	outcomeText,
 	previewText,
 	stashLinkCode,
 	takeStashedLinkCode,
@@ -108,5 +110,20 @@ describe('the stashed link code', () => {
 		} finally {
 			Reflect.deleteProperty(globalThis, 'sessionStorage');
 		}
+	});
+});
+
+describe('outcomeText', () => {
+	it('outcome_text_win_loss_draw', () => {
+		expect(outcomeText({ outcome: 'win' })).toBe('Won');
+		expect(outcomeText({ outcome: 'loss' })).toBe('Lost');
+		expect(outcomeText({ outcome: 'draw' })).toBe('Drawn');
+	});
+});
+
+describe('claimBadgeCount', () => {
+	it('sums pending claims over the list', () => {
+		expect(claimBadgeCount([])).toBe(0);
+		expect(claimBadgeCount([{ pending_claims: 1 }, { pending_claims: 0 }, { pending_claims: 2 }])).toBe(3);
 	});
 });
