@@ -181,7 +181,7 @@ async fn marked_events_keep_their_rows() {
     let s = store().await;
     let m = s.create_match(new_match(), 1).await.unwrap();
     let mut tx = s.begin().await.unwrap();
-    for seq in 1..=3 {
+    for seq in 1..=4 {
         append(&mut tx, &m.id, seq, Event::Point(Team::A), "c", 10)
             .await
             .unwrap();
@@ -192,7 +192,7 @@ async fn marked_events_keep_their_rows() {
     mark(&mut tx, &m.id, &[3], EventState::Discarded)
         .await
         .unwrap();
-    mark(&mut tx, &m.id, &[], EventState::Replaced)
+    mark(&mut tx, &m.id, &[4], EventState::Replaced)
         .await
         .unwrap();
     tx.commit().await.unwrap();
@@ -203,10 +203,11 @@ async fn marked_events_keep_their_rows() {
         vec![
             EventState::Effective,
             EventState::Undone,
-            EventState::Discarded
+            EventState::Discarded,
+            EventState::Replaced
         ]
     );
-    assert_eq!(s.head_seq(&m.id).await.unwrap(), 3);
+    assert_eq!(s.head_seq(&m.id).await.unwrap(), 4);
 }
 
 #[tokio::test]
