@@ -5,6 +5,7 @@
 	import { ApiError, getScore, postCommands, replace, streamUrl } from '#lib/api.ts';
 	import { unlockAudio } from '#lib/audio.ts';
 	import { engineReady, initEngine, replayLocal } from '#lib/engine.ts';
+	import { newClientId } from '#lib/ids.ts';
 	import {
 		latestView,
 		loadLayout,
@@ -159,7 +160,7 @@
 		);
 		const q = createQueue(t, safeStorage(), { post: postCommands, replace }, replayLocal, {
 			view: () => view,
-			newClientId: () => crypto.randomUUID(),
+			newClientId: () => newClientId(),
 			setTimeout: (fn, ms) => setTimeout(fn, ms),
 			clearTimeout: (id) => clearTimeout(id),
 			onView: (v) => live && accept(v),
@@ -223,6 +224,7 @@
 	function point(team: Team) {
 		gesture();
 		if (model?.finished) return;
+		// A second tap within TAP_DEBOUNCE_MS is ignored by the queue as a double tap.
 		sender?.point(team);
 	}
 

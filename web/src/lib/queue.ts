@@ -112,6 +112,8 @@ export interface QueueHost {
 	/** The latest server view the page holds. */
 	view(): MatchView | null;
 	newClientId(): string;
+	/** A monotonic clock in ms for the double-tap guard (default `performance.now`). */
+	now?(): number;
 	setTimeout(f: () => void, ms: number): Timer;
 	clearTimeout(t: Timer): void;
 	/** A view the server answered with (applied or conflict). */
@@ -125,6 +127,8 @@ export interface QueueHost {
  * batch and a replace each go whole, so no more taps than this are queued.
  */
 export const MAX_COMMANDS = 1000;
+/** A point tap this soon after the last one counted is a bounce or a double tap: ignored. */
+export const TAP_DEBOUNCE_MS = 700;
 /** A live point that conflicts is resent fresh this many times before it is given up. */
 const MAX_CONFLICTS = 3;
 
@@ -372,6 +376,9 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 	let retry: Timer | null = null;
 	let attempt = 0;
 	let waiters: ((o: FlushOutcome) => void)[] = [];
+	/** When the last point tap that counted came in (host.now). */
+	let lastPoint: number | null = null;
+	const now = () => (host.now ? host.now() : performance.now());
 
 	const loaded = load(storage, key);
 	if (loaded.kind === 'ok') {
@@ -528,14 +535,26 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		return true;
 	}
 
-	function point(team: Team) {
-		if (stopped) return;
+	/**
+	 * A point tap. Returns false when it is ignored: the queue is stopped, or it came within
+	 * TAP_DEBOUNCE_MS of the last point that counted (for either team), as a bounce or a fat
+	 * finger does. Each tap gets its own client_id, so the server can't tell those apart.
+	 */
+	function point(team: Team): boolean {
+		if (stopped) return false;
+		const t = now();
+		// A clock that went back counts as a fresh start rather than a long silence.
+		if (lastPoint !== null && t >= lastPoint && t - lastPoint < TAP_DEBOUNCE_MS) return false;
+		lastPoint = t;
 		const intent: Intent = { kind: 'point', team };
 		if (mode === 'live' || !queue({ intent, after: null })) enqueueLive(intent);
+		return true;
 	}
 
 	function undo() {
 		if (stopped) return;
+		// Undo is never debounced, and a point right after it is a correction, not a bounce.
+		lastPoint = null;
 		if (mode === 'live') return undoLive();
 		const tail = queued.at(-1);
 		if (tail && tail.intent.kind === 'point' && queued.length > (outstanding?.count ?? 0)) {
@@ -611,7 +630,12 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		busy = true;
 		try {
 			const job = jobs[0];
-			if (job) await sendLive(job);
+			if (job) {
+				// An undo that names the latest event needs a view to find it: wait for one
+				// (viewArrived) rather than drop it as having nothing to undo.
+				if (job.req === null && job.intent.kind === 'undo' && job.target === null && !host.view()) return;
+				await sendLive(job);
+			}
 			else if (outstanding?.kind === 'replace') await sendOutstanding();
 			else if (mode === 'offline' && online && !outstanding && queued.length === 0 && carried.length > 0) {
 				askAboutCarried();
@@ -620,6 +644,12 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 				buildBatch();
 				await sendOutstanding();
 			} else return;
+		} catch (e) {
+			// Never a job left silently unsent: whatever threw (making a client id, say), what
+			// was going out is still queued, and goes again after the backoff.
+			console.error('queue: sending failed, will retry', e);
+			if (!stopped && retry === null) scheduleRetry();
+			return;
 		} finally {
 			busy = false;
 		}
@@ -916,11 +946,18 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 				stuck({ kind: 'failed', message: strings.queue.tooMany });
 				return Promise.resolve({ status: 'rejected', problem: { kind: 'failed', message: strings.queue.tooMany } });
 			}
+			let clientId: string;
+			try {
+				clientId = host.newClientId();
+			} catch (e) {
+				console.error('queue: could not make a client id', e);
+				return Promise.resolve({ status: 'idle' });
+			}
 			outstanding = {
 				kind: 'replace',
 				count: queued.length,
 				req: {
-					client_id: host.newClientId(),
+					client_id: clientId,
 					base_revision: conflictView.revision,
 					base_seq: plan.base_seq,
 					commands: plan.commands

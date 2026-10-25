@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { overlayTaps } from './fence';
-import { createQueue } from './queue';
+import { createQueue, TAP_DEBOUNCE_MS } from './queue';
 import { replayLocal } from './engine';
 import { ApiError, postCommands, REQUEST_TIMEOUT_MS, type CommandOutcome } from './api';
 import type { CommandRequest, MatchView } from './types';
 import { asView } from './fixtures/load';
-import { grow } from './fixtures/queue-harness';
+import { newClientId } from './ids';
+import { grow, KEY } from './fixtures/queue-harness';
 import {
 	applied as appliedWith,
 	harness as base,
@@ -226,7 +227,7 @@ describe('live sending', () => {
 				replayLocal,
 				{
 					view: () => view,
-					newClientId: () => crypto.randomUUID(),
+					newClientId: () => newClientId(),
 					setTimeout: (f, ms) => setTimeout(f, ms),
 					clearTimeout: (t) => clearTimeout(t),
 					onView: (v2) => (view = v2),
@@ -352,5 +353,112 @@ describe('overlay base', () => {
 		// So the echo of B (one revision past the request's base) hides the overlay.
 		expect(overlayTaps(grow(newer, ['b']), h.sender.state().pending)).toEqual([]);
 		expect(overlayTaps(newer, h.sender.state().pending)).toEqual(['b']);
+	});
+});
+
+describe('double tap', () => {
+	const clocked = (answers: Answer<CommandRequest>[]) => base(answers, { view: start, now: () => Date.now() });
+
+	it('double_tap_within_700ms_counts_once', async () => {
+		expect(TAP_DEBOUNCE_MS).toBe(700);
+		const h = clocked([applied(after)]);
+		expect(h.queue.point('a')).toBe(true);
+		await tick(300);
+		// A bounce, or the other team's button caught by the same finger: ignored either way.
+		expect(h.queue.point('a')).toBe(false);
+		await tick(399);
+		expect(h.queue.point('b')).toBe(false);
+		await tick(2000);
+		expect(h.sent.map((r) => r.commands)).toEqual([[{ kind: 'point', team: 'a' }]]);
+		expect(h.dropped).toEqual([]);
+	});
+
+	it('taps_800ms_apart_both_count', async () => {
+		const second = grow(after, ['a']);
+		const h = clocked([applied(after), applied(second)]);
+		expect(h.queue.point('a')).toBe(true);
+		await tick(800);
+		expect(h.queue.point('a')).toBe(true);
+		await tick();
+		expect(h.sent.map((r) => r.commands)).toEqual([[{ kind: 'point', team: 'a' }], [{ kind: 'point', team: 'a' }]]);
+	});
+
+	it('undo_is_not_debounced', async () => {
+		const h = clocked([applied(after), applied(start), applied(after)]);
+		h.queue.point('a');
+		await tick(100);
+		h.queue.undo();
+		await tick(100);
+		// A correction straight after the undo is a new tap, not a bounce of the first.
+		expect(h.queue.point('a')).toBe(true);
+		await tick();
+		expect(h.sent.map((r) => r.commands)).toEqual([
+			[{ kind: 'point', team: 'a' }],
+			[{ kind: 'undo', target_seq: after.events.at(-1)?.seq }],
+			[{ kind: 'point', team: 'a' }]
+		]);
+	});
+
+	it('debounces queued (offline) taps too', async () => {
+		const h = clocked([offline]);
+		h.queue.point('a');
+		await tick();
+		expect(h.queue.state().offline).toBe(true);
+		await tick(100);
+		expect(h.queue.point('b')).toBe(false);
+		expect(h.queue.state().pending.map((p) => p.intent)).toEqual([{ kind: 'point', team: 'a' }]);
+		expect(h.queue.state().queued).toEqual([]);
+		// Past the window, the next tap queues behind it.
+		await tick(700);
+		expect(h.queue.point('b')).toBe(true);
+		expect(h.queue.state().queued).toEqual([{ kind: 'point', team: 'b' }]);
+	});
+});
+
+describe('client ids and an early reload', () => {
+	it('pump_survives_id_generation_error', async () => {
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			let calls = 0;
+			const h = base([applied(after)], {
+				view: start,
+				newClientId: () => {
+					if (++calls === 1) throw new TypeError('crypto.randomUUID is not a function');
+					return 'id-ok';
+				}
+			});
+			h.queue.point('a');
+			await tick();
+			// Not sent, not lost: still waiting for its retry.
+			expect(h.post).not.toHaveBeenCalled();
+			expect(h.queue.state().pending.map((p) => p.intent)).toEqual([{ kind: 'point', team: 'a' }]);
+			expect(h.dropped).toEqual([]);
+			expect(error).toHaveBeenCalled();
+			await tick(1000);
+			expect(h.sent.map((r) => r.client_id)).toEqual(['id-ok']);
+			expect(h.queue.state().pending).toEqual([]);
+		} finally {
+			error.mockRestore();
+		}
+	});
+
+	it('stored_live_undo_survives_reload_before_first_view', async () => {
+		// A page that stored an unbound live undo, as one made just before the line went.
+		const first = base([], { view: null });
+		first.queue.undo();
+		first.queue.stop();
+		const stored = first.storage.map.get(KEY);
+		expect(stored).toBeDefined();
+		// Reload: the queue starts before the page has its first view.
+		const h = base([applied(start)], { view: null, storage: first.storage });
+		await tick();
+		expect(h.dropped).toEqual([]);
+		expect(h.post).not.toHaveBeenCalled();
+		expect(h.queue.state().pending.map((p) => p.intent)).toEqual([{ kind: 'undo' }]);
+		h.setView(after);
+		h.queue.viewArrived();
+		await tick();
+		expect(h.sent.map((r) => r.commands)).toEqual([[{ kind: 'undo', target_seq: after.events.at(-1)?.seq }]]);
+		expect(h.dropped).toEqual([]);
 	});
 });

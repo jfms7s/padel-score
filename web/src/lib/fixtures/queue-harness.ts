@@ -39,6 +39,11 @@ export interface HarnessOptions {
 	replace?: Answer<ReplaceRequest>[];
 	/** Client ids start after this many (a second queue on the same store must not reuse ids). */
 	idsFrom?: number;
+	/** The queue's clock for the double-tap guard. Default: each reading 1 s after the last, so
+	 *  taps in a row are never taken for a double tap. */
+	now?: () => number;
+	/** Client ids; default `id-1`, `id-2`, ... */
+	newClientId?: () => string;
 }
 
 export function harness(answers: Answer<CommandRequest>[], opts: HarnessOptions = {}) {
@@ -51,6 +56,7 @@ export function harness(answers: Answer<CommandRequest>[], opts: HarnessOptions 
 	const states: QueueState[] = [];
 	const replaceAnswers = opts.replace ?? [];
 	let ids = opts.idsFrom ?? 0;
+	let clock = 0;
 	const post = vi.fn(async (_token: string, req: CommandRequest) => {
 		sent.push(structuredClone(req));
 		const answer = answers.shift();
@@ -65,7 +71,8 @@ export function harness(answers: Answer<CommandRequest>[], opts: HarnessOptions 
 	});
 	const queue = createQueue(TOKEN, storage, { post, replace }, replayLocal, {
 		view: () => view,
-		newClientId: () => `id-${++ids}`,
+		newClientId: opts.newClientId ?? (() => `id-${++ids}`),
+		now: opts.now ?? (() => (clock += 1000)),
 		setTimeout: (f, ms) => setTimeout(f, ms),
 		clearTimeout: (t) => clearTimeout(t),
 		onView: (v2) => {
