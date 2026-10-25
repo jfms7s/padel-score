@@ -106,6 +106,7 @@ export const strings = {
 		loading: 'Loading the match',
 		notFound: "This match doesn't exist, or it has expired.",
 		loadFailed: "Couldn't load the match.",
+		gone: 'This match no longer exists.',
 		home: 'Home',
 		rejected: {
 			match_over: 'The match is over.',

@@ -83,4 +83,44 @@ describe('keepAwake', () => {
 		await flush();
 		expect(sentinels[0]?.release).toHaveBeenCalled();
 	});
+
+	it('retry asks again only while no lock is held', async () => {
+		const doc = fakeDoc();
+		let refuse = true;
+		const sentinels: { release: () => Promise<void>; addEventListener: (t: 'release', h: () => void) => void; fire: () => void }[] = [];
+		const request = vi.fn(async () => {
+			if (refuse) throw new DOMException('needs a gesture', 'NotAllowedError');
+			let onRelease = () => {};
+			const s = {
+				release: vi.fn(async () => {}),
+				addEventListener: (_: 'release', h: () => void) => void (onRelease = h),
+				fire: () => onRelease()
+			};
+			sentinels.push(s);
+			return s;
+		});
+		const lock = keepAwake({ wakeLock: { request } } as unknown as WakeNav, doc);
+		await flush();
+		expect(request).toHaveBeenCalledTimes(1);
+		refuse = false;
+		lock.retry();
+		await flush();
+		expect(request).toHaveBeenCalledTimes(2);
+		lock.retry();
+		await flush();
+		expect(request).toHaveBeenCalledTimes(2);
+		// The system drops the lock (battery saver): the next tap asks again.
+		sentinels[0]?.fire();
+		lock.retry();
+		await flush();
+		expect(request).toHaveBeenCalledTimes(3);
+		lock.release();
+		lock.retry();
+		await flush();
+		expect(request).toHaveBeenCalledTimes(3);
+	});
+
+	it('retry is a no-op without support', () => {
+		expect(() => keepAwake({} as WakeNav, fakeDoc()).retry()).not.toThrow();
+	});
 });

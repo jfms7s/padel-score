@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, createMatch, getScore, getView, postCommands, replace, streamUrl } from './api';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError, createMatch, getScore, getView, postCommands, replace, REQUEST_TIMEOUT_MS, streamUrl } from './api';
 import type { CommandRequest } from './types';
 import { asView } from './fixtures/load';
 import created from './fixtures/create-response.json';
@@ -140,12 +140,58 @@ describe('api', () => {
 		await expect(getScore('tok')).rejects.toMatchObject({ code: 'network', retryable: true });
 	});
 
-	it('keeps a real JSON 500 internal and not retryable', async () => {
+	it('keeps a real JSON 500 on a read internal and not retryable', async () => {
 		serve(500, { error: 'internal' });
-		await expect(postCommands('tok', REQ)).rejects.toMatchObject({
+		await expect(getScore('tok')).rejects.toMatchObject({
 			status: 500,
 			code: 'internal',
 			retryable: false
+		});
+	});
+
+	it.each([
+		[500, '{"error":"internal"}'],
+		[500, '<html>oops</html>'],
+		[507, '']
+	])('treats any %i on a command as retryable: client_id makes the resend safe', async (status, body) => {
+		vi.stubGlobal('fetch', async () => new Response(body, { status }));
+		await expect(postCommands('tok', REQ)).rejects.toMatchObject({ status, code: 'network', retryable: true });
+		await expect(
+			replace('tok', { client_id: 'c', base_revision: 1, base_seq: 1, commands: [] })
+		).rejects.toMatchObject({ status, code: 'network', retryable: true });
+	});
+
+	describe('timeouts', () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		/** A fetch that never answers, but gives up when its signal aborts, as fetch does. */
+		function hang() {
+			const signals: AbortSignal[] = [];
+			vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+				const signal = init?.signal;
+				if (signal) signals.push(signal);
+				return new Promise((_, reject) => {
+					signal?.addEventListener('abort', () => reject(new DOMException('timed out', 'TimeoutError')));
+				});
+			});
+			return signals;
+		}
+
+		it.each([
+			['postCommands', () => postCommands('tok', REQ)],
+			['getScore', () => getScore('tok')]
+		])('%s gives up after 10 s as a retryable network failure', async (_name, run) => {
+			const signals = hang();
+			const out = run().catch((e: unknown) => e);
+			await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
+			expect(signals[0]?.aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(await out).toMatchObject({ status: 0, code: 'network', retryable: true });
 		});
 	});
 

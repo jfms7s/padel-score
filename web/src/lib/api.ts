@@ -44,12 +44,39 @@ const GATEWAY = new Set([502, 503, 504]);
 const unreachable = (status: number) =>
 	new ApiError(status, 'network', strings.networkError, true);
 
-async function call(path: string, init?: RequestInit): Promise<{ status: number; body: unknown }> {
+/** How long a read or a command may take before it counts as lost (and a command is resent). */
+export const REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * A signal that aborts after `ms`. The same as `AbortSignal.timeout`, but built on the global
+ * `setTimeout` so tests with fake timers can drive it; `done()` clears the timer.
+ */
+function deadline(ms: number): { signal: AbortSignal; done: () => void } {
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(new DOMException('request timed out', 'TimeoutError')), ms);
+	return { signal: ctrl.signal, done: () => clearTimeout(timer) };
+}
+
+async function call(
+	path: string,
+	init?: RequestInit,
+	timeoutMs?: number
+): Promise<{ status: number; body: unknown }> {
+	const limit = timeoutMs === undefined ? null : deadline(timeoutMs);
+	try {
+		return await exchange(path, { ...init, signal: limit?.signal });
+	} finally {
+		limit?.done();
+	}
+}
+
+/** One request; a timeout aborts it like a dropped connection, so it is retryable. */
+async function exchange(path: string, init: RequestInit): Promise<{ status: number; body: unknown }> {
 	let res: Response;
 	try {
 		res = await fetch(path, {
 			...init,
-			headers: init?.body ? { 'content-type': 'application/json' } : undefined
+			headers: init.body ? { 'content-type': 'application/json' } : undefined
 		});
 	} catch {
 		throw unreachable(0);
@@ -79,8 +106,8 @@ function failure(status: number, body: unknown): ApiError {
 	return new ApiError(status, code, message);
 }
 
-async function request<T>(path: string, ok: number, init?: RequestInit): Promise<T> {
-	const { status, body } = await call(path, init);
+async function request<T>(path: string, ok: number, init?: RequestInit, timeoutMs?: number): Promise<T> {
+	const { status, body } = await call(path, init, timeoutMs);
 	if (status !== ok) throw failure(status, body);
 	return body as T;
 }
@@ -90,7 +117,17 @@ function post(body: unknown): RequestInit {
 }
 
 async function outcome(path: string, req: unknown): Promise<CommandOutcome> {
-	const { status, body } = await call(path, post(req));
+	let answer: { status: number; body: unknown };
+	try {
+		answer = await call(path, post(req), REQUEST_TIMEOUT_MS);
+	} catch (e) {
+		// A server error page on a command: whatever it was, a resend with the same client_id
+		// is safe, so it is retryable like any other lost answer.
+		if (e instanceof ApiError && e.status >= 500) throw unreachable(e.status);
+		throw e;
+	}
+	const { status, body } = answer;
+	if (status >= 500) throw unreachable(status);
 	const b = body as ApiErrorBody;
 	if (status === 200) return { status: 'applied', view: body as MatchView };
 	if (status === 409 && b.error === 'conflict') return { status: 'conflict', view: b.view };
@@ -106,7 +143,7 @@ export function createMatch(req: CreateMatchRequest): Promise<CreatedMatch> {
 
 /** The scorer's view; the token must be a scoring token. */
 export function getScore(token: string): Promise<MatchView> {
-	return request(`/api/score/${enc(token)}`, 200);
+	return request(`/api/score/${enc(token)}`, 200, undefined, REQUEST_TIMEOUT_MS);
 }
 
 /** The read-only view; either token works. */

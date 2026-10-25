@@ -9,6 +9,7 @@ import {
 	loadLayout,
 	nextLayout,
 	optimisticView,
+	overlayTaps,
 	saveLayout,
 	setsSummary,
 	shareLinks,
@@ -191,5 +192,31 @@ describe('optimisticView', () => {
 		const point = third.events.at(-1)?.event;
 		if (!point || point === 'time_up') throw new Error('fixture');
 		expect(optimisticView(before, [point.point], replayLocal)?.score).toEqual(third.score);
+	});
+});
+
+describe('overlayTaps', () => {
+	const view = v(onePoint);
+	const r = view.revision;
+	const tap = (team: 'a' | 'b', base: number, sent: boolean) => ({
+		intent: { kind: 'point' as const, team },
+		base,
+		sent
+	});
+
+	it('lays every unsent tap over any view', () => {
+		expect(overlayTaps(withRevision(view, r + 5), [tap('a', r, false), tap('b', r, false)])).toEqual(['a', 'b']);
+	});
+
+	it('an echo of the head removes only the head', () => {
+		const pending = [tap('a', r, true), tap('b', r, false)];
+		expect(overlayTaps(view, pending)).toEqual(['a', 'b']);
+		expect(overlayTaps(withRevision(view, r + 1), pending)).toEqual(['b']);
+	});
+
+	it('ignores undos', () => {
+		expect(overlayTaps(view, [{ intent: { kind: 'undo' }, base: r, sent: false }, tap('b', r, false)])).toEqual([
+			'b'
+		]);
 	});
 });

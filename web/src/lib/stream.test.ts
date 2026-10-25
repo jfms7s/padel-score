@@ -211,12 +211,44 @@ describe('openStream', () => {
 		server.conns[0]?.push(frame(view));
 		await tick();
 		expect(states).toHaveLength(1);
-		// A frame resets the backoff: the next drop retries after 1 s again.
+		// Up for less than 30 s: a flapping link keeps backing off (the next step is 10 s).
 		server.conns[0]?.drop();
+		await tick(9999);
+		expect(server.fetch).toHaveBeenCalledTimes(4);
+		await tick(1);
+		expect(server.fetch).toHaveBeenCalledTimes(5);
+	});
+
+	it('resets the backoff once the stream has stayed up 30 s', async () => {
+		const server = fakeServer();
+		server.refuse = true;
+		open(server);
+		await tick();
+		await tick(1000);
+		await tick(2000);
+		server.refuse = false;
+		await tick(5000);
+		const conn = server.conns[0];
+		conn?.push(frame(view));
+		for (let i = 0; i < 2; i++) {
+			await tick(15_000);
+			conn?.push(KEEP_ALIVE);
+		}
+		conn?.drop();
 		await tick(999);
 		expect(server.fetch).toHaveBeenCalledTimes(4);
 		await tick(1);
 		expect(server.fetch).toHaveBeenCalledTimes(5);
+	});
+
+	it('reports gone and stops on a 404', async () => {
+		const server = fakeServer();
+		server.status = 404;
+		const { statuses } = open(server);
+		await tick();
+		expect(statuses).toEqual(['gone']);
+		await tick(60_000);
+		expect(server.fetch).toHaveBeenCalledTimes(1);
 	});
 
 	it('ignores frames that are not state or not JSON', async () => {

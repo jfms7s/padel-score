@@ -9,10 +9,14 @@
 
 import type { MatchView } from './types';
 
-export type StreamStatus = 'live' | 'offline';
+/** `gone`: the server says the match doesn't exist (purged or never was); the stream stops. */
+export type StreamStatus = 'live' | 'offline' | 'gone';
 
 /** No frame (state or keep-alive) for this long means the stream is gone. */
 export const WATCHDOG_MS = 20_000;
+/** A connection must stay up this long before the backoff starts over, so a flapping link
+ *  keeps backing off instead of reconnecting every second. */
+export const STABLE_MS = 30_000;
 /** Reconnect delays, the last one repeating. Also used to resend commands. */
 export const BACKOFF_MS = [1000, 2000, 5000, 10_000] as const;
 
@@ -26,6 +30,7 @@ export interface StreamDeps {
 	fetch: typeof fetch;
 	setTimeout: (f: () => void, ms: number) => Timer;
 	clearTimeout: (t: Timer) => void;
+	now?: () => number;
 }
 
 const defaultDeps = (): StreamDeps => ({
@@ -82,7 +87,8 @@ export function sseParser(onEvent: (type: string, data: string) => void, onComme
  * Follow `url`'s `state` events until `close()`. `onStatus` hears `'offline'` on a failed
  * connect, an error, the end of the stream or 20 s of silence, and `'live'` on the first frame
  * after that (or the first frame at all). Each is reported once per change. Reconnects back off
- * 1, 2, 5, then every 10 s; any frame resets the backoff.
+ * 1, 2, 5, then every 10 s; the backoff starts over only after a connection stayed up 30 s.
+ * A 404 reports `'gone'` and stops for good.
  */
 export function openStream(
 	url: string,
@@ -96,6 +102,9 @@ export function openStream(
 	let watchdog: Timer | null = null;
 	let retry: Timer | null = null;
 	let abort: AbortController | null = null;
+	/** When the current connection delivered its first frame. */
+	let upSince: number | null = null;
+	const now = deps.now ?? (() => Date.now());
 
 	const report = (s: StreamStatus) => {
 		if (closed || status === s) return;
@@ -118,7 +127,7 @@ export function openStream(
 
 	function alive(ctrl: AbortController) {
 		if (ctrl !== abort) return;
-		attempt = 0;
+		upSince ??= now();
 		armWatchdog(ctrl);
 		report('live');
 	}
@@ -128,6 +137,8 @@ export function openStream(
 		clearWatchdog();
 		ctrl.abort();
 		abort = null;
+		if (upSince !== null && now() - upSince >= STABLE_MS) attempt = 0;
+		upSince = null;
 		report('offline');
 		const delay = backoffDelay(attempt);
 		attempt++;
@@ -135,6 +146,15 @@ export function openStream(
 			retry = null;
 			void connect();
 		}, delay);
+	}
+
+	function gone(ctrl: AbortController) {
+		if (closed || ctrl !== abort) return;
+		clearWatchdog();
+		report('gone');
+		closed = true;
+		ctrl.abort();
+		abort = null;
 	}
 
 	async function connect() {
@@ -162,6 +182,11 @@ export function openStream(
 				cache: 'no-store',
 				signal: ctrl.signal
 			});
+			if (res.status === 404) {
+				void res.body?.cancel().catch(() => {});
+				gone(ctrl);
+				return;
+			}
 			if (!res.ok || !res.body) {
 				void res.body?.cancel().catch(() => {});
 				throw new Error(`stream answered ${res.status}`);

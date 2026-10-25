@@ -10,6 +10,7 @@
 		loadLayout,
 		nextLayout,
 		optimisticView,
+		overlayTaps,
 		saveLayout,
 		setsSummary,
 		shareLinks,
@@ -23,7 +24,7 @@
 	import { strings } from '#lib/strings.ts';
 	import type { MatchView, Team } from '#lib/types.ts';
 	import { fenceModel } from '#lib/view.ts';
-	import { keepAwake } from '#lib/wakelock.ts';
+	import { keepAwake, type Awake } from '#lib/wakelock.ts';
 	import BoardView from '#lib/components/BoardView.svelte';
 	import CourtView from '#lib/components/CourtView.svelte';
 	import ShareSheet from '#lib/components/ShareSheet.svelte';
@@ -45,15 +46,12 @@
 	let origin = $state('');
 
 	let sender: ReturnType<typeof createSender> | null = null;
+	let awake: Awake | null = null;
 	let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Optimistic taps: the points still on their way, laid over the server's view until a newer
 	// view comes in (which already holds them, or tells otherwise).
-	const overlay = $derived.by((): Team[] => {
-		const v = view;
-		if (!v) return [];
-		return sending.pending.flatMap((p) => (p.intent.kind === 'point' && p.base >= v.revision ? [p.intent.team] : []));
-	});
+	const overlay = $derived(view ? overlayTaps(view, sending.pending) : []);
 	const shown = $derived.by(() => {
 		if (!view || overlay.length === 0 || !engine) return view;
 		return optimisticView(view, overlay, replayLocal) ?? view;
@@ -64,7 +62,10 @@
 	const pending = $derived(sending.pending.length > 0);
 	const syncLabel = $derived(offline ? f.offline : stream === null ? f.connecting : f.synced);
 	const links = $derived(shareLinks(origin, token, spectator));
-	const canUndo = $derived(!!view && view.events.length > 0);
+	// A pending tap can always be taken back (locally, if it hasn't gone yet).
+	const canUndo = $derived(
+		(!!view && view.events.length > 0) || sending.pending.some((p) => p.intent.kind === 'point')
+	);
 
 	function accept(incoming: MatchView) {
 		view = latestView(view, incoming);
@@ -104,7 +105,15 @@
 		stream = null;
 
 		let live = true;
-		const s = openStream(streamUrl('score', t), (v) => live && accept(v), (st) => (stream = st));
+		const s = openStream(
+			streamUrl('score', t),
+			(v) => live && accept(v),
+			(st) => {
+				if (!live) return;
+				stream = st;
+				if (st === 'gone') loadError = f.gone;
+			}
+		);
 		getScore(t).then(
 			(v) => live && accept(v),
 			(e: unknown) => {
@@ -127,13 +136,15 @@
 				if (live) sending = st;
 			}
 		});
-		const awake = keepAwake(navigator, document);
+		const lock = keepAwake(navigator, document);
+		awake = lock;
 		return () => {
 			live = false;
 			s.close();
 			sender?.stop();
 			sender = null;
-			awake.release();
+			lock.release();
+			awake = null;
 			sending = { pending: [], offline: false };
 		};
 	});
@@ -156,14 +167,20 @@
 		};
 	});
 
-	function point(team: Team) {
+	/** A tap is a user gesture: the moment to unlock audio and ask again for a refused wake lock. */
+	function gesture() {
 		unlockAudio();
+		awake?.retry();
+	}
+
+	function point(team: Team) {
+		gesture();
 		if (model?.finished) return;
 		sender?.point(team);
 	}
 
 	function undoLast() {
-		unlockAudio();
+		gesture();
 		sender?.undo();
 	}
 
@@ -180,6 +197,16 @@
 		return `${a.name} ${a.points}, ${b.name} ${b.points}. ${model.callout ?? ''}`;
 	});
 </script>
+
+<svelte:window
+	onbeforeunload={(e) => {
+		// Taps not yet on the server would be lost with the page.
+		if (sending.pending.length > 0) {
+			e.preventDefault();
+			e.returnValue = '';
+		}
+	}}
+/>
 
 <svelte:head>
 	<title>{title}</title>

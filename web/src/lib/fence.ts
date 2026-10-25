@@ -5,6 +5,7 @@ import { strings } from './strings';
 import type { FenceModel, TeamModel } from './view';
 import type { Event, Format, MatchView, ReplayResult, Start, Team } from './types';
 import type { StorageLike } from './setup';
+import type { Pending } from './sender';
 
 /**
  * The view to show next. Revisions only grow, so an incoming view older than the one shown is
@@ -125,6 +126,17 @@ export function shareLinks(
 }
 
 // ---- optimistic taps ---------------------------------------------------------------------
+
+/**
+ * The pending points to lay over `view`. A tap not yet sent can't be in any server view, so it
+ * always shows. A sent one (the head, in flight) may already be in a view the stream delivered
+ * before its HTTP answer: it shows only while the view is no newer than the one it was made on.
+ */
+export function overlayTaps(view: MatchView, pending: Pending[]): Team[] {
+	return pending.flatMap((p) =>
+		p.intent.kind === 'point' && (!p.sent || p.base >= view.revision) ? [p.intent.team] : []
+	);
+}
 
 /**
  * The view as it will be once `points` land: the server's events plus the pending points,

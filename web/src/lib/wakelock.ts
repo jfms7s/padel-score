@@ -3,6 +3,8 @@
 
 interface Sentinel {
 	release(): Promise<void>;
+	/** Fired when the system drops the lock (page hidden, battery saver). */
+	addEventListener?(type: 'release', listener: () => void): void;
 }
 
 export interface WakeNav {
@@ -19,31 +21,41 @@ export interface Awake {
 	/** False when the browser has no wake lock; the screen then sleeps as usual. */
 	supported: boolean;
 	release(): void;
+	/** Ask again if no lock is held, say from a tap: some browsers want a user gesture. */
+	retry(): void;
 }
 
 /** Hold a screen wake lock until `release()`. Never throws: a refused lock is simply not held. */
 export function keepAwake(nav: WakeNav, doc: WakeDoc): Awake {
 	const api = nav.wakeLock;
 	if (!api || typeof api.request !== 'function') {
-		return { supported: false, release: () => {} };
+		return { supported: false, release: () => {}, retry: () => {} };
 	}
 	const wakeLock = api;
 
 	let released = false;
 	let sentinel: Sentinel | null = null;
+	let asking = false;
 
 	const drop = (s: Sentinel) => void s.release().catch(() => {});
 
 	async function acquire() {
+		if (asking) return;
+		asking = true;
 		try {
 			const s = await wakeLock.request('screen');
 			if (released) drop(s);
 			else {
 				if (sentinel) drop(sentinel);
 				sentinel = s;
+				s.addEventListener?.('release', () => {
+					if (sentinel === s) sentinel = null;
+				});
 			}
 		} catch {
 			// Refused (battery saver, not visible, no user gesture yet): try again next time.
+		} finally {
+			asking = false;
 		}
 	}
 
@@ -62,6 +74,9 @@ export function keepAwake(nav: WakeNav, doc: WakeDoc): Awake {
 			doc.removeEventListener('visibilitychange', onVisibility);
 			if (sentinel) drop(sentinel);
 			sentinel = null;
+		},
+		retry() {
+			if (!released && sentinel === null && doc.visibilityState === 'visible') void acquire();
 		}
 	};
 }

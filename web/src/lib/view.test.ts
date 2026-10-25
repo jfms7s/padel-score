@@ -225,4 +225,15 @@ describe('fenceModel', () => {
 		expect(sup.b.setDetails[1]).toEqual({ games: 6, tiebreak: null, superTieBreak: false, won: true });
 		expect(fenceModel(v(timed)).a.setDetails).toEqual([]);
 	});
+
+	it('only the deciding set of a super tie-break format is a super tie-break', () => {
+		const one = v(finished);
+		const m = fenceModel({
+			...one,
+			format: { sets: { deuce: 'golden_point', sets: 'one', deciding: 'super_tie_break' } }
+		});
+		expect(m.a.setDetails[0]?.superTieBreak).toBe(false);
+		const sup = fenceModel(v(superTiebreakFinished));
+		expect(sup.a.setDetails.map((d) => d.superTieBreak)).toEqual([false, false, true]);
+	});
 });

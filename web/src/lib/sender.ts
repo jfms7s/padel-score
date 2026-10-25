@@ -11,14 +11,18 @@ export type Intent = { kind: 'point'; team: Team } | { kind: 'undo' };
 
 export interface Pending {
 	intent: Intent;
-	/** The revision this tap was made on. Its optimistic point shows only while no newer view is in. */
+	/** The revision this tap was made on (or last resent on). */
 	base: number;
+	/** It has gone to the server at least once, so a server view may already hold it. */
+	sent: boolean;
 }
 
 export type DropReason =
 	| { kind: 'rejected'; error: ErrorKind }
 	| { kind: 'conflict' }
 	| { kind: 'nothing' }
+	/** An undo queued behind a tap that was dropped: it would undo the wrong point. */
+	| { kind: 'cancelled' }
 	| { kind: 'failed'; message: string };
 
 export interface Dropped {
@@ -47,9 +51,13 @@ export interface SenderDeps {
 	onState(state: SenderState): void;
 }
 
-interface Job extends Pending {
+interface Job {
+	intent: Intent;
+	base: number;
 	/** Fixed at the first send so a resend is the same request. */
 	req: CommandRequest | null;
+	/** For an undo: the job queued just ahead of it. If that one is dropped, so is this. */
+	after: Job | null;
 	attempt: number;
 	conflicts: number;
 }
@@ -65,23 +73,41 @@ export function createSender(deps: SenderDeps) {
 	let retry: Timer | null = null;
 
 	const state = (): SenderState => ({
-		pending: queue.map((j) => ({ intent: j.intent, base: j.base })),
+		pending: queue.map((j) => ({ intent: j.intent, base: j.base, sent: j.req !== null })),
 		offline
 	});
 	const emit = () => deps.onState(state());
 
-	function enqueue(intent: Intent) {
+	function enqueue(intent: Intent, after: Job | null = null) {
 		if (stopped) return;
-		queue.push({ intent, base: deps.view()?.revision ?? 0, req: null, attempt: 0, conflicts: 0 });
+		queue.push({ intent, base: deps.view()?.revision ?? 0, req: null, after, attempt: 0, conflicts: 0 });
 		emit();
 		void pump();
 	}
 
+	/**
+	 * Undo the latest point. A tap still waiting to be sent is simply taken back here and never
+	 * sent; otherwise the undo waits behind whatever is queued and names the latest event when
+	 * its turn comes.
+	 */
+	function undo() {
+		if (stopped) return;
+		const tail = queue.at(-1);
+		if (tail && tail.intent.kind === 'point' && tail.req === null) {
+			queue.pop();
+			emit();
+			return;
+		}
+		enqueue({ kind: 'undo' }, tail ?? null);
+	}
+
 	function drop(job: Job, reason: DropReason) {
 		const i = queue.indexOf(job);
-		if (i >= 0) queue.splice(i, 1);
+		if (i < 0) return;
+		queue.splice(i, 1);
 		emit();
 		deps.onDropped({ intent: job.intent, reason });
+		for (const j of queue.filter((q) => q.after === job)) drop(j, { kind: 'cancelled' });
 	}
 
 	function command(intent: Intent): Command | null {
@@ -148,6 +174,7 @@ export function createSender(deps: SenderDeps) {
 				// named an event that is no longer the latest, so it no longer means what was asked.
 				if (job.intent.kind === 'point' && job.conflicts++ < MAX_CONFLICTS) {
 					job.req = null;
+					job.base = out.view.revision;
 					emit();
 					return;
 				}
@@ -160,7 +187,7 @@ export function createSender(deps: SenderDeps) {
 
 	return {
 		point: (team: Team) => enqueue({ kind: 'point', team }),
-		undo: () => enqueue({ kind: 'undo' }),
+		undo,
 		state,
 		/** Stop sending (the page is closing). */
 		stop() {

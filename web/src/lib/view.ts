@@ -102,9 +102,16 @@ export function fenceModel(view: MatchView): FenceModel {
 	};
 }
 
+/** The index of the set played as a super tie-break, if the format has one: the deciding set. */
+function superTieBreakSet(format: Format): number | null {
+	if (!('sets' in format) || format.sets.deciding !== 'super_tie_break') return null;
+	const maxSets = format.sets.sets === 'best_of_3' ? 3 : 1;
+	return maxSets > 1 ? maxSets - 1 : null;
+}
+
 function setDetail(set: SetScore, t: Team, n: number, over: boolean, format: Format): SetDetail {
 	const other: Team = t === 'a' ? 'b' : 'a';
-	const superTieBreak = 'sets' in format && format.sets.deciding === 'super_tie_break' && n === 2;
+	const superTieBreak = n === superTieBreakSet(format);
 	if (!over) return { games: set[t], tiebreak: null, superTieBreak, won: null };
 	const i = t === 'a' ? 0 : 1;
 	const tb = set.tiebreak;
