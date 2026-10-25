@@ -437,3 +437,282 @@ async fn anonymous_match_unchanged() {
     assert_eq!(count(&pool, "matches").await, 1);
     assert_eq!(count(&pool, "match_players").await, 0);
 }
+
+// ---- history and the player page ----
+
+/// Create a match as `raw` with the given slots and finish it 6-0 for `winner`.
+async fn played(
+    state: &padel_score_server::AppState,
+    app: &axum::Router,
+    raw: &str,
+    players: serde_json::Value,
+    winner: &str,
+) -> String {
+    let made = create(
+        state,
+        app,
+        Some(raw),
+        match_body(
+            json!({"a": ["Ana", "Marta"], "b": ["Rui", "João"]}),
+            Some(players),
+        ),
+    )
+    .await;
+    assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
+    let scorer = made.body["scorer_token"].as_str().unwrap().to_owned();
+    let commands: Vec<_> = (0..24)
+        .map(|_| json!({"kind": "point", "team": winner}))
+        .collect();
+    let res = send(
+        app,
+        req(
+            Method::POST,
+            &format!("/api/score/{scorer}/commands"),
+            Some(json!({"client_id": "fin", "batch": false, "base_revision": 0, "commands": commands})),
+            &[],
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    made.body["id"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn history_needs_session() {
+    let (state, _pool, app, admin_id, raw) = with_admin().await;
+    let token = device_token(&state.store, &admin_id).await;
+    let ana = make_player(&state, &app, &raw, "Ana").await;
+    for path in ["/api/me/history".to_owned(), format!("/api/players/{ana}")] {
+        let res = send(&app, req(Method::GET, &path, None, &[])).await;
+        assert_eq!(res.status, StatusCode::UNAUTHORIZED, "{path}");
+        let res = send(&app, as_device(&token, Method::GET, &path, None)).await;
+        assert_eq!(res.status, StatusCode::FORBIDDEN, "{path}");
+    }
+    let res = send(
+        &app,
+        as_session(&state, &raw, Method::GET, "/api/me/history", None),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.header(header::CACHE_CONTROL), Some("no-store"));
+    assert_eq!(res.body, json!({"items": [], "next": null}));
+}
+
+#[tokio::test]
+async fn bad_cursor_is_400() {
+    let (state, _pool, app, _id, raw) = with_admin().await;
+    let ana = make_player(&state, &app, &raw, "Ana").await;
+    for path in [
+        "/api/me/history?before=nonsense".to_owned(),
+        "/api/me/history?before=12".to_owned(),
+        "/api/me/history?limit=ten".to_owned(),
+        format!("/api/players/{ana}?before=x.y"),
+    ] {
+        let res = send(&app, as_session(&state, &raw, Method::GET, &path, None)).await;
+        assert_eq!(res.status, StatusCode::BAD_REQUEST, "{path}: {}", res.body);
+        assert_eq!(res.body, json!({"error": "bad_request"}));
+    }
+    // A well-formed cursor and an out-of-range limit are fine.
+    let res = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::GET,
+            "/api/me/history?before=12.abc&limit=500",
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+}
+
+#[tokio::test]
+async fn other_users_player_page_is_404() {
+    let (state, _pool, app, _id, raw_a) = with_admin().await;
+    let (_b, raw_b) = invited_user(&state, &app, &raw_a, "b@x.test", "Rui").await;
+    let ana = make_player(&state, &app, &raw_a, "Ana").await;
+    let foreign = send(
+        &app,
+        as_session(
+            &state,
+            &raw_b,
+            Method::GET,
+            &format!("/api/players/{ana}"),
+            None,
+        ),
+    )
+    .await;
+    let missing = send(
+        &app,
+        as_session(&state, &raw_b, Method::GET, "/api/players/nope", None),
+    )
+    .await;
+    assert_eq!(foreign.status, StatusCode::NOT_FOUND);
+    assert_eq!(foreign.body, missing.body);
+    assert_eq!(foreign.status, missing.status);
+}
+
+#[tokio::test]
+async fn history_and_player_page_shapes() {
+    let (state, _pool, app, _id, raw) = with_admin().await;
+    let ana = make_player(&state, &app, &raw, "Ana").await;
+    let rui = make_player(&state, &app, &raw, "Rui").await;
+    let first = played(
+        &state,
+        &app,
+        &raw,
+        json!({"a": [ana, null], "b": [rui, null]}),
+        "a",
+    )
+    .await;
+    let second = played(
+        &state,
+        &app,
+        &raw,
+        json!({"a": [ana, null], "b": [rui, null]}),
+        "b",
+    )
+    .await;
+
+    let res = send(
+        &app,
+        as_session(&state, &raw, Method::GET, "/api/me/history?limit=1", None),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let items = res.body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let entry = &items[0];
+    let ids = [first.as_str(), second.as_str()];
+    assert!(ids.contains(&entry["match_id"].as_str().unwrap()));
+    assert_eq!(
+        entry["teams"],
+        json!({"a": ["Ana", "Marta"], "b": ["Rui", "João"]})
+    );
+    assert_eq!(
+        entry["players"],
+        json!({"a": [ana, null], "b": [rui, null]})
+    );
+    assert!(entry["spectator_token"].is_string());
+    assert!(entry["finished_at"].is_i64());
+    assert_eq!(entry["score"]["timed"], false);
+    let next = res.body["next"].as_str().unwrap().to_owned();
+    let res = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::GET,
+            &format!("/api/me/history?limit=1&before={next}"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(res.body["items"].as_array().unwrap().len(), 1);
+    assert_ne!(res.body["items"][0]["match_id"], entry["match_id"]);
+    assert_eq!(res.body["next"], serde_json::Value::Null);
+
+    let page = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::GET,
+            &format!("/api/players/{ana}"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    assert_eq!(page.header(header::CACHE_CONTROL), Some("no-store"));
+    assert_eq!(page.body["player"]["id"], ana.as_str());
+    assert_eq!(page.body["player"]["name"], "Ana");
+    assert_eq!(
+        page.body["player"]["record"],
+        json!({"wins": 1, "losses": 1, "draws": 0})
+    );
+    assert_eq!(page.body["placings"], json!([]));
+    assert_eq!(page.body["next"], serde_json::Value::Null);
+    let items = page.body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    for item in items {
+        assert_eq!(item["side"], "a");
+        let want = if item["match_id"] == first.as_str() {
+            "win"
+        } else {
+            "loss"
+        };
+        assert_eq!(item["outcome"], want);
+    }
+
+    // Every Player the API returns carries its record.
+    let list = send(
+        &app,
+        as_session(&state, &raw, Method::GET, "/api/players", None),
+    )
+    .await;
+    for p in list.body["items"].as_array().unwrap() {
+        assert_eq!(p["record"], json!({"wins": 1, "losses": 1, "draws": 0}));
+    }
+    let again = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::POST,
+            "/api/players",
+            Some(json!({"name": "rui"})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        again.body["record"],
+        json!({"wins": 1, "losses": 1, "draws": 0})
+    );
+    let fresh = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::POST,
+            "/api/players",
+            Some(json!({"name": "Marta"})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        fresh.body["record"],
+        json!({"wins": 0, "losses": 0, "draws": 0})
+    );
+    let archived = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::PATCH,
+            &format!("/api/players/{ana}"),
+            Some(json!({"archived": true})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        archived.body["record"],
+        json!({"wins": 1, "losses": 1, "draws": 0})
+    );
+    // An archived player's page still reads.
+    let page = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::GET,
+            &format!("/api/players/{ana}"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert_eq!(page.body["player"]["archived"], true);
+    assert_eq!(page.body["items"].as_array().unwrap().len(), 2);
+}

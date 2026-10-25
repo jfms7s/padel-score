@@ -22,7 +22,7 @@ pub struct PlayerChange {
 }
 
 /// The players picked from the list for a match's four slots; `None` is a free-text slot.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerSlots {
     #[serde(default)]
     pub a: [Option<String>; 2],
