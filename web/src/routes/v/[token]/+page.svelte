@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { ApiError, getView, streamUrl } from '#lib/api.ts';
 	import { latestView, loadLayout, nextLayout, saveLayout, setsSummary, type Layout } from '#lib/fence.ts';
+	import { loadView, saveView } from '#lib/lastview.ts';
 	import { matchLabel } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
 	import { openStream, type StreamStatus } from '#lib/stream.ts';
@@ -36,7 +37,11 @@
 
 		let live = true;
 		// Never show an older revision than the one already on screen.
-		const accept = (v: MatchView) => live && (view = latestView(view, v));
+		const accept = (v: MatchView) => {
+			if (!live) return;
+			view = latestView(view, v);
+			saveView(safeStorage(), t, view);
+		};
 		const s = openStream(streamUrl('view', t), accept, (st) => {
 			if (!live) return;
 			stream = st;
@@ -45,8 +50,16 @@
 		getView(t).then(accept, (e: unknown) => {
 			if (!live) return;
 			// A retryable failure is just offline: the stream catches up once it is back.
-			if (e instanceof ApiError && e.retryable) return;
-			loadError = e instanceof ApiError && e.code === 'not_found' ? f.notFound : f.loadFailed;
+			if (e instanceof ApiError && e.retryable) {
+				// Cold open without a line: show the last view this device saw.
+				const stored = loadView(safeStorage(), t);
+				if (stored) {
+					view = latestView(view, stored);
+					stream ??= 'offline';
+				}
+				return;
+			}
+			loadError = e instanceof ApiError && e.code === 'not_found' ? f.gone : f.loadFailed;
 			s.close();
 		});
 		// A spectator phone can hang on the fence too.

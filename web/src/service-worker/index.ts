@@ -44,7 +44,14 @@ sw.addEventListener('fetch', (event) => {
 
 	if (request.mode === 'navigate') {
 		// Online, the server answers; offline, any route is the cached shell.
-		event.respondWith(fetch(request).catch(async () => (await caches.match(SHELL)) ?? Response.error()));
+		// A gateway error (502, 503, 504: a proxy with nothing behind it) counts as offline.
+		const shell = async () => (await caches.match(SHELL)) ?? Response.error();
+		event.respondWith(
+			fetch(request).then(
+				(res) => ([502, 503, 504].includes(res.status) ? shell() : res),
+				shell
+			)
+		);
 		return;
 	}
 

@@ -16,6 +16,7 @@
 		type Layout
 	} from '#lib/fence.ts';
 	import { createQueue, localView, type Dropped, type Problem, type Queue, type QueueState } from '#lib/queue.ts';
+	import { loadView, saveView } from '#lib/lastview.ts';
 	import { matchLabel, recentSpectator } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
 	import { openStream, type StreamStatus } from '#lib/stream.ts';
@@ -78,6 +79,7 @@
 
 	function accept(incoming: MatchView) {
 		view = latestView(view, incoming);
+		saveView(safeStorage(), token, view);
 		sender?.viewArrived();
 	}
 
@@ -140,7 +142,17 @@
 			(e: unknown) => {
 				if (!live) return;
 				// A retryable failure is just offline: the stream catches up once it is back.
-				if (e instanceof ApiError && e.retryable) return;
+				if (e instanceof ApiError && e.retryable) {
+					// Cold open without a line: the last view this device saw, so scoring goes on
+					// (taps queue against it; if the server moved meanwhile, the sheet asks).
+					const stored = loadView(safeStorage(), t);
+					if (stored) {
+						view = latestView(view, stored);
+						stream ??= 'offline';
+						sender?.viewArrived();
+					}
+					return;
+				}
 				loadError = e instanceof ApiError && e.code === 'not_found' ? f.notFound : f.loadFailed;
 				s.close();
 			}
