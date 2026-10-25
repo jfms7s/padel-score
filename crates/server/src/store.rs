@@ -20,11 +20,27 @@ pub type Tx<'a> = sqlx::Transaction<'a, sqlx::Sqlite>;
 
 const MAX_NAME_CHARS: usize = 40;
 
+/// `SELECT <every matches column> FROM matches <rest>`, as a `&'static str`. Every query that
+/// builds a [`StoredMatch`] goes through it, so a new column is added in one place.
+macro_rules! select_matches {
+    ($rest:literal) => {
+        concat!(
+            "SELECT id, scorer_token, spectator_token, format, start, teams, revision, \
+             owner_user_id, last_activity_at FROM matches ",
+            $rest
+        )
+    };
+}
+pub(crate) use select_matches;
+
 #[derive(Debug)]
 pub enum StoreError {
     InvalidRules(RulesError),
     InvalidTeams,
     NotFound,
+    /// The write would break a uniqueness or state rule, e.g. a taken email or a used invite.
+    /// The code is a snake_case error name, served as a 409.
+    Conflict(&'static str),
     /// The stored log contradicts itself, e.g. the engine rejects an event already stored as
     /// effective. Never expected; the request is refused rather than shown a wrong score.
     Corrupt(String),
@@ -37,6 +53,7 @@ impl fmt::Display for StoreError {
             StoreError::InvalidRules(e) => write!(f, "invalid rules: {e}"),
             StoreError::InvalidTeams => write!(f, "invalid team names"),
             StoreError::NotFound => write!(f, "not found"),
+            StoreError::Conflict(code) => write!(f, "conflict: {code}"),
             StoreError::Corrupt(msg) => write!(f, "corrupt match log: {msg}"),
             StoreError::Db(e) => write!(f, "database error: {e}"),
         }
@@ -93,6 +110,8 @@ pub struct NewMatch {
     pub format: Format,
     pub start: Start,
     pub teams: Teams,
+    /// The signed-in creator, or `None` for an anonymous quick match.
+    pub owner_user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +123,7 @@ pub struct StoredMatch {
     pub start: Start,
     pub teams: Teams,
     pub revision: i64,
+    pub owner_user_id: Option<String>,
     pub last_activity_at: i64,
 }
 
@@ -167,7 +187,7 @@ fn decode<'a, T: Deserialize<'a>>(text: &'a str) -> Result<T, sqlx::Error> {
     serde_json::from_str(text).map_err(json_error)
 }
 
-fn match_from_row(row: &SqliteRow) -> Result<StoredMatch, sqlx::Error> {
+pub(crate) fn match_from_row(row: &SqliteRow) -> Result<StoredMatch, sqlx::Error> {
     Ok(StoredMatch {
         id: row.try_get("id")?,
         scorer_token: row.try_get("scorer_token")?,
@@ -176,6 +196,7 @@ fn match_from_row(row: &SqliteRow) -> Result<StoredMatch, sqlx::Error> {
         start: decode(row.try_get::<&str, _>("start")?)?,
         teams: decode(row.try_get::<&str, _>("teams")?)?,
         revision: row.try_get("revision")?,
+        owner_user_id: row.try_get("owner_user_id")?,
         last_activity_at: row.try_get("last_activity_at")?,
     })
 }
@@ -195,13 +216,10 @@ pub async fn match_by_scorer_token_in(
     conn: &mut SqliteConnection,
     token: &str,
 ) -> Result<Option<StoredMatch>, StoreError> {
-    let row = sqlx::query(
-        "SELECT id, scorer_token, spectator_token, format, start, teams, revision, last_activity_at \
-         FROM matches WHERE scorer_token = ?",
-    )
-    .bind(token)
-    .fetch_optional(conn)
-    .await?;
+    let row = sqlx::query(select_matches!("WHERE scorer_token = ?"))
+        .bind(token)
+        .fetch_optional(conn)
+        .await?;
     Ok(row.as_ref().map(match_from_row).transpose()?)
 }
 
@@ -209,13 +227,10 @@ pub async fn match_by_id_in(
     conn: &mut SqliteConnection,
     id: &str,
 ) -> Result<Option<StoredMatch>, StoreError> {
-    let row = sqlx::query(
-        "SELECT id, scorer_token, spectator_token, format, start, teams, revision, \
-         last_activity_at FROM matches WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(conn)
-    .await?;
+    let row = sqlx::query(select_matches!("WHERE id = ?"))
+        .bind(id)
+        .fetch_optional(conn)
+        .await?;
     Ok(row.as_ref().map(match_from_row).transpose()?)
 }
 
@@ -357,7 +372,6 @@ impl Store {
         Store { pool }
     }
 
-    #[allow(dead_code)] // used by later tasks (retention, SSE)
     pub(crate) fn pool(&self) -> &SqlitePool {
         &self.pool
     }
@@ -395,11 +409,13 @@ impl Store {
             start: new.start,
             teams,
             revision: 0,
+            owner_user_id: new.owner_user_id,
             last_activity_at: now,
         };
         sqlx::query(
             "INSERT INTO matches (id, scorer_token, spectator_token, format, start, teams, \
-             revision, created_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+             revision, owner_user_id, created_at, last_activity_at) \
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
         )
         .bind(&stored.id)
         .bind(&stored.scorer_token)
@@ -407,6 +423,7 @@ impl Store {
         .bind(encode(&stored.format)?)
         .bind(encode(&stored.start)?)
         .bind(encode(&stored.teams)?)
+        .bind(&stored.owner_user_id)
         .bind(now)
         .bind(now)
         .execute(&self.pool)
@@ -420,13 +437,10 @@ impl Store {
     }
 
     pub async fn by_spectator_token(&self, token: &str) -> Result<Option<StoredMatch>, StoreError> {
-        let row = sqlx::query(
-            "SELECT id, scorer_token, spectator_token, format, start, teams, revision, \
-             last_activity_at FROM matches WHERE spectator_token = ?",
-        )
-        .bind(token)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query(select_matches!("WHERE spectator_token = ?"))
+            .bind(token)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row.as_ref().map(match_from_row).transpose()?)
     }
 

@@ -37,6 +37,7 @@ fn new_match() -> NewMatch {
             a: ["Ana".into(), "Bea".into()],
             b: ["Cris".into(), "Dani".into()],
         },
+        owner_user_id: None,
     }
 }
 

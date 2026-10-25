@@ -45,6 +45,7 @@ async fn new_match(s: &Store) -> StoredMatch {
                 a: ["Ana".into(), "Bea".into()],
                 b: ["Cris".into(), "Dani".into()],
             },
+            owner_user_id: None,
         },
         NOW,
     )

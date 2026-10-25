@@ -1,3 +1,4 @@
+pub mod accounts_store;
 pub mod api;
 pub mod commands;
 pub mod config;

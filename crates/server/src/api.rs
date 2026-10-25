@@ -69,6 +69,8 @@ pub enum ApiError {
     MethodNotAllowed,
     PayloadTooLarge,
     InvalidMatch(String),
+    /// 409, with the snake_case code from [`StoreError::Conflict`].
+    Conflict(&'static str),
     Internal,
 }
 
@@ -85,6 +87,7 @@ impl From<StoreError> for ApiError {
             StoreError::InvalidRules(_) | StoreError::InvalidTeams => {
                 ApiError::InvalidMatch(e.to_string())
             }
+            StoreError::Conflict(code) => ApiError::Conflict(code),
             StoreError::Corrupt(_) | StoreError::Db(_) => internal(e),
         }
     }
@@ -107,6 +110,7 @@ impl IntoResponse for ApiError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 json!({ "error": "invalid_match", "message": message }),
             ),
+            ApiError::Conflict(code) => (StatusCode::CONFLICT, json!({ "error": code })),
             ApiError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 json!({ "error": "internal" }),
@@ -188,6 +192,8 @@ async fn create_match(
         format: req.format,
         start: req.start,
         teams: req.teams,
+        // Task 7 sets this from the signed-in user.
+        owner_user_id: None,
     };
     let m = state.store.create_match(new, now()).await?;
     let location = format!("/s/{}", m.scorer_token);
