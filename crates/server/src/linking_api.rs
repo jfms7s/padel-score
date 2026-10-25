@@ -3,7 +3,7 @@
 //! ([`accounts::secret_headers`]); a code travels in request bodies and the `/link-player#`
 //! fragment only, never in a path or query.
 //!
-//! - `POST /api/players/{id}/link-code` is 201 `{url, expires_at}`, 404 for an unknown or
+//! - `POST /api/players/{id}/link-code` is 201 `{url, expires_at, expires_in}` (seconds left), 404 for an unknown or
 //!   another user's entry, 409 `player_linked`.
 //! - `POST /api/link-codes/lookup` `{code}` is 200 with the `ClaimPreview`, or 410
 //!   `link_code_invalid` (one answer for an unknown, expired, used or no longer linkable code).
@@ -37,7 +37,7 @@
 //! - `GET /api/profiles/{token}?before=&limit=` needs no credential: the fully redacted
 //!   `LinkedHistory` of a public profile, or 404.
 //!
-//! Lookups, accepts, claim previews and claim creates count against the caller's `claims` budget.
+//! Code creations, lookups, accepts, claim previews and claim creates count against the caller's `claims` budget.
 
 use axum::Router;
 use axum::extract::rejection::QueryRejection;
@@ -107,13 +107,18 @@ async fn create_code(
     SessionUser(user): SessionUser,
     ApiPath(id): ApiPath<String>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let (code, expires_at) = state
-        .store
-        .create_link_code(&user.user.id, &id, now())
-        .await?;
+    let t = now();
+    limit_claims(&state, &user.user.id, t)?;
+    let (code, expires_at) = state.store.create_link_code(&user.user.id, &id, t).await?;
+    // `expires_in` is the server's own view of the time left, so a client with a wrong clock
+    // can count down without comparing `expires_at` with its own time.
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "url": fragment_url(LINK_PAGE, &code), "expires_at": expires_at })),
+        Json(json!({
+            "url": fragment_url(LINK_PAGE, &code),
+            "expires_at": expires_at,
+            "expires_in": expires_at - t,
+        })),
     ))
 }
 

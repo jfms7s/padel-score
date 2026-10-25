@@ -580,21 +580,21 @@ async fn results_pagination_ties_on_finished_at() {
 #[tokio::test]
 async fn privacy_routes_need_session() {
     let w = world().await;
-    for (m, p) in [
+    let routes = [
         (Method::GET, "/api/me/results"),
         (Method::GET, "/api/me/privacy"),
+        (Method::PUT, "/api/me/privacy"),
         (Method::POST, "/api/me/privacy/rotate"),
-    ] {
-        assert_eq!(
-            send(&w.app, req(m, p, None, &[])).await.status,
-            StatusCode::UNAUTHORIZED
-        );
-    }
+        (Method::GET, "/api/players/anyone/linked-history"),
+    ];
     let token = support::device_token(&w.state.store, &w.r_id).await;
-    let res = send(
-        &w.app,
-        support::as_device(&token, Method::GET, "/api/me/results", None),
-    )
-    .await;
-    assert_eq!(res.status, StatusCode::FORBIDDEN);
+    for (m, p) in routes {
+        assert_eq!(
+            send(&w.app, req(m.clone(), p, None, &[])).await.status,
+            StatusCode::UNAUTHORIZED,
+            "{m} {p}"
+        );
+        let res = send(&w.app, support::as_device(&token, m.clone(), p, None)).await;
+        assert_eq!(res.status, StatusCode::FORBIDDEN, "{m} {p}");
+    }
 }

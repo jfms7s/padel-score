@@ -130,6 +130,17 @@ pub async fn link_in(
         .bind(player_id)
         .execute(&mut **tx)
         .await?;
+    // The linker's own pending claim on this entry is settled by the link. Other claimants'
+    // rows stay pending: they reappear if the entry is unlinked.
+    sqlx::query(
+        "UPDATE player_claims SET status = 'approved', decided_at = ? \
+         WHERE player_id = ? AND claimant_user_id = ? AND status = 'pending'",
+    )
+    .bind(now)
+    .bind(player_id)
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 

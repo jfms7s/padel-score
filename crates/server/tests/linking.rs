@@ -486,7 +486,14 @@ async fn qr_link_round_trip() {
     let q = qr_setup().await;
     let made = q.make_code(&q.ana, &q.rui).await;
     assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
-    assert!(made.body["expires_at"].as_i64().unwrap() > 0);
+    let expires_at = made.body["expires_at"].as_i64().unwrap();
+    assert!(expires_at > 0);
+    let expires_in = made.body["expires_in"].as_i64().unwrap();
+    assert!(
+        (expires_in - LINK_CODE_TTL_SECS).abs() <= 2 && expires_at > expires_in,
+        "{}",
+        made.body
+    );
     let code = fragment_code(made.body["url"].as_str().unwrap());
     let looked = q
         .post_code(&q.rui_session, "/api/link-codes/lookup", &code)
@@ -685,6 +692,17 @@ async fn link_code_routes_are_rate_limited() {
     // Per user: another account is not affected.
     let res = q.post_code(&q.ana, "/api/link-codes/lookup", "nope").await;
     assert_eq!(res.status, StatusCode::GONE);
+}
+
+#[tokio::test]
+async fn link_code_creation_is_rate_limited() {
+    let q = qr_setup().await;
+    for i in 0..20 {
+        let res = q.make_code(&q.ana, &q.rui).await;
+        assert_eq!(res.status, StatusCode::CREATED, "call {i}");
+    }
+    let res = q.make_code(&q.ana, &q.rui).await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
 }
 
 #[tokio::test]
