@@ -1,12 +1,11 @@
 #!/bin/sh
-# Woodpecker check: every non-merge commit made since the rule was adopted has a Conventional
-# Commits subject, `type[(scope)][!]: description` (see CLAUDE.md). Commits older than
-# COMMIT_SUBJECTS_SINCE are history and never checked, so branches cut before the rule still
-# pass. The repo is private and only the clone step gets credentials, so there is no main ref to
-# diff against: the check walks HEAD's own history (the clone is full, `partial: false`). Commits
-# that came from main were checked on their own branch already and pass again. Git's default
-# `Revert "..."` subject is accepted. Tests pipe "<sha> <subject>" lines in with
-# COMMIT_SUBJECTS_STDIN=1 instead of reading git.
+# CI check (GitHub Actions): every non-merge commit made since the rule was adopted has a
+# Conventional Commits subject, `type[(scope)][!]: description` (see CLAUDE.md). Commits older
+# than COMMIT_SUBJECTS_SINCE are history and never checked, so branches cut before the rule still
+# pass. The repo is public and the job checks out with `fetch-depth: 0`, so the check walks HEAD's
+# own history rather than diffing against a main ref. Commits that came from main were checked on
+# their own branch already and pass again. Git's default `Revert "..."` subject is accepted.
+# Tests pipe "<sha> <subject>" lines in with COMMIT_SUBJECTS_STDIN=1 instead of reading git.
 set -eu
 SINCE="${COMMIT_SUBJECTS_SINCE:-2026-10-17T00:00:00Z}"
 types='feat|fix|docs|chore|refactor|build|ci|style|perf|test|revert'
@@ -16,7 +15,7 @@ if [ "${COMMIT_SUBJECTS_STDIN:-}" = 1 ]; then
   lines="$(cat)"
 else
   if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-    echo "commit-subjects: the clone is shallow; set partial: false on the clone step" >&2; exit 1
+    echo "commit-subjects: the clone is shallow; check out with fetch-depth: 0" >&2; exit 1
   fi
   lines="$(git log --no-merges --since="$SINCE" --format='%h %s' HEAD)"
 fi
