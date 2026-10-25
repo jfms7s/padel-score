@@ -537,6 +537,8 @@ export interface EventDetail {
 	matches: EventMatch[];
 	/** Filled once the event is finished. */
 	places: Place[];
+	/** The kind works out the places itself, so Finish sends none (false in this phase). */
+	places_computed: boolean;
 	/** Owned by the kind (phases 7 and 8); null in this phase. */
 	kind_data: unknown;
 }

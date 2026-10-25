@@ -501,6 +501,11 @@ export const strings = {
 		tied: 'Tied',
 		tiedLabel: (a: string, b: string) => `${a} and ${b} share a place`,
 		finishConfirm: 'Save the positions and finish',
+		finishComputedHint: 'The final positions come from the results.',
+		unfinishedWarning: (n: number) =>
+			n === 1
+				? '1 match isn’t finished. Its court phone will stop working.'
+				: `${n} matches aren’t finished. Their court phones will stop working.`,
 		finishing: 'Finishing…',
 		place: (place: number, to: number) => (to > place ? `${ordinal(place)}–${ordinal(to)}` : ordinal(place)),
 

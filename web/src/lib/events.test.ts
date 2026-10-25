@@ -26,6 +26,7 @@ import {
 	postEventResult,
 	rulesText,
 	teamText,
+	unfinishedCount,
 	withOvertimeWinner
 } from './events';
 import { ApiError, setUnauthorizedHandler } from './api';
@@ -323,6 +324,16 @@ describe('coordinator screens', () => {
 		expect(eventMessage(new Error('boom'))).toBe(strings.networkError);
 	});
 
+	it('finish_warns_about_unfinished_matches', () => {
+		const done = { ...match('m3', 't1', 't3'), state: 'finished' as const };
+		const live = { ...match('m2', 't2', 't3'), state: 'live' as const };
+		expect(unfinishedCount([match('m1', 't1', 't2'), live, done])).toBe(2);
+		expect(unfinishedCount([done])).toBe(0);
+		expect(unfinishedCount([])).toBe(0);
+		expect(strings.events.unfinishedWarning(2)).toBe("2 matches aren’t finished. Their court phones will stop working.");
+		expect(strings.events.unfinishedWarning(1)).toBe('1 match isn’t finished. Its court phone will stop working.');
+	});
+
 	it('places_editor_helpers', () => {
 		expect(moveItem(['a', 'b', 'c'], 0, 2)).toEqual(['b', 'c', 'a']);
 		expect(moveItem(['a', 'b', 'c'], 2, 1)).toEqual(['a', 'c', 'b']);
@@ -341,6 +352,7 @@ describe('coordinator screens', () => {
 			courts: [],
 			matches: [],
 			places: [],
+			places_computed: false,
 			kind_data: null
 		};
 		expect(isEventDetail(detail)).toBe(true);

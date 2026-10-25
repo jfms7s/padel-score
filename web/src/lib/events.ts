@@ -260,6 +260,11 @@ export function withOvertimeWinner(score: TypedScore, team: Team): TypedScore {
 // ---- lines -------------------------------------------------------------------------------
 
 /** A team as shown: its custom name, or "Ana / Marta" (the server builds it). */
+/** How many of the event's matches aren't finished (their court phones stop at Finish). */
+export function unfinishedCount(matches: readonly Pick<EventMatch, 'state'>[]): number {
+	return matches.filter((m) => m.state !== 'finished').length;
+}
+
 export function teamText(t: EventTeam): string {
 	return t.name;
 }

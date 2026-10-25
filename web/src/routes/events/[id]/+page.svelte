@@ -7,6 +7,7 @@
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
 	import QrCode from '#lib/components/QrCode.svelte';
 	import TypedScoreSheet from '#lib/components/TypedScoreSheet.svelte';
+	import KindFinish from '#lib/components/events/KindFinish.svelte';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import {
 		addCourt,
@@ -22,27 +23,25 @@
 		eventStreamUrl,
 		finishEvent,
 		getEvent,
-		groupsFromTies,
 		isEventDetail,
 		liveScoreText,
 		matchText,
 		matchViewPath,
-		moveItem,
-		placesFromOrder,
 		postEventResult,
 		rotateCourt,
 		rulesText,
 		startEvent,
 		teamText,
+		unfinishedCount,
 		updateTeam
 	} from '#lib/events.ts';
-	import { newClientId } from '#lib/ids.ts';
+	import { stickyClientId } from '#lib/ids.ts';
 	import { listPlayers, scoreText } from '#lib/players.ts';
 	import { requireSignedIn, session } from '#lib/session.ts';
 	import { MAX_NAME_LENGTH } from '#lib/setup.ts';
 	import { openSseStream, type StreamStatus } from '#lib/stream.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { CourtOut, EventDetail, EventMatch, EventTeam, Player, Teams, TypedScore } from '#lib/types.ts';
+	import type { CourtOut, EventDetail, EventMatch, EventTeam, Place, Player, Teams, TypedScore } from '#lib/types.ts';
 
 	const t = strings.events;
 
@@ -228,6 +227,13 @@
 	let matchCourt = $state('');
 	let matchLabel = $state('');
 	let sheetFor = $state<string | null>(null);
+	/** One client id per typed score while a sheet is open, so a retry is replayed. */
+	const resultIds = stickyClientId();
+
+	function openSheet(match: EventMatch) {
+		resultIds.reset();
+		sheetFor = match.id;
+	}
 
 	function submitMatch(event: SubmitEvent) {
 		event.preventDefault();
@@ -273,7 +279,7 @@
 
 	async function saveResult(match: EventMatch, score: TypedScore) {
 		// Throws to the sheet, which explains a refusal in place.
-		await postEventResult(id, match.id, { client_id: newClientId(), score });
+		await postEventResult(id, match.id, { client_id: resultIds.for(score), score });
 		sheetFor = null;
 		await refresh().catch(() => {
 			// The stream brings the change too.
@@ -294,10 +300,8 @@
 	// ---- start and finish ------------------------------------------------------------------
 
 	let finishing = $state(false);
-	let order = $state<string[]>([]);
-	let tied = $state<boolean[]>([]);
 
-	const preview = $derived(placesFromOrder(groupsFromTies(order, tied)));
+	const unfinished = $derived(unfinishedCount(matches));
 	const teamById = (tid: string) => teams.find((x) => x.id === tid);
 	const nameOf = (tid: string) => {
 		const tm = teamById(tid);
@@ -312,19 +316,14 @@
 	}
 
 	function openFinish() {
-		order = teams.map((x) => x.id);
-		tied = order.slice(1).map(() => false);
 		finishing = true;
 		failures = {};
 	}
 
-	function shift(i: number, by: number) {
-		order = moveItem(order, i, i + by);
-	}
-
-	function finish() {
+	/** With the places, or with none when the kind computes them (see KindFinish). */
+	function finish(places?: Place[]) {
 		void act('lifecycle', async () => {
-			detail = await finishEvent(id, preview);
+			detail = await finishEvent(id, places);
 			finishing = false;
 		});
 	}
@@ -450,15 +449,20 @@
 		<!-- 2. Courts -->
 		<section aria-labelledby="h-courts">
 			<h2 id="h-courts">{t.courts}</h2>
+			<!-- Once finished, scoring links give 410: only the viewing QR stays (and no rotate). -->
 			<div class="cards">
 				{#each courts as court (court.id)}
 					{@const links = courtLinks(origin, court)}
 					{@const current = matchById(court.current)}
+					{@const items = [
+						...(status === 'finished' ? [] : [{ key: 'scoring', label: t.scoring, qr: t.scoringQr(court.name), link: links.scoring }]),
+						{ key: 'viewing', label: t.viewing, qr: t.viewingQr(court.name), link: links.viewing }
+					]}
 					<article class="card" aria-labelledby="court-{court.id}">
 						<h3 id="court-{court.id}">{court.name}</h3>
 						<p class="st">{courtStatusText(court, matches, teams)}</p>
 						<div class="qrs">
-							{#each [{ key: 'scoring', label: t.scoring, qr: t.scoringQr(court.name), link: links.scoring }, { key: 'viewing', label: t.viewing, qr: t.viewingQr(court.name), link: links.viewing }] as item (item.key)}
+							{#each items as item (item.key)}
 								{@const copyKey = `${court.id}-${item.key}`}
 								<div class="qr">
 									<figure>
@@ -554,7 +558,7 @@
 										<span class="hint court-name">{courtName(m.court_id)}</span>
 									{/if}
 									{#if status === 'running'}
-										<button class="secondary" type="button" disabled={busy} aria-label={t.enterResultLabel(text)} onclick={() => (sheetFor = m.id)}>
+										<button class="secondary" type="button" disabled={busy} aria-label={t.enterResultLabel(text)} onclick={() => openSheet(m)}>
 											{t.enterResult}
 										</button>
 									{/if}
@@ -621,32 +625,8 @@
 			{:else if status === 'running'}
 				<h2 id="h-lifecycle">{finishing ? t.finishTitle : t.finish}</h2>
 				{#if finishing}
-					<p class="hint">{t.finishHint}</p>
-					<ol class="places">
-						{#each order as tid, i (tid)}
-							{@const place = preview.find((p) => p.team_id === tid)}
-							{#if i > 0}
-								<li class="tie">
-									<label>
-										<input type="checkbox" bind:checked={tied[i - 1]} aria-label={t.tiedLabel(nameOf(order[i - 1] ?? ''), nameOf(tid))} />
-										<span aria-hidden="true">{t.tied}</span>
-									</label>
-								</li>
-							{/if}
-							<li class="row place-row">
-								<span class="pos">{place ? t.place(place.place, place.place_to) : ''}</span>
-								<span class="what"><strong>{nameOf(tid)}</strong></span>
-								<div class="actions">
-									<button class="secondary" type="button" disabled={i === 0} aria-label={t.moveUp(nameOf(tid))} onclick={() => shift(i, -1)}>{t.up}</button>
-									<button class="secondary" type="button" disabled={i === order.length - 1} aria-label={t.moveDown(nameOf(tid))} onclick={() => shift(i, 1)}>{t.down}</button>
-								</div>
-							</li>
-						{/each}
-					</ol>
-					<div class="actions">
-						<button class="primary" type="button" disabled={busy} onclick={finish}>{busy ? t.finishing : t.finishConfirm}</button>
-						<button class="secondary" type="button" onclick={() => (finishing = false)}>{t.cancel}</button>
-					</div>
+					{#if unfinished > 0}<p class="warn" role="status">{t.unfinishedWarning(unfinished)}</p>{/if}
+					<KindFinish event={detail} {busy} onfinish={finish} oncancel={() => (finishing = false)} />
 				{:else}
 					<button class="primary wide" type="button" disabled={busy} onclick={openFinish}>{t.finish}</button>
 				{/if}
@@ -822,42 +802,21 @@
 	.court-name {
 		align-self: center;
 	}
-	.places {
-		list-style: none;
-		margin: 0 0 12px;
-		padding: 0;
-		display: grid;
-		gap: 4px;
-	}
-	.tie label {
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-		gap: 8px;
-		min-height: var(--tap);
-		color: var(--ink);
-		font-size: 14px;
-		cursor: pointer;
-	}
-	.tie input {
-		width: 22px;
-		min-height: 22px;
-		height: 22px;
-		margin: 0;
-	}
 	.pos {
 		flex: none;
 		min-width: 4.5rem;
 		font-weight: 750;
 		font-feature-settings: 'tnum';
 	}
-	.place-row .what {
-		flex: 1 1 6rem;
-	}
 	.final {
 		margin: 0;
 	}
 	p.error {
 		margin-top: 12px;
+	}
+	p.warn {
+		margin: 0 0 12px;
+		color: var(--warn);
+		font-weight: 650;
 	}
 </style>
