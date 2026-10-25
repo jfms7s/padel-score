@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use padel_scoring::DecidingSet::*;
 use padel_scoring::DeuceRule::*;
 use padel_scoring::FinalScore::*;
@@ -220,4 +222,70 @@ fn final_score_rejects_invalid_rules() {
             RulesError::SuperTieBreakNeedsMultipleSets
         ))
     );
+}
+
+fn play(format: &Format, points: &str) -> Score {
+    let start = Start {
+        first_server: Player {
+            team: Team::A,
+            index: 0,
+        },
+    };
+    let events: Vec<Event> = points
+        .chars()
+        .filter_map(|c| match c {
+            'a' => Some(Event::Point(Team::A)),
+            'b' => Some(Event::Point(Team::B)),
+            't' => Some(Event::TimeUp),
+            _ => None,
+        })
+        .collect();
+    replay(format, &start, &events).unwrap()
+}
+
+#[test]
+fn final_score_round_trips_through_validate_final() {
+    // Timed: 1-1 at time-up, B wins the overtime game.
+    let f = timed(false);
+    let score = play(&f, "aaaa bbbb t bbbb");
+    assert_eq!(score.games, [1, 2]);
+    assert_eq!(score.regulation_games, [1, 1]);
+    let typed = score.final_score().unwrap();
+    assert_eq!(
+        typed,
+        Timed {
+            a: 1,
+            b: 1,
+            overtime_winner: Some(Team::B)
+        }
+    );
+    assert_eq!(validate_final(&f, &typed), Ok(Some(Team::B)));
+
+    // Timed without overtime: regulation games are the games.
+    let f = timed(true);
+    let score = play(&f, "aaaa aaaa bbbb t");
+    assert_eq!(score.regulation_games, score.games);
+    let typed = score.final_score().unwrap();
+    assert_eq!(
+        typed,
+        Timed {
+            a: 2,
+            b: 1,
+            overtime_winner: None
+        }
+    );
+    assert_eq!(validate_final(&f, &typed), Ok(Some(Team::A)));
+
+    // Sets: 6-0 6-4.
+    let f = fmt(BestOf3, FullSet);
+    let points = format!("{}{}aaaaaaaa", "aaaa".repeat(6), "aaaabbbb".repeat(4));
+    let score = play(&f, &points);
+    assert_eq!(score.regulation_games, score.games);
+    let typed = score.final_score().unwrap();
+    assert_eq!(typed, Sets(vec![s(6, 0), s(6, 4)]));
+    assert_eq!(validate_final(&f, &typed), Ok(Some(Team::A)));
+
+    // Not finished: no final score.
+    assert_eq!(play(&f, "aaaa").final_score(), None);
+    assert_eq!(play(&timed(false), "aaaa bbbb t").final_score(), None);
 }

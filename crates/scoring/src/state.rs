@@ -2,8 +2,8 @@ use crate::serve::{
     ends_change_after_game, ends_change_in_tiebreak, in_rotation, serve_side, tiebreak_server,
 };
 use crate::{
-    DecidingSet, DeuceRule, ErrorKind, Event, Format, Game, GameScore, Player, RulesError,
-    SUPER_TIEBREAK_TO, ServeSide, SetRules, Start, TIEBREAK_TO, Team, TieBreak,
+    DecidingSet, DeuceRule, ErrorKind, Event, FinalScore, Format, Game, GameScore, Player,
+    RulesError, SUPER_TIEBREAK_TO, ServeSide, SetRules, Start, TIEBREAK_TO, Team, TieBreak,
 };
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +65,9 @@ pub struct Score {
     /// Games in the current set; for a timed match, the whole match.
     /// Once the match is over it shows the final set's games, so a super tie-break set shows 1-0 or 0-1.
     pub games: [u16; 2],
+    /// The games before any overtime game. It equals `games` for a sets match and for a timed
+    /// match with no overtime. Standings count regulation games only (spec §4.3 step 2).
+    pub regulation_games: [u16; 2],
     pub current: Current,
     /// Who serves the next point.
     pub server: Player,
@@ -128,6 +131,24 @@ impl MatchState {
 }
 
 impl Score {
+    /// The final score as it would be typed in after the match, for `validate_final`.
+    /// `None` unless the match is finished.
+    pub fn final_score(&self) -> Option<FinalScore> {
+        let Status::Finished { winner } = self.status else {
+            return None;
+        };
+        // Only a timed match has a time-up, and a timed match only finishes after one.
+        if !self.time_up {
+            return Some(FinalScore::Sets(self.sets.clone()));
+        }
+        let [a, b] = self.regulation_games;
+        Some(FinalScore::Timed {
+            a,
+            b,
+            overtime_winner: if self.overtime { winner } else { None },
+        })
+    }
+
     /// Defaults for the fields a mode doesn't set: no sets, no games, no time-up or overtime.
     /// Every mode sets `current`, `server`, `side`, `change_ends` and `status` itself.
     fn base(start: Start) -> Score {
@@ -135,6 +156,7 @@ impl Score {
             sets: Vec::new(),
             sets_won: [0, 0],
             games: [0, 0],
+            regulation_games: [0, 0],
             current: Current::None,
             server: start.first_server,
             side: ServeSide::Right,
@@ -154,6 +176,8 @@ struct TimedMatch {
     draws_allowed: bool,
     /// Games in the whole match.
     games: [u16; 2],
+    /// Games before any overtime game.
+    regulation_games: [u16; 2],
     unit: TimedUnit,
     /// Places along the service rotation (mod 4) of the current game's server.
     rotation: u16,
@@ -180,6 +204,7 @@ impl TimedMatch {
             deuce,
             draws_allowed,
             games: [0, 0],
+            regulation_games: [0, 0],
             unit: TimedUnit::Game(Game::new(deuce)),
             rotation: 0,
             change_ends: false,
@@ -221,6 +246,7 @@ impl TimedMatch {
         if self.overtime {
             self.finish(Some(w));
         } else {
+            self.regulation_games = self.games;
             self.unit = TimedUnit::Game(Game::new(self.deuce));
         }
     }
@@ -264,6 +290,7 @@ impl TimedMatch {
         };
         Score {
             games: self.games,
+            regulation_games: self.regulation_games,
             current,
             server,
             side,
@@ -467,6 +494,7 @@ impl SetsMatch {
             sets,
             sets_won: self.sets_won,
             games: [u16::from(a), u16::from(b)],
+            regulation_games: [u16::from(a), u16::from(b)],
             current,
             server,
             side,

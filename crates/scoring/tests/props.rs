@@ -178,28 +178,6 @@ fn play_plan(format: &Format, plan: &[PlannedSet]) -> Vec<Event> {
     events
 }
 
-/// The typed final score for a finished timed match: the regulation games, so the overtime
-/// game comes back off the winner's total. `None` if the winner has no game to take off.
-fn timed_final(score: &Score, winner: Option<Team>) -> Option<FinalScore> {
-    let [a, b] = score.games;
-    if !score.overtime {
-        return Some(FinalScore::Timed {
-            a,
-            b,
-            overtime_winner: None,
-        });
-    }
-    let (a, b) = match winner? {
-        Team::A => (a.checked_sub(1)?, b),
-        Team::B => (a, b.checked_sub(1)?),
-    };
-    Some(FinalScore::Timed {
-        a,
-        b,
-        overtime_winner: winner,
-    })
-}
-
 proptest! {
     #[test]
     fn never_panics(format in format(), start in start(), events in events()) {
@@ -247,7 +225,8 @@ proptest! {
         let score = replay(&format, &start, &events).unwrap();
         if let Status::Finished { winner } = score.status {
             prop_assert!(winner.is_some());
-            let typed = FinalScore::Sets(score.sets.clone());
+            let typed = score.final_score().unwrap();
+            prop_assert!(matches!(typed, FinalScore::Sets(_)));
             prop_assert_eq!(validate_final(&format, &typed), Ok(winner));
         }
     }
@@ -261,9 +240,9 @@ proptest! {
         let events = valid_prefix(&format, &start, &events);
         let score = replay(&format, &start, &events).unwrap();
         if let Status::Finished { winner } = score.status {
-            let typed = timed_final(&score, winner);
-            prop_assert!(typed.is_some(), "overtime finish with no game to take off: {:?}", score);
-            prop_assert_eq!(validate_final(&format, &typed.unwrap()), Ok(winner));
+            let typed = score.final_score().unwrap();
+            prop_assert!(matches!(typed, FinalScore::Timed { .. }), "not a timed final score");
+            prop_assert_eq!(validate_final(&format, &typed), Ok(winner));
         }
     }
 
