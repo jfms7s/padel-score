@@ -181,10 +181,10 @@ function post(body: unknown): RequestInit {
 export const ACCOUNT_TIMEOUT_MS = 20_000;
 
 export interface AccountCall {
-	method?: 'GET' | 'POST' | 'DELETE';
+	method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
 	body?: unknown;
-	/** The success status: 200 unless given. */
-	ok?: number;
+	/** The success status, or the statuses that all mean success: 200 unless given. */
+	ok?: number | readonly number[];
 	/**
 	 * The call needs the user signed in, so a 401 means the session ended (expired, revoked,
 	 * disabled) and the browser goes to sign-in. A 401 `invalid_credentials` is a wrong password,
@@ -201,7 +201,8 @@ export async function accountRequest<T>(path: string, opts: AccountCall = {}): P
 	const init: RequestInit = { method: opts.method ?? 'GET' };
 	if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
 	const { status, body, retryAfter } = await call(path, init, ACCOUNT_TIMEOUT_MS);
-	if (status !== (opts.ok ?? 200)) {
+	const ok = opts.ok ?? 200;
+	if (typeof ok === 'number' ? status !== ok : !ok.includes(status)) {
 		const err = failure(status, body, retryAfter);
 		if (status === 401 && opts.signedIn && err.code !== 'invalid_credentials') onUnauthorized();
 		throw err;

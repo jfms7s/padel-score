@@ -315,6 +315,43 @@ export const strings = {
 		}
 	},
 
+	// The player list, and picking players for a match.
+	players: {
+		title: 'Players',
+		back: 'Home',
+		intro: 'Pick these players when you start a match, and their wins and losses add up.',
+		add: 'Add a player',
+		addLabel: 'New player name',
+		adding: 'Adding…',
+		added: (name: string) => `${name} is on your list.`,
+		restored: (name: string) => `${name} is back on your list.`,
+		already: (name: string) => `${name} is already on your list.`,
+		none: 'No players yet. Add the people you play with.',
+		archived: 'Archived',
+		archivedHint: 'Archived players keep their record, and are not offered for new matches.',
+		rename: 'Rename',
+		renameLabel: (name: string) => `Rename ${name}`,
+		newName: (name: string) => `New name for ${name}`,
+		save: 'Save',
+		cancel: 'Cancel',
+		archive: 'Archive',
+		archiveLabel: (name: string) => `Archive ${name}`,
+		restore: 'Restore',
+		restoreLabel: (name: string) => `Restore ${name}`,
+		record: (wins: number, losses: number, draws: number) => `${wins} W · ${losses} L · ${draws} D`,
+		// The picker in the new-match form.
+		suggestions: (slot: string) => `Players for ${slot}`,
+		addToList: (name: string) => `Add ‘${name}’ to my players`,
+		fromList: 'From your players',
+		picked: (name: string) => `${name}, from your players`,
+		listFailed: "Couldn't load your players, so names are typed only.",
+		errors: {
+			invalid_player: 'Enter a name of 1 to 40 characters.',
+			player_exists: 'Another player already has this name.',
+			not_found: 'This player is not on your list.'
+		}
+	},
+
 	// Home, signed in.
 	myMatches: 'My matches',
 	noMyMatches: 'Matches you start while signed in show up here, on any device.',

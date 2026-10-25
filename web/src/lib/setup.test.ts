@@ -62,7 +62,8 @@ describe('setup', () => {
 			deciding: 'full_set',
 			teams: { a: ['', ''], b: ['', ''] },
 			firstServer: { team: 'a', index: 0 },
-			otherFirstServer: 0
+			otherFirstServer: 0,
+			players: { a: [null, null], b: [null, null] }
 		});
 	});
 
@@ -107,6 +108,33 @@ describe('setup', () => {
 			format: { sets: { deuce: 'advantage', sets: 'best_of_3', deciding: 'super_tie_break' } },
 			start: { first_server: { team: 'b', index: 1 }, other_first_server: 1 },
 			teams: { a: ['Ana', 'Rui'], b: ['João', 'Marta'] }
+		});
+	});
+
+	it('to_create_request_omits_players_when_none_picked', () => {
+		expect(toCreateRequest(named())).not.toHaveProperty('players');
+	});
+
+	it('to_create_request_sends_picked_slots', () => {
+		const s = named({ players: { a: ['p-ana', null], b: [null, 'p-marta'] } });
+		expect(toCreateRequest(s).players).toEqual({ a: ['p-ana', null], b: [null, 'p-marta'] });
+		expect(toCreateRequest(s).teams).toEqual({ a: ['Ana', 'Rui'], b: ['João', 'Marta'] });
+	});
+
+	it('last_setup_does_not_store_player_ids', () => {
+		const st = fakeStorage();
+		const s = named({ players: { a: ['p-ana', 'p-rui'], b: [null, 'p-marta'] } });
+		saveLastSetup(st, s);
+		expect(st.data[LAST_SETUP_KEY]).not.toContain('p-ana');
+		expect(JSON.parse(st.data[LAST_SETUP_KEY]!)).not.toHaveProperty('players');
+		const loaded = loadLastSetup(st);
+		expect(loaded.players).toEqual({ a: [null, null], b: [null, null] });
+		expect(loaded.teams).toEqual(s.teams);
+		// Ids saved by hand (or by an older build) are ignored too.
+		const planted = JSON.stringify({ ...s, players: { a: ['p-x', null], b: [null, null] } });
+		expect(loadLastSetup(fakeStorage({ [LAST_SETUP_KEY]: planted })).players).toEqual({
+			a: [null, null],
+			b: [null, null]
 		});
 	});
 

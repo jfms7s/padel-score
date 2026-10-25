@@ -1,0 +1,32 @@
+{
+	"player": {
+		"id": "6f1c2a90-5b1e-4c55-9a43-3d2f1e0b7c11",
+		"name": "Ana",
+		"archived": false,
+		"created_at": 1761400000,
+		"record": { "wins": 1, "losses": 1, "draws": 0 }
+	},
+	"placings": [
+		{ "event_id": "ev-1", "event_kind": "tournament", "place": 3, "place_to": 4, "field_size": 12, "finished_at": 1761400000 }
+	],
+	"items": [
+		{
+			"match_id": "9b2e7d10-4a5c-4f1e-b2d3-c4e5f6a7b8c9",
+			"finished_at": 1761400000,
+			"teams": { "a": ["Ana", "Marta"], "b": ["Rui", "João"] },
+			"players": { "a": ["6f1c2a90-5b1e-4c55-9a43-3d2f1e0b7c11", null], "b": ["a7d04c1e-2f3b-4d6a-8e9f-0b1c2d3e4f50", null] },
+			"winner": "b",
+			"score": {
+				"sets": [{ "a": 0, "b": 6, "tiebreak": null }],
+				"games": [0, 6],
+				"regulation_games": [0, 6],
+				"overtime": false,
+				"timed": false
+			},
+			"spectator_token": "v-3c1f8e2a9b7d",
+			"side": "a",
+			"outcome": "loss"
+		}
+	],
+	"next": null
+}

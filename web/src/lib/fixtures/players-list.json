@@ -1,0 +1,18 @@
+{
+	"items": [
+		{
+			"id": "6f1c2a90-5b1e-4c55-9a43-3d2f1e0b7c11",
+			"name": "Ana",
+			"archived": false,
+			"created_at": 1761400000,
+			"record": { "wins": 1, "losses": 1, "draws": 0 }
+		},
+		{
+			"id": "a7d04c1e-2f3b-4d6a-8e9f-0b1c2d3e4f50",
+			"name": "Rui",
+			"archived": true,
+			"created_at": 1761400100,
+			"record": { "wins": 0, "losses": 0, "draws": 0 }
+		}
+	]
+}

@@ -19,6 +19,10 @@ import type {
 	MatchView,
 	Me,
 	MyMatch,
+	Page,
+	Player,
+	PlayerPage,
+	HistoryEntry,
 	ResetLink,
 	Score,
 	SetupStatus
@@ -161,6 +165,49 @@ function build(exact: (shape: Shape, optional?: Shape) => Check) {
 		{ id: str, label: str, created_at: int, last_activity_at: int, view: matchView },
 		{ scorer_token: str, spectator_token: str }
 	);
+
+	// Players and history.
+	const slot = nullable(str);
+	const listedPlayer = exact({
+		id: str,
+		name: str,
+		archived: bool,
+		created_at: int,
+		record: exact({ wins: int, losses: int, draws: int })
+	});
+	const historyShape: Shape = {
+		match_id: str,
+		finished_at: int,
+		teams: exact({ a: tuple(str, str), b: tuple(str, str) }),
+		players: exact({ a: tuple(slot, slot), b: tuple(slot, slot) }),
+		winner: nullable(team),
+		score: exact({
+			sets: array(exact({ a: int, b: int, tiebreak: nullable(tuple(int, int)) })),
+			games: tuple(int, int),
+			regulation_games: tuple(int, int),
+			overtime: bool,
+			timed: bool
+		}),
+		spectator_token: str
+	};
+	const historyEntry = exact(historyShape);
+	const playerHistoryEntry = exact({
+		...historyShape,
+		side: team,
+		outcome: oneOf('win', 'loss', 'draw')
+	});
+	const placing = exact({
+		event_id: str,
+		event_kind: oneOf('tournament', 'non_stop'),
+		place: int,
+		place_to: int,
+		field_size: int,
+		finished_at: int
+	});
+	const next = nullable(str);
+	const playerList = exact({ items: array(listedPlayer) });
+	const historyPage = exact({ items: array(historyEntry), next });
+	const playerPage = exact({ player: listedPlayer, placings: array(placing), items: array(playerHistoryEntry), next });
 	return {
 		format,
 		event,
@@ -175,7 +222,12 @@ function build(exact: (shape: Shape, optional?: Shape) => Check) {
 		resetLink,
 		deviceLookup,
 		device,
-		myMatch
+		myMatch,
+		player: listedPlayer,
+		playerList,
+		historyEntry,
+		historyPage,
+		playerPage
 	};
 }
 
@@ -198,6 +250,11 @@ export const isResetLink = (v: unknown, o?: GuardOptions): v is ResetLink => pic
 export const isDeviceLookup = (v: unknown, o?: GuardOptions): v is DeviceLookup => pick(o).deviceLookup(v);
 export const isDevice = (v: unknown, o?: GuardOptions): v is Device => pick(o).device(v);
 export const isMyMatch = (v: unknown, o?: GuardOptions): v is MyMatch => pick(o).myMatch(v);
+export const isPlayer = (v: unknown, o?: GuardOptions): v is Player => pick(o).player(v);
+export const isPlayerList = (v: unknown, o?: GuardOptions): v is { items: Player[] } => pick(o).playerList(v);
+export const isHistoryEntry = (v: unknown, o?: GuardOptions): v is HistoryEntry => pick(o).historyEntry(v);
+export const isHistoryPage = (v: unknown, o?: GuardOptions): v is Page<HistoryEntry> => pick(o).historyPage(v);
+export const isPlayerPage = (v: unknown, o?: GuardOptions): v is PlayerPage => pick(o).playerPage(v);
 /** A list whose every item passes `item` (lenient). */
 export const isListOf =
 	<T>(item: (v: unknown) => v is T) =>

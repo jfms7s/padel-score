@@ -4,7 +4,7 @@
 // full or blocked.
 
 import { strings } from './strings';
-import type { CreateMatchRequest, DecidingSet, DeuceRule, Player, SetsFormat, Teams } from './types';
+import type { CreateMatchRequest, DecidingSet, DeuceRule, CourtPlayer, PlayerSlots, SetsFormat, Teams } from './types';
 
 export interface StorageLike {
 	getItem(key: string): string | null;
@@ -17,9 +17,18 @@ export interface Setup {
 	sets: SetsFormat;
 	deciding: DecidingSet;
 	teams: Teams;
-	firstServer: Player;
+	firstServer: CourtPlayer;
 	/** The index (0 or 1) of the player who serves first for the pair that receives first. */
 	otherFirstServer: 0 | 1;
+	/**
+	 * The players picked from the signed-in user's list, by slot. Never remembered: a shared
+	 * phone must not offer one coordinator's players to the next.
+	 */
+	players: PlayerSlots;
+}
+
+export function noPlayers(): PlayerSlots {
+	return { a: [null, null], b: [null, null] };
 }
 
 export interface RecentMatch {
@@ -45,7 +54,8 @@ export function defaultSetup(): Setup {
 		deciding: 'full_set',
 		teams: { a: ['', ''], b: ['', ''] },
 		firstServer: { team: 'a', index: 0 },
-		otherFirstServer: 0
+		otherFirstServer: 0,
+		players: noPlayers()
 	};
 }
 
@@ -61,7 +71,7 @@ function nameOf(setup: Setup, team: 'a' | 'b', index: number): string {
 }
 
 export function serveChoices(setup: Setup): {
-	first: { player: Player; label: string }[];
+	first: { player: CourtPlayer; label: string }[];
 	other: { index: 0 | 1; label: string }[];
 } {
 	const first = (['a', 'b'] as const).flatMap((team) =>
@@ -74,7 +84,7 @@ export function serveChoices(setup: Setup): {
 
 export function toCreateRequest(setup: Setup): CreateMatchRequest {
 	const name = (team: 'a' | 'b', i: 0 | 1) => nameOf(setup, team, i);
-	return {
+	const req: CreateMatchRequest = {
 		format: {
 			sets: {
 				deuce: setup.deuce,
@@ -85,6 +95,9 @@ export function toCreateRequest(setup: Setup): CreateMatchRequest {
 		start: { first_server: setup.firstServer, other_first_server: setup.otherFirstServer },
 		teams: { a: [name('a', 0), name('a', 1)], b: [name('b', 0), name('b', 1)] }
 	};
+	const { a, b } = setup.players;
+	if ([...a, ...b].some((id) => id !== null)) req.players = { a: [a[0], a[1]], b: [b[0], b[1]] };
+	return req;
 }
 
 export function matchLabel(teams: Teams): string {
@@ -111,7 +124,8 @@ function parseSetup(raw: unknown): Setup | null {
 		deciding: sets === 'one' ? 'full_set' : deciding,
 		teams: { a: teams.a, b: teams.b },
 		firstServer: { team: firstServer.team as 'a' | 'b', index: firstServer.index as number },
-		otherFirstServer: otherFirstServer as 0 | 1
+		otherFirstServer: otherFirstServer as 0 | 1,
+		players: noPlayers()
 	};
 }
 
@@ -127,7 +141,8 @@ export function loadLastSetup(storage: StorageLike): Setup {
 
 export function saveLastSetup(storage: StorageLike, setup: Setup): void {
 	try {
-		storage.setItem(LAST_SETUP_KEY, JSON.stringify(setup));
+		const { players: _notRemembered, ...rest } = setup;
+		storage.setItem(LAST_SETUP_KEY, JSON.stringify(rest));
 	} catch {
 		// Remembering is a convenience; a full or blocked store must not stop a match.
 	}

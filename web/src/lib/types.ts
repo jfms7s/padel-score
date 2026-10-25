@@ -7,7 +7,8 @@
 
 export type Team = 'a' | 'b';
 
-export interface Player {
+/** A place on court: the team and which of its two players (the engine's `Player`). */
+export interface CourtPlayer {
 	team: Team;
 	/** 0 or 1. */
 	index: number;
@@ -27,7 +28,7 @@ export interface SetRules {
 export type Format = { sets: SetRules } | { timed: { deuce: DeuceRule; draws_allowed: boolean } };
 
 export interface Start {
-	first_server: Player;
+	first_server: CourtPlayer;
 	/** The index (0 or 1) of the player who serves first for the team that receives first. */
 	other_first_server: number;
 }
@@ -83,7 +84,7 @@ export interface Score {
 	regulation_games: [number, number];
 	current: Current;
 	/** Who serves the next point. Meaningless once finished. */
-	server: Player;
+	server: CourtPlayer;
 	/** Where the next serve goes from. Meaningless once finished. */
 	side: ServeSide;
 	/** True only in the snapshot right after the event that made the players change ends. */
@@ -145,6 +146,8 @@ export interface CreateMatchRequest {
 	format: Format;
 	start: Start;
 	teams: Teams;
+	/** Signed in only: the slots picked from the player list. Left out when none is picked. */
+	players?: PlayerSlots;
 }
 
 export interface CreatedMatch {
@@ -186,7 +189,9 @@ export type AccountErrorCode =
 	| 'reset_invalid'
 	| 'cannot_disable_self'
 	| 'last_admin'
-	| 'device_code_used';
+	| 'device_code_used'
+	| 'invalid_player'
+	| 'player_exists';
 
 /** `GET /api/auth/me`, and the answer to setup, login and accepting an invite. */
 export interface Me {
@@ -280,6 +285,93 @@ export interface MyMatch {
 	view: MatchView;
 	scorer_token?: string;
 	spectator_token?: string;
+}
+
+// ---- players and history (crates/server/src/players_api.rs, results.rs) -----------------
+
+/** A player's wins, losses and draws (timed draws) over finished matches. */
+export interface PlayerRecord {
+	wins: number;
+	losses: number;
+	draws: number;
+}
+
+/** One of the coordinator's players. Never deleted, only archived. */
+export interface Player {
+	id: string;
+	name: string;
+	archived: boolean;
+	created_at: number;
+	record: PlayerRecord;
+}
+
+/** `PATCH /api/players/{id}`: either field, or both. */
+export interface PlayerChange {
+	name?: string;
+	archived?: boolean;
+}
+
+/** The player picked for each slot of a match, team A then team B; null = typed name only. */
+export interface PlayerSlots {
+	a: [string | null, string | null];
+	b: [string | null, string | null];
+}
+
+/** A finished match's score as history keeps it. */
+export interface FinalScore {
+	/** The sets in order; empty for a timed match. */
+	sets: SetScore[];
+	/** The final set's games; for a timed match, the whole match including any overtime game. */
+	games: [number, number];
+	/** The games before any overtime game. */
+	regulation_games: [number, number];
+	overtime: boolean;
+	timed: boolean;
+}
+
+/** One of `GET /api/me/history`: a finished match the user started. */
+export interface HistoryEntry {
+	match_id: string;
+	finished_at: number;
+	/** The names as played. */
+	teams: Teams;
+	players: PlayerSlots;
+	/** Null for a timed draw. */
+	winner: Team | null;
+	score: FinalScore;
+	/** The final view is at `/v/{spectator_token}`. */
+	spectator_token: string;
+}
+
+export type Outcome = 'win' | 'loss' | 'draw';
+
+/** One of a player page's matches: which side the player was on and how it went. */
+export interface PlayerHistoryEntry extends HistoryEntry {
+	side: Team;
+	outcome: Outcome;
+}
+
+/** A place in a tournament or non-stop event (phases 6-8). */
+export interface Placing {
+	event_id: string;
+	event_kind: 'tournament' | 'non_stop';
+	place: number;
+	/** Equal to `place` unless the place is shared (3rd-4th). */
+	place_to: number;
+	field_size: number;
+	finished_at: number;
+}
+
+/** A page of a newest-first list; `next` is the `before` of the following page, null on the last. */
+export interface Page<T> {
+	items: T[];
+	next: string | null;
+}
+
+/** `GET /api/players/{id}`: paging applies to `items` only. */
+export interface PlayerPage extends Page<PlayerHistoryEntry> {
+	player: Player;
+	placings: Placing[];
 }
 
 // ---- WASM bridge -------------------------------------------------------------------------
