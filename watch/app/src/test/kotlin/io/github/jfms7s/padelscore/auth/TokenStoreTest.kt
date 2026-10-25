@@ -30,6 +30,7 @@ import org.junit.Test
 /** Same blob layout as KeystoreCipher (iv || ciphertext+tag) but with an in-memory key. */
 private class TestCipher(private val key: SecretKey = newKey()) : TokenCipher {
     var failDecrypt: Exception? = null
+    var decrypts = 0
 
     override fun encrypt(plain: ByteArray): ByteArray {
         val iv = ByteArray(12).also(SecureRandom()::nextBytes)
@@ -39,6 +40,7 @@ private class TestCipher(private val key: SecretKey = newKey()) : TokenCipher {
     }
 
     override fun decrypt(blob: ByteArray): ByteArray {
+        decrypts++
         failDecrypt?.let { throw it }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, blob.copyOfRange(0, 12)))
@@ -101,11 +103,52 @@ class TokenStoreTest {
     @Test
     fun cipher_security_exception_clears_and_returns_null() = runTest {
         store.write("pdl_TEST_abc123")
+        // A fresh instance, as after a process restart: nothing cached, so the cipher is used.
+        val restarted = DataStoreTokenStore(dataStore, cipher)
         cipher.failDecrypt = GeneralSecurityException("key permanently invalidated")
-        assertNull(store.read())
-        assertFalse(store.signedIn.first())
+        assertNull(restarted.read())
+        assertFalse(restarted.signedIn.first())
         cipher.failDecrypt = null
-        assertNull(store.read())
+        assertNull(restarted.read())
+    }
+
+    @Test
+    fun read_after_write_is_served_from_memory() = runTest {
+        store.write("pdl_TEST_abc123")
+        assertEquals("pdl_TEST_abc123", store.read())
+        assertEquals("pdl_TEST_abc123", store.read())
+        assertEquals(0, cipher.decrypts)
+    }
+
+    @Test
+    fun first_read_decrypts_once_then_caches() = runTest {
+        store.write("pdl_TEST_abc123")
+        val restarted = DataStoreTokenStore(dataStore, cipher)
+        assertEquals("pdl_TEST_abc123", restarted.read())
+        assertEquals("pdl_TEST_abc123", restarted.read())
+        assertEquals(1, cipher.decrypts)
+    }
+
+    @Test
+    fun clear_drops_the_cached_token() = runTest {
+        store.write("pdl_TEST_abc123")
+        assertEquals("pdl_TEST_abc123", store.read())
+        store.clear()
+        // Another writer puts a new token in the file: a stale cache would still answer with the old one.
+        DataStoreTokenStore(dataStore, cipher).write("pdl_TEST_new")
+        assertEquals("pdl_TEST_new", store.read())
+        assertEquals(1, cipher.decrypts)
+    }
+
+    @Test
+    fun failed_read_caches_nothing() = runTest {
+        store.write("pdl_TEST_abc123")
+        val restarted = DataStoreTokenStore(dataStore, cipher)
+        cipher.failDecrypt = GeneralSecurityException("key permanently invalidated")
+        assertNull(restarted.read())
+        cipher.failDecrypt = null
+        DataStoreTokenStore(dataStore, cipher).write("pdl_TEST_new")
+        assertEquals("pdl_TEST_new", restarted.read())
     }
 
     @Test

@@ -122,7 +122,9 @@ data class DeviceStart(
 )
 
 @Serializable
-data class DeviceToken(@SerialName("access_token") val accessToken: String)
+data class DeviceToken(@SerialName("access_token") val accessToken: String) {
+    override fun toString() = "DeviceToken(accessToken=$REDACTED)"
+}
 
 @Serializable
 data class ErrorBody(

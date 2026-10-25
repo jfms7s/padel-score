@@ -7,6 +7,7 @@ import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -149,5 +150,28 @@ class PadelApiTest {
         assertEquals("/api/me/matches/stream", list.url.encodedPath)
         assertEquals("Bearer pdl_TEST", list.header("Authorization"))
         assertEquals("/api/me/matches/m1/stream", api().matchStreamRequest("m1").url.encodedPath)
+    }
+
+    @Test fun token_is_read_off_the_calling_thread() = runBlocking {
+        val caller = Thread.currentThread()
+        val readers = mutableListOf<Thread>()
+        val api = HttpPadelApi(server.url("/"), OkHttpClient(), WireJson) {
+            synchronized(readers) { readers += Thread.currentThread() }
+            "pdl_TEST"
+        }
+        enqueue(200, resource("fixtures/me-matches.json"))
+        api.myMatches()
+        enqueue(200, resource("view-one-point.json"))
+        api.send("m1", request)
+        api.listStreamRequest()
+        api.matchStreamRequest("m1")
+        assertEquals(4, readers.size)
+        assertTrue(readers.none { it === caller })
+    }
+
+    @Test fun granted_to_string_hides_the_token() {
+        val text = TokenPoll.Granted("pdl_TEST_secret").toString()
+        assertFalse(text.contains("pdl_TEST_secret"))
+        assertEquals("Granted(token=██)", text)
     }
 }
