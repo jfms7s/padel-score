@@ -27,8 +27,12 @@ pub const INVITE_TTL_SECS: i64 = 7 * 86_400;
 pub const RESET_TTL_SECS: i64 = 86_400;
 /// A device code lasts 10 minutes.
 pub const DEVICE_CODE_TTL_SECS: i64 = 600;
-/// A device polling again sooner than this is told to slow down.
+/// The interval a device is told to poll at.
 pub const DEVICE_POLL_INTERVAL_SECS: i64 = 5;
+/// How much sooner than [`DEVICE_POLL_INTERVAL_SECS`] a poll may land before it is too fast:
+/// timer jitter and whole-second clocks put a well-behaved 5 s poll at 4 s now and then. A
+/// device polling again sooner than the interval less this is told to slow down.
+pub const POLL_SLACK_SECS: i64 = 1;
 /// Unused, unrevoked, unexpired invites one user may hold at once.
 pub const MAX_ACTIVE_INVITES: i64 = 20;
 /// A device token's `last_used_at` is written at most this often.
@@ -1014,7 +1018,7 @@ impl Store {
     }
 
     /// One poll by the device. Every poll is recorded; a pending code polled again within
-    /// [`DEVICE_POLL_INTERVAL_SECS`] gets `SlowDown`. Once approved, the poll mints the device
+    /// [`DEVICE_POLL_INTERVAL_SECS`] less [`POLL_SLACK_SECS`] gets `SlowDown`. Once approved, the poll mints the device
     /// token in the same transaction that marks the code consumed, so it is issued exactly once.
     /// An approval whose user has since been disabled reads as denied. An unknown code is
     /// `NotFound`.
@@ -1077,7 +1081,9 @@ impl Store {
                 }
                 PollOutcome::Issued { raw_token }
             }
-        } else if last_polled_at.is_some_and(|t| now - t < DEVICE_POLL_INTERVAL_SECS) {
+        } else if last_polled_at
+            .is_some_and(|t| now - t < DEVICE_POLL_INTERVAL_SECS - POLL_SLACK_SECS)
+        {
             PollOutcome::SlowDown
         } else {
             PollOutcome::Pending

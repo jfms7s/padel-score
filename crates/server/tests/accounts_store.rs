@@ -6,8 +6,8 @@
 )]
 
 use padel_score_server::accounts_store::{
-    DEVICE_CODE_TTL_SECS, InviteStatus, MAX_ACTIVE_INVITES, NewUser, PollOutcome, SESSION_TTL_SECS,
-    normalize_user_code,
+    DEVICE_CODE_TTL_SECS, DEVICE_POLL_INTERVAL_SECS, InviteStatus, MAX_ACTIVE_INVITES, NewUser,
+    PollOutcome, SESSION_TTL_SECS, normalize_user_code,
 };
 use padel_score_server::db;
 use padel_score_server::store::{NewMatch, Store, StoreError, Teams};
@@ -438,6 +438,21 @@ async fn reset_single_use_revokes_everything() {
     ));
 }
 
+/// A watch polling every 5 s can land a poll a second early (timer jitter, whole seconds):
+/// that is not too fast.
+#[tokio::test]
+async fn poll_after_four_seconds_is_not_slow_down() {
+    let (s, _) = setup().await;
+    let started = s.start_device("Ana's watch", NOW).await.unwrap();
+    let poll = |t: i64| s.poll_device(&started.device_code, t);
+    assert_eq!(poll(NOW).await.unwrap(), PollOutcome::Pending);
+    assert_eq!(
+        poll(NOW + DEVICE_POLL_INTERVAL_SECS - 1).await.unwrap(),
+        PollOutcome::Pending
+    );
+    assert_eq!(poll(NOW + 7).await.unwrap(), PollOutcome::SlowDown);
+}
+
 #[tokio::test]
 async fn device_poll_lifecycle() {
     let (s, _) = setup().await;
@@ -446,10 +461,10 @@ async fn device_poll_lifecycle() {
     assert_eq!(started.expires_at, NOW + DEVICE_CODE_TTL_SECS);
     let poll = |t: i64| s.poll_device(&started.device_code, t);
     assert_eq!(poll(NOW).await.unwrap(), PollOutcome::Pending);
-    assert_eq!(poll(NOW + 4).await.unwrap(), PollOutcome::SlowDown);
-    // The too-fast poll still counts, so the next must wait 5 s from it.
-    assert_eq!(poll(NOW + 8).await.unwrap(), PollOutcome::SlowDown);
-    assert_eq!(poll(NOW + 13).await.unwrap(), PollOutcome::Pending);
+    assert_eq!(poll(NOW + 3).await.unwrap(), PollOutcome::SlowDown);
+    // The too-fast poll still counts, so the next must wait from it.
+    assert_eq!(poll(NOW + 6).await.unwrap(), PollOutcome::SlowDown);
+    assert_eq!(poll(NOW + 10).await.unwrap(), PollOutcome::Pending);
     let shown = s
         .device_by_user_code(&started.user_code)
         .await

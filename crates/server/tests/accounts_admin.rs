@@ -355,7 +355,7 @@ async fn reset_does_not_sign_in() {
 #[tokio::test]
 async fn reset_is_rate_limited() {
     let (state, _, app, _, _) = with_admin().await;
-    for _ in 0..30 {
+    for _ in 0..120 {
         assert_eq!(
             reset(&app, "guess", NEW_PASSWORD).await.status,
             StatusCode::GONE
@@ -506,9 +506,14 @@ async fn codes_never_appear_in_logs() {
         .layer(MockConnectInfo(peer(1)));
 
     let (_, code) = create_invite(&state, &app, &admin).await;
-    let path = format!("/api/invites/{code}");
+    let lookup = json!({ "code": code });
     assert_eq!(
-        send(&app, req(Method::GET, &path, None, &[])).await.status,
+        send(
+            &app,
+            req(Method::POST, "/api/invites/lookup", Some(lookup), &[])
+        )
+        .await
+        .status,
         StatusCode::OK
     );
     let res = accept(&app, &code, accept_body("bea@x.test", "Bea")).await;
@@ -519,7 +524,7 @@ async fn codes_never_appear_in_logs() {
         reset(&app, &reset_code, NEW_PASSWORD).await.status,
         StatusCode::NO_CONTENT
     );
-    // Failures too, including a method no route takes.
+    // Failures too, including a method no route takes and a code put in a path by mistake.
     let res = send(
         &app,
         req(Method::PUT, &format!("/api/invites/{code}"), None, &[]),
@@ -588,7 +593,9 @@ async fn codes_never_appear_in_logs() {
     let text = logs.text();
     assert!(!text.contains(&code), "invite code logged:\n{text}");
     // The capture works: the trace layer logged these requests, by route.
-    assert!(text.contains("/api/invites/{key}/accept"), "{text}");
+    assert!(text.contains("/api/invites/lookup"), "{text}");
+    assert!(text.contains("/api/invites/accept"), "{text}");
+    assert!(text.contains("/api/invites/{id}"), "{text}");
     assert!(text.contains("/api/reset"), "{text}");
     assert!(!text.contains(&reset_code), "reset code logged:\n{text}");
     assert!(!text.contains(&admin), "session logged:\n{text}");

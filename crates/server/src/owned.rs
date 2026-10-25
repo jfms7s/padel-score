@@ -10,17 +10,19 @@
 //!   request, response and idempotency ([`api::run_command`]), for the owner only.
 //! - `GET /api/me/matches/{id}/stream` is the scorer stream's `state` frames, for the owner only.
 //!
-//! Every route takes [`CurrentUser`], so a revoked device or a disabled user is 401 on its next
-//! request. A match the caller does not own is 404, as is an unknown one, so existence does not
+//! Every response carries `Cache-Control: no-store` and `Referrer-Policy: no-referrer`
+//! ([`accounts::secret_headers`]). Every route takes [`CurrentUser`], so a revoked device or a
+//! disabled user is 401 on its next request. A match the caller does not own is 404, as is an unknown one, so existence does not
 //! leak. The two streams also re-check their credential every [`AppState::credential_recheck`]
 //! (30 s) and end once it no longer holds; the client's reconnect then gets 401.
 //!
-//! A user may hold at most [`MAX_LIST_STREAMS`] list streams at once; another is 429
-//! `too_many_requests` with `Retry-After: 30`. Every change re-reads and replays the list once
-//! per stream, so the cap bounds that work. The list stream's re-reads run off the response body
+//! A user may hold at most [`MAX_LIST_STREAMS`] list streams at once; opening another ends
+//! their oldest to make room, so a client that leaked streams (a reload, a lost tab) is never
+//! locked out. Every change re-reads and replays the list once per stream, so the cap bounds
+//! that work. The list stream's re-reads run off the response body
 //! ([`api::detached_reread`]), so a client that stops reading cannot pin a pool connection.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -39,6 +41,7 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
+use crate::accounts;
 use crate::api::{self, ApiError, ApiJson, ApiPath, internal};
 use crate::auth::{AuthVia, Credential, CurrentUser, credential, credential_holds};
 use crate::commands::{CommandRequest, MatchView, view_of};
@@ -51,14 +54,17 @@ pub const LIVE_LIMIT: usize = 20;
 /// The most list streams one user may hold open at once.
 pub const MAX_LIST_STREAMS: usize = 5;
 
-/// The `Retry-After` of a list stream refused by [`MAX_LIST_STREAMS`], in seconds.
-pub const LIST_STREAM_RETRY_SECS: u64 = 30;
-
-/// The open list streams per user, for [`MAX_LIST_STREAMS`]. The lock guards map operations
-/// only, never an await.
+/// The open list streams per user, oldest first, for [`MAX_LIST_STREAMS`]. The lock guards
+/// map operations only, never an await.
 #[derive(Debug, Default)]
 pub struct ListStreams {
-    open: Mutex<HashMap<String, usize>>,
+    open: Mutex<ListStreamsInner>,
+}
+
+#[derive(Debug, Default)]
+struct ListStreamsInner {
+    next_id: u64,
+    by_user: HashMap<String, VecDeque<(u64, CancellationToken)>>,
 }
 
 impl ListStreams {
@@ -66,39 +72,50 @@ impl ListStreams {
         ListStreams::default()
     }
 
-    /// Take one of the user's slots, or `None` when they hold [`MAX_LIST_STREAMS`] already.
-    /// The slot is given back when the returned guard drops.
-    fn try_open(self: &Arc<Self>, user_id: &str) -> Option<ListStreamSlot> {
-        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-        let count = open.entry(user_id.to_owned()).or_insert(0);
-        if *count >= MAX_LIST_STREAMS {
-            return None;
+    /// Take one of the user's slots. When they hold [`MAX_LIST_STREAMS`] already, their oldest
+    /// is cancelled and its slot handed over at once; that stream ends on its next poll. The
+    /// slot is given back when the returned guard drops.
+    fn open(self: &Arc<Self>, user_id: &str) -> ListStreamSlot {
+        let mut inner = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        let id = inner.next_id;
+        inner.next_id = inner.next_id.wrapping_add(1);
+        let evicted = CancellationToken::new();
+        let slots = inner.by_user.entry(user_id.to_owned()).or_default();
+        while slots.len() >= MAX_LIST_STREAMS {
+            if let Some((_, oldest)) = slots.pop_front() {
+                oldest.cancel();
+            }
         }
-        *count += 1;
-        Some(ListStreamSlot {
+        slots.push_back((id, evicted.clone()));
+        ListStreamSlot {
             streams: Arc::clone(self),
             user_id: user_id.to_owned(),
-        })
+            id,
+            evicted,
+        }
     }
 }
 
-/// One open list stream's slot; dropping it frees the slot.
+/// One open list stream's slot; dropping it frees the slot (a no-op once it was evicted).
 struct ListStreamSlot {
     streams: Arc<ListStreams>,
     user_id: String,
+    id: u64,
+    /// Cancelled when a newer stream of the same user takes this slot.
+    evicted: CancellationToken,
 }
 
 impl Drop for ListStreamSlot {
     fn drop(&mut self) {
-        let mut open = self
+        let mut inner = self
             .streams
             .open
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if let Some(count) = open.get_mut(&self.user_id) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                open.remove(&self.user_id);
+        if let Some(slots) = inner.by_user.get_mut(&self.user_id) {
+            slots.retain(|(id, _)| *id != self.id);
+            if slots.is_empty() {
+                inner.by_user.remove(&self.user_id);
             }
         }
     }
@@ -110,6 +127,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/me/matches/stream", get(list_stream))
         .route("/api/me/matches/{id}/commands", post(commands))
         .route("/api/me/matches/{id}/stream", get(match_stream))
+        // The list carries scorer tokens; no cache may keep it, nor any of these.
+        .layer(axum::middleware::map_response(accounts::secret_headers))
 }
 
 /// One entry of the live list.
@@ -277,13 +296,9 @@ async fn list_stream(
     user: CurrentUser,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    let slot = state
-        .list_streams
-        .try_open(&user.user.id)
-        .ok_or(ApiError::TooMany {
-            retry_after: LIST_STREAM_RETRY_SECS,
-        })?;
     let lapsed = lapsed(&state, &headers, &user)?;
+    let slot = state.list_streams.open(&user.user.id);
+    let evicted = slot.evicted.clone().cancelled_owned();
     // Subscribe before the first read so no change can fall between the two.
     let subscription = state.hub.subscribe_user(&user.user.id);
     let first = live_list(&state, &user).await?;
@@ -295,8 +310,10 @@ async fn list_stream(
         pending: Some(first),
         _slot: slot,
     };
-    let events = futures_util::stream::unfold(watch, next_list)
-        .take_until(api::until_either(shutdown, lapsed));
+    let events = futures_util::stream::unfold(watch, next_list).take_until(api::until_either(
+        shutdown,
+        api::until_either(lapsed, evicted),
+    ));
     Ok(api::sse(events))
 }
 

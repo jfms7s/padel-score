@@ -185,34 +185,35 @@ impl RateLimiter {
 /// The named limiters the account routes use. All windows are one minute.
 #[derive(Debug)]
 pub struct Limits {
-    /// Login failures per client address (reserve, then refund on success) ([`crate::client_ip::rate_key`]): 10 a minute.
+    /// Login failures per client address (reserve, then refund on success) ([`crate::client_ip::rate_key`]): 60 a minute.
     pub login_ip: RateLimiter,
     /// Login and password-change failures per email (its SHA-256) and per `user:{id}` (reserve,
     /// then refund on success), from any address: 5 a minute.
     pub login_email: RateLimiter,
-    /// `POST /api/device/start` per client address: 10 a minute.
+    /// `POST /api/device/start` per client address: 60 a minute.
     pub device_start: RateLimiter,
     /// Device-code approvals per user id: 10 a minute.
     pub device_approve: RateLimiter,
-    /// `GET /api/invites/{code}` per client address: 30 a minute.
+    /// The public code routes (`POST /api/invites/lookup`, `/accept`, `POST /api/reset`) per
+    /// client address: 120 a minute.
     pub invite_lookup: RateLimiter,
     /// `GET /api/device/{user_code}` per user id: 30 a minute.
     pub device_lookup: RateLimiter,
     /// `POST /api/device/token` per client address (a loose brake; the watch polls every 5 s):
-    /// 60 a minute.
+    /// 300 a minute.
     pub device_token: RateLimiter,
 }
 
 impl Limits {
     pub fn new() -> Limits {
         Limits {
-            login_ip: RateLimiter::new(10, 60),
+            login_ip: RateLimiter::new(60, 60),
             login_email: RateLimiter::new(5, 60),
-            device_start: RateLimiter::new(10, 60),
+            device_start: RateLimiter::new(60, 60),
             device_approve: RateLimiter::new(10, 60),
-            invite_lookup: RateLimiter::new(30, 60),
+            invite_lookup: RateLimiter::new(120, 60),
             device_lookup: RateLimiter::new(30, 60),
-            device_token: RateLimiter::new(60, 60),
+            device_token: RateLimiter::new(300, 60),
         }
     }
 
@@ -274,13 +275,13 @@ mod tests {
     fn named_limits_match_the_plan() {
         let limits = Limits::new();
         let cases = [
-            (&limits.login_ip, 10),
+            (&limits.login_ip, 60),
             (&limits.login_email, 5),
-            (&limits.device_start, 10),
+            (&limits.device_start, 60),
             (&limits.device_approve, 10),
-            (&limits.invite_lookup, 30),
+            (&limits.invite_lookup, 120),
             (&limits.device_lookup, 30),
-            (&limits.device_token, 60),
+            (&limits.device_token, 300),
         ];
         for (limiter, limit) in cases {
             assert_eq!(limiter.limit, limit);

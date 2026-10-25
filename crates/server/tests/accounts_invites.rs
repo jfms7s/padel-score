@@ -16,8 +16,12 @@ use serde_json::{Value, json};
 use support::*;
 
 async fn lookup(app: &axum::Router, code: &str) -> Res {
-    let path = format!("/api/invites/{code}");
-    send(app, req(Method::GET, &path, None, &[])).await
+    let body = json!({ "code": code });
+    send(
+        app,
+        req(Method::POST, "/api/invites/lookup", Some(body), &[]),
+    )
+    .await
 }
 
 async fn list(state: &padel_score_server::AppState, app: &axum::Router, raw: &str) -> Res {
@@ -242,11 +246,17 @@ async fn accept_creates_user_signed_in_with_inviter() {
         assert_eq!(res.body, json!({ "error": "validation", "field": field }));
     }
     // Accepted in a browser where the admin is signed in: that session ends.
-    let path = format!("/api/invites/{code}/accept");
-    let body = accept_body(" Bea@X.test ", " Bea ");
+    let mut body = accept_body(" Bea@X.test ", " Bea ");
+    body["code"] = json!(code);
     let res = send(
         &app,
-        as_session(&state, &admin, Method::POST, &path, Some(body)),
+        as_session(
+            &state,
+            &admin,
+            Method::POST,
+            "/api/invites/accept",
+            Some(body),
+        ),
     )
     .await;
     assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
@@ -340,7 +350,7 @@ async fn twenty_active_invites_limit() {
 async fn invite_lookup_is_rate_limited() {
     let (state, _, app, _, admin) = with_admin().await;
     let (_, code) = create_invite(&state, &app, &admin).await;
-    for i in 0..30 {
+    for i in 0..120 {
         let res = lookup(&app, &code).await;
         assert_eq!(res.status, StatusCode::OK, "lookup {i}");
     }
@@ -423,4 +433,20 @@ async fn invite_responses_no_store_no_referrer() {
             "{name}"
         );
     }
+}
+
+/// Codes travel in bodies only: the old path-carrying routes are gone.
+#[tokio::test]
+async fn code_in_path_routes_are_gone() {
+    let (state, _, app, _, admin) = with_admin().await;
+    let (_, code) = create_invite(&state, &app, &admin).await;
+    let path = format!("/api/invites/{code}");
+    let res = send(&app, req(Method::GET, &path, None, &[])).await;
+    assert_eq!(res.status, StatusCode::METHOD_NOT_ALLOWED);
+    let path = format!("/api/invites/{code}/accept");
+    let body = accept_body("bea@x.test", "Bea");
+    let res = send(&app, req(Method::POST, &path, Some(body), &[])).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    // The invite is still usable through the body routes.
+    assert_eq!(lookup(&app, &code).await.status, StatusCode::OK);
 }

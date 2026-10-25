@@ -174,6 +174,19 @@ describe('the auth client', () => {
 		expect(JSON.parse(String(calls[5]?.init?.body))).toEqual({ code: 'code', password: 'new-pass-1' });
 	});
 
+	it('sends invite codes in the body, never the path', async () => {
+		const looked = serve(200, { invited_by_name: 'Ana', expires_at: 1 });
+		await lookupInvite('se/cret');
+		expect(looked.map((c) => `${c.init?.method ?? 'GET'} ${c.url}`)).toEqual(['POST /api/invites/lookup']);
+		expect(JSON.parse(String(looked[0]?.init?.body))).toEqual({ code: 'se/cret' });
+
+		const accepted = serve(201, meAdmin);
+		const req = { email: 'a@b.test', display_name: 'A', password: '12345678' };
+		await acceptInvite('se/cret', req);
+		expect(accepted.map((c) => `${c.init?.method ?? 'GET'} ${c.url}`)).toEqual(['POST /api/invites/accept']);
+		expect(JSON.parse(String(accepted[0]?.init?.body))).toEqual({ code: 'se/cret', ...req });
+	});
+
 	it('reads each shape the server sends', async () => {
 		serve(200, setupNeeded);
 		expect(await getSetup()).toEqual({ needs_setup: true });

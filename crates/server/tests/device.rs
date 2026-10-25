@@ -365,7 +365,7 @@ async fn decided_code_is_409() {
 #[tokio::test]
 async fn device_start_and_approve_are_rate_limited() {
     let (state, _, app, _, admin) = with_admin().await;
-    for _ in 0..10 {
+    for _ in 0..60 {
         start(&app).await;
     }
     let res = send(
@@ -572,7 +572,7 @@ async fn device_lookup_is_rate_limited() {
 #[tokio::test]
 async fn device_token_route_is_rate_limited_per_ip() {
     let (state, _, app, _, _) = with_admin().await;
-    for _ in 0..60 {
+    for _ in 0..300 {
         assert_poll_error(&poll(&app, "unknown").await, "expired_token");
     }
     let res = poll(&app, "unknown").await;

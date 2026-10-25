@@ -16,7 +16,8 @@
 //!   `login_email` budget plus a `user:{id}` key.
 //!
 //! Invites (Task 5). Codes travel only in URL fragments (`/invite#<code>`), which browsers never
-//! send; the PWA reads the fragment and puts the code in the API path itself.
+//! send, and in request bodies; the PWA reads the fragment and posts the code. A code is never in
+//! an API path, so it cannot reach a log, a proxy's access log or a cache key.
 //!
 //! - `POST /api/invites` (session only) is 201 `{id, url: "/invite#<code>", expires_at}`; past
 //!   [`crate::accounts_store::MAX_ACTIVE_INVITES`] active ones it is 409 `too_many_invites`.
@@ -24,9 +25,10 @@
 //!   `[{id, created_at, expires_at, status, used_by_name?}]`, never their codes.
 //! - `DELETE /api/invites/{id}` (session only) revokes one of the caller's own: 204. Anyone
 //!   else's is 404, like an unknown one; a used one is 409 `invite_used`.
-//! - `GET /api/invites/{code}` (public) is `{invited_by_name, expires_at}`. Unknown, used,
-//!   expired, revoked and disabled-creator invites are all the same 410 `invite_invalid`.
-//! - `POST /api/invites/{code}/accept` (public) takes `{email, display_name, password}`, checked
+//! - `POST /api/invites/lookup` (public) takes `{code}` and is `{invited_by_name, expires_at}`.
+//!   Unknown, used, expired, revoked and disabled-creator invites are all the same 410
+//!   `invite_invalid`.
+//! - `POST /api/invites/accept` (public) takes `{code, email, display_name, password}`, checked
 //!   as setup checks them (422 naming the field), and creates the user signed in: 201 [`Me`]
 //!   with the session cookie (a session the browser presented ends, as at login). An unusable
 //!   invite is 410 `invite_invalid`, a taken email 409 `email_taken`.
@@ -90,11 +92,9 @@ pub fn routes() -> Router<AppState> {
         .route("/api/auth/me", get(me))
         .route("/api/auth/password", post(change_password))
         .route("/api/invites", get(list_invites).post(create_invite))
-        .route(
-            "/api/invites/{key}",
-            get(lookup_invite).delete(revoke_invite),
-        )
-        .route("/api/invites/{key}/accept", post(accept_invite))
+        .route("/api/invites/lookup", post(lookup_invite))
+        .route("/api/invites/accept", post(accept_invite))
+        .route("/api/invites/{id}", axum::routing::delete(revoke_invite))
         .route("/api/admin/users", get(list_users))
         .route("/api/admin/users/{id}/disable", post(disable_user))
         .route("/api/admin/users/{id}/enable", post(enable_user))
@@ -529,13 +529,18 @@ async fn revoke_invite(
 
 const INVITE_INVALID: ApiError = ApiError::Gone("invite_invalid");
 
+#[derive(Deserialize)]
+struct LookupBody {
+    code: String,
+}
+
 async fn lookup_invite(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
-    Path(code): Path<String>,
+    ApiJson(body): ApiJson<LookupBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     limit_code_route(&state, ip)?;
-    match state.store.invite_by_code(&code, now()).await? {
+    match state.store.invite_by_code(&body.code, now()).await? {
         Some(info) if info.status == InviteStatus::Valid => Ok(Json(json!({
             "invited_by_name": info.created_by_name,
             "expires_at": info.expires_at,
@@ -546,6 +551,7 @@ async fn lookup_invite(
 
 #[derive(Deserialize)]
 struct AcceptBody {
+    code: String,
     email: String,
     display_name: String,
     password: String,
@@ -557,11 +563,11 @@ struct AcceptBody {
 async fn accept_invite(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
-    Path(code): Path<String>,
     headers: HeaderMap,
     ApiJson(body): ApiJson<AcceptBody>,
 ) -> Result<Response, ApiError> {
     limit_code_route(&state, ip)?;
+    let code = body.code;
     let valid = validate_user(&body.email, &body.display_name, &body.password)?;
     let usable = state
         .store

@@ -231,7 +231,7 @@ export interface Invite {
 	used_by_name?: string;
 }
 
-/** `GET /api/invites/{code}`. */
+/** `POST /api/invites/lookup` with `{code}`. */
 export interface InviteLookup {
 	invited_by_name: string;
 	expires_at: number;

@@ -341,8 +341,8 @@ async fn client_ip_extractor_end_to_end() {
     let (_, _, body) = get_text(&proxied, "/ip", Some("1.1.1.1, 203.0.113.9, 192.0.2.1")).await;
     assert_eq!(body, "203.0.113.9");
 
-    // The named limiter in AppState refuses the 31st invite lookup a minute with a 429.
-    for _ in 0..30 {
+    // The named limiter in AppState refuses the 121st invite lookup a minute with a 429.
+    for _ in 0..120 {
         let (status, _, _) = get_text(&proxied, "/limited", Some("203.0.113.9")).await;
         assert_eq!(status, StatusCode::OK);
     }

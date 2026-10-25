@@ -101,7 +101,7 @@ async fn api_not_found() -> impl IntoResponse {
 }
 
 /// The request trace layer `main.rs` serves with: tower-http's HTTP defaults, except that each
-/// request's span names its matched route template (`/api/invites/{key}`), never the URI. Paths
+/// request's span names its matched route template (`/api/invites/{id}`), never the URI. Paths
 /// can carry secrets (invite codes, phase 2 scorer tokens) and a query string anything, so
 /// neither may reach a log. A request no route matched (the static web files, and the PWA's
 /// pages such as `/s/{scorer_token}`) logs the fixed label [`STATIC_ROUTE`].

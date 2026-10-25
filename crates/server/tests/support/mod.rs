@@ -191,9 +191,14 @@ pub fn accept_body(email: &str, name: &str) -> Value {
     json!({ "email": email, "display_name": name, "password": PASSWORD })
 }
 
-pub async fn accept(app: &Router, code: &str, body: Value) -> Res {
-    let path = format!("/api/invites/{code}/accept");
-    send(app, req(Method::POST, &path, Some(body), &[])).await
+/// `POST /api/invites/accept` with `body` and the code added to it.
+pub async fn accept(app: &Router, code: &str, mut body: Value) -> Res {
+    body["code"] = json!(code);
+    send(
+        app,
+        req(Method::POST, "/api/invites/accept", Some(body), &[]),
+    )
+    .await
 }
 
 /// A user invited by the session `inviter`, signed in: (user id, session raw).

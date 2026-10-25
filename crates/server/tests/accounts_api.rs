@@ -399,9 +399,9 @@ async fn login_is_rate_limited_per_email_and_ip() {
         .parse()
         .unwrap();
     assert!((1..=60).contains(&retry), "{retry}");
-    // Per address: 10 failures a minute, across emails.
+    // Per address: 60 failures a minute, across emails.
     let app = app_from(&state, 99);
-    for i in 0..10 {
+    for i in 0..60 {
         let res = login(&app, &format!("n{i}@x.test"), "wrong password").await;
         assert_eq!(res.status, StatusCode::UNAUTHORIZED, "attempt {i}");
     }
@@ -787,12 +787,12 @@ async fn successful_password_change_refunds_limits() {
 async fn ip_refusal_does_not_create_email_windows() {
     let (state, _, _) = with_admin().await;
     let app = app_from(&state, 77);
-    for i in 0..10 {
+    for i in 0..60 {
         let res = login(&app, &format!("n{i}@x.test"), "wrong password").await;
         assert_eq!(res.status, StatusCode::UNAUTHORIZED, "attempt {i}");
     }
     let before = state.limits.login_email.len();
-    assert_eq!(before, 10);
+    assert_eq!(before, 60);
     for i in 0..5 {
         let res = login(&app, &format!("fresh{i}@x.test"), "wrong password").await;
         assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);

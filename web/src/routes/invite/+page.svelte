@@ -19,8 +19,9 @@
 	let failure = $state<string | null>(null);
 
 	onMount(() => {
-		// The code lives only in the fragment, which never reaches the server or a referrer. It is
-		// taken out of the address bar as soon as it is read.
+		// The code lives only in the fragment, which never reaches the server or a referrer, and is
+		// then sent in request bodies only, never in a path. It is taken out of the address bar as
+		// soon as it is read.
 		code = takeFragmentCode(location, {
 			state: page.state,
 			replaceState: (_state, _unused, url) => replaceState(url, page.state)

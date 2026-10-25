@@ -33,11 +33,15 @@ kubectl logs -n padel-score deploy/padel-score-padel-score-server | grep "setup 
 
 Or set `SETUP_TOKEN` and use that value as the setup code. The setup creates the first admin.
 
-**Invites.** There is no public sign-up. An admin creates an invite on the admin page and sends the link (`/invite#<code>`) to the person. The code is in the URL fragment, so it never reaches a server log. Invites expire and can be revoked. An admin can also disable and re-enable users.
+**Invites.** There is no public sign-up. Any signed-in user creates an invite on `/account` and sends the link (`/invite#<code>`) to the person. The code is in the URL fragment and then in request bodies, never in a URL path, so it never reaches a server log. Invites expire and can be revoked.
+
+**Admin.** The admin page lists the users, disables and re-enables them, and makes password reset links.
 
 **Password resets.** An admin creates a reset link (`/reset#<code>`) for a user and sends it to them. Using it sets a new password and signs the user out everywhere.
 
 **Known gap: no email.** The server sends no email, so a forgotten password is recovered through an admin-made reset link, never by the user alone. If the only admin loses their password, a reset needs database access.
+
+**Known gap: per-address limits are global behind the homelab's load balancer.** Behind the homelab's Traefik ServiceLB, every visitor reaches the app with the same in-cluster address, so the per-address rate limits (login, device start and polling, invite and reset codes) are in effect one shared bucket. The per-email login limit still protects each account. The proper fix (`externalTrafficPolicy: Local`) comes before the app is public.
 
 **Watch sign-in.** The watch shows a code; sign in on the web and enter it at `/link` to approve the device. A signed-in watch is listed on the account page and can be revoked there.
 

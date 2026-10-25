@@ -87,14 +87,14 @@ export function revokeInvite(id: string): Promise<void> {
 	return accountRequest(`/api/invites/${enc(id)}`, { method: DELETE, ok: 204, signedIn: true });
 }
 
-/** Public: who sent the invite. */
+/** Public: who sent the invite. The code goes in the body, never a path a log could keep. */
 export function lookupInvite(code: string): Promise<InviteLookup> {
-	return accountRequest(`/api/invites/${enc(code)}`, { guard: isInviteLookup });
+	return accountRequest('/api/invites/lookup', { method: POST, body: { code }, guard: isInviteLookup });
 }
 
-/** Public: creates the account, signed in. */
+/** Public: creates the account, signed in. The code goes in the body, as for the lookup. */
 export function acceptInvite(code: string, req: AcceptInviteRequest): Promise<Me> {
-	return accountRequest(`/api/invites/${enc(code)}/accept`, { method: POST, body: req, ok: 201, guard: isMe });
+	return accountRequest('/api/invites/accept', { method: POST, body: { code, ...req }, ok: 201, guard: isMe });
 }
 
 // ---- admin and reset ---------------------------------------------------------------------

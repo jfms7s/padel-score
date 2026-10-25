@@ -690,7 +690,7 @@ async fn stalled_lag_reread_does_not_hold_pool_connection() {
 }
 
 #[tokio::test]
-async fn sixth_list_stream_is_refused() {
+async fn sixth_list_stream_evicts_oldest() {
     let (state, _, app, _, admin) = with_admin().await;
     let (_, bea, _) = user_and_device(&state, &app, &admin).await;
     let open = || as_session(&state, &admin, Method::GET, "/api/me/matches/stream", None);
@@ -700,22 +700,55 @@ async fn sixth_list_stream_is_refused() {
         s.next("matches").await;
         streams.push(s);
     }
-    // A 6th would stream forever, hence the timeout.
-    let res = tokio::time::timeout(TIMEOUT, send(&app, open()))
-        .await
-        .expect("a 6th list stream was opened");
-    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(res.body["error"], json!("too_many_requests"));
-    assert_eq!(res.header(header::RETRY_AFTER), Some("30"));
-    // Another user has their own allowance.
+    // A 6th is admitted, and the oldest ends to make room.
+    let mut sixth = Sse::open(&app, open()).await;
+    sixth.next("matches").await;
+    let mut oldest = streams.remove(0);
+    assert!(
+        oldest.ends_within(TIMEOUT).await,
+        "the oldest stream lives on"
+    );
+    // The other four live on: never more than five.
+    for s in &mut streams {
+        assert!(!s.ends_within(Duration::from_millis(50)).await);
+    }
+    // A 7th evicts the next oldest, and so on.
+    let mut seventh = Sse::open(&app, open()).await;
+    seventh.next("matches").await;
+    assert!(streams[0].ends_within(TIMEOUT).await);
+    assert!(!sixth.ends_within(Duration::from_millis(50)).await);
+    // Another user has their own allowance; their streams are not evicted.
     let mut other = Sse::open(
         &app,
         as_session(&state, &bea, Method::GET, "/api/me/matches/stream", None),
     )
     .await;
     other.next("matches").await;
-    // A closed stream frees its slot.
-    streams.pop();
+    assert!(!streams[1].ends_within(Duration::from_millis(50)).await);
+    // A closed stream frees its slot: opening after it evicts nobody.
+    drop(seventh);
     let mut again = Sse::open(&app, open()).await;
     again.next("matches").await;
+    for s in &mut streams[1..] {
+        assert!(!s.ends_within(Duration::from_millis(50)).await);
+    }
+    assert!(!sixth.ends_within(Duration::from_millis(50)).await);
+}
+
+/// The list carries scorer tokens: no cache may keep it.
+#[tokio::test]
+async fn owned_routes_are_no_store() {
+    let (state, _, app, _, admin) = with_admin().await;
+    let res = send(
+        &app,
+        as_session(&state, &admin, Method::GET, "/api/me/matches", None),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK);
+    assert_eq!(res.header(header::CACHE_CONTROL), Some("no-store"));
+    assert_eq!(res.header(header::REFERRER_POLICY), Some("no-referrer"));
+    // Errors too.
+    let res = send(&app, req(Method::GET, "/api/me/matches", None, &[])).await;
+    assert_eq!(res.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(res.header(header::CACHE_CONTROL), Some("no-store"));
 }
