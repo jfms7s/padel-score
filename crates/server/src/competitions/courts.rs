@@ -59,6 +59,15 @@ pub struct Advanced {
     pub rotated: Option<String>,
 }
 
+/// Which of a court's two tokens a request came in by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CourtAccess {
+    /// The court scorer token: the court phone, which may score and advance.
+    Scorer,
+    /// The court spectator token: view only.
+    Viewer,
+}
+
 fn court_from_row(row: &SqliteRow) -> Result<Court, sqlx::Error> {
     Ok(Court {
         id: row.try_get("id")?,
@@ -146,7 +155,7 @@ pub async fn event_matches_in(
         .collect::<Result<Vec<_>, _>>()?)
 }
 
-async fn event_match_in(
+pub(crate) async fn event_match_in(
     conn: &mut SqliteConnection,
     event_id: &str,
     match_id: &str,
@@ -190,7 +199,7 @@ async fn is_finished_in(conn: &mut SqliteConnection, match_id: &str) -> Result<b
 
 /// The court's next match: the lowest `court_seq` match queued there that is unfinished and
 /// not current anywhere.
-async fn next_queued_in(
+pub(crate) async fn next_queued_in(
     conn: &mut SqliteConnection,
     court_id: &str,
 ) -> Result<Option<String>, StoreError> {
@@ -420,6 +429,35 @@ pub async fn advance_court_in(
     })
 }
 
+/// The court whose scorer or spectator token is `token`, with its event (whoever owns it) and
+/// which token matched; `None` for an unknown token.
+pub(crate) async fn court_by_token_in(
+    conn: &mut SqliteConnection,
+    token: &str,
+) -> Result<Option<(Competition, Court, CourtAccess)>, StoreError> {
+    let row = sqlx::query(
+        "SELECT id, event_id, name, position, scorer_token, spectator_token, current_match_id \
+         FROM courts WHERE scorer_token = ?1 OR spectator_token = ?1",
+    )
+    .bind(token)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let court = court_from_row(&row)?;
+    let event_id: String = row.try_get("event_id")?;
+    let ev = competition_by_id_in(conn, &event_id)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+    let access = if court.scorer_token == token {
+        CourtAccess::Scorer
+    } else {
+        CourtAccess::Viewer
+    };
+    Ok(Some((ev, court, access)))
+}
+
 async fn owned_event_in(
     conn: &mut SqliteConnection,
     owner: &str,
@@ -431,6 +469,15 @@ async fn owned_event_in(
 }
 
 impl Store {
+    /// See [`court_by_token_in`].
+    pub async fn court_by_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<(Competition, Court, CourtAccess)>, StoreError> {
+        let mut conn = self.pool().acquire().await?;
+        court_by_token_in(&mut conn, token).await
+    }
+
     /// Add a court; without a name it is "Court {n}", `n` being its position. Not once the event
     /// is finished (`Conflict("event_finished")`), nor past [`MAX_COURTS`].
     pub async fn add_court(

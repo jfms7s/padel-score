@@ -6,6 +6,7 @@ pub mod client_ip;
 pub mod commands;
 pub mod competitions;
 pub mod config;
+pub mod court_api;
 pub mod db;
 pub mod device;
 pub mod events_api;

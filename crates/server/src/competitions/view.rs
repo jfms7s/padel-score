@@ -1,5 +1,7 @@
-//! The coordinator's read model of an event: [`EventDetail`], the body of `GET /api/events/{id}`
-//! and of each `event` frame on its stream.
+//! The read models of an event: the coordinator's [`EventDetail`] (`GET /api/events/{id}` and
+//! each `event` frame on its stream), the court page's [`CourtState`] (`GET /api/court/{token}`)
+//! and the spectators' [`EventView`] (`GET /api/event-view/{token}`), which is the detail with
+//! every scorer token and phone count left out.
 //!
 //! A match's `state` is `finished` when it has a `match_results` row, else `live` when its log
 //! has an effective event, else `waiting`. Only live matches are replayed (for `live`); the
@@ -11,13 +13,19 @@ use padel_scoring::{Score, Team};
 use serde::Serialize;
 use sqlx::{Row, SqliteConnection};
 
-use super::courts::{courts_in, event_matches_in};
+use super::courts::{
+    Court, CourtAccess, court_by_token_in, courts_in, event_match_in, event_matches_in,
+    next_queued_in,
+};
 use super::places::{Place, places};
-use super::{Audience, Competition, EventTeam, Kind, Status, competition_in, kinds, teams_in};
+use super::{
+    Audience, Competition, EventTeam, Kind, Status, competition_by_id_in, competition_in, kinds,
+    teams_in,
+};
 use crate::commands::view_of;
 use crate::hub::CourtPhones;
 use crate::results::FinalScore;
-use crate::store::{Store, StoreError, decode, events_in, match_by_id_in};
+use crate::store::{Store, StoreError, Teams, decode, events_in, match_by_id_in};
 
 /// An event as listed, and at the top of every detail. The spectator token sits beside it in
 /// [`EventDetail`], never in a list item.
@@ -207,6 +215,17 @@ pub(crate) async fn detail_in(
     ev: Competition,
     phones: &CourtPhones,
 ) -> Result<EventDetail, StoreError> {
+    detail_for_in(conn, ev, Some(phones), Audience::Coordinator).await
+}
+
+/// The detail of `ev` with the kind's data for `audience`; without `phones` every court counts
+/// 0 (a spectator's view drops the count anyway).
+async fn detail_for_in(
+    conn: &mut SqliteConnection,
+    ev: Competition,
+    phones: Option<&CourtPhones>,
+    audience: Audience,
+) -> Result<EventDetail, StoreError> {
     let teams = teams_in(conn, &ev.id).await?;
     let courts = courts_in(conn, &ev.id).await?;
     let links = event_matches_in(conn, &ev.id).await?;
@@ -274,7 +293,7 @@ pub(crate) async fn detail_in(
             position: c.position,
             scorer_token: c.scorer_token.clone(),
             spectator_token: c.spectator_token.clone(),
-            phones: phones.count(&c.id),
+            phones: phones.map_or(0, |p| p.count(&c.id)),
             current: c.current_match_id.clone(),
             queue: queued
                 .iter()
@@ -285,7 +304,7 @@ pub(crate) async fn detail_in(
         .collect();
 
     let places = places(conn, &ev.id).await?;
-    let kind_data = kinds::kind_data(ev.kind, conn, &ev, Audience::Coordinator).await?;
+    let kind_data = kinds::kind_data(ev.kind, conn, &ev, audience).await?;
     Ok(EventDetail {
         event: EventSummary::new(&ev, teams.len(), courts.len()),
         spectator_token: ev.spectator_token.clone(),
@@ -295,6 +314,267 @@ pub(crate) async fn detail_in(
         places,
         kind_data,
     })
+}
+
+/// The event as a court page shows it at the top.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CourtEvent {
+    pub id: String,
+    pub name: String,
+    pub kind: Kind,
+    pub status: Status,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CourtRef {
+    pub id: String,
+    pub name: String,
+}
+
+/// A match as a court page shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CourtMatch {
+    /// The match id.
+    pub id: String,
+    pub label: String,
+    pub teams: Teams,
+    pub spectator_token: String,
+    /// The match's scorer token: only for the current match, and only when the page came in
+    /// by the court's scorer token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scorer_token: Option<String>,
+}
+
+/// `GET /api/court/{token}`, and each `court` frame on its stream.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CourtState {
+    pub event: CourtEvent,
+    pub court: CourtRef,
+    /// The court's current match; a finished one stays until the court is advanced.
+    pub current: Option<CourtMatch>,
+    /// The match the court moves on to: the lowest `court_seq` unfinished queued match.
+    pub next: Option<CourtMatch>,
+    pub kind_data: Option<serde_json::Value>,
+}
+
+async fn court_match_in(
+    conn: &mut SqliteConnection,
+    event_id: &str,
+    match_id: &str,
+    with_scorer_token: bool,
+) -> Result<CourtMatch, StoreError> {
+    let link = event_match_in(conn, event_id, match_id)
+        .await?
+        .ok_or_else(|| StoreError::Corrupt(format!("court match {match_id} has no link")))?;
+    let m = match_by_id_in(conn, match_id)
+        .await?
+        .ok_or_else(|| StoreError::Corrupt(format!("court match {match_id} lost")))?;
+    Ok(CourtMatch {
+        id: m.id,
+        label: link.label,
+        teams: m.teams,
+        spectator_token: m.spectator_token,
+        scorer_token: with_scorer_token.then_some(m.scorer_token),
+    })
+}
+
+/// Build the court page's state on `conn` (the caller's read transaction).
+async fn court_state_in(
+    conn: &mut SqliteConnection,
+    ev: &Competition,
+    court: &Court,
+    access: CourtAccess,
+) -> Result<CourtState, StoreError> {
+    let current = match &court.current_match_id {
+        Some(id) => Some(court_match_in(conn, &ev.id, id, access == CourtAccess::Scorer).await?),
+        None => None,
+    };
+    let next = match next_queued_in(conn, &court.id).await? {
+        Some(id) => Some(court_match_in(conn, &ev.id, &id, false).await?),
+        None => None,
+    };
+    let audience = Audience::Court {
+        court_id: court.id.clone(),
+    };
+    let kind_data = kinds::kind_data(ev.kind, conn, ev, audience).await?;
+    Ok(CourtState {
+        event: CourtEvent {
+            id: ev.id.clone(),
+            name: ev.name.clone(),
+            kind: ev.kind,
+            status: ev.status,
+        },
+        court: CourtRef {
+            id: court.id.clone(),
+            name: court.name.clone(),
+        },
+        current,
+        next,
+        kind_data,
+    })
+}
+
+/// The court page's state for `court` of `ev`, as the token `access` sees it. One read
+/// transaction; the court's current match is the one in `court`.
+pub async fn court_state(
+    store: &Store,
+    ev: &Competition,
+    court: &Court,
+    access: CourtAccess,
+) -> Result<CourtState, StoreError> {
+    let mut tx = store.pool().begin().await?;
+    let state = court_state_in(&mut tx, ev, court, access).await?;
+    tx.commit().await?;
+    Ok(state)
+}
+
+/// A court found by one of its tokens, with its page's state.
+#[derive(Debug, Clone)]
+pub struct CourtLookup {
+    pub event: Competition,
+    pub court: Court,
+    pub access: CourtAccess,
+    pub state: CourtState,
+}
+
+/// The court whose scorer or spectator token is `token` and its page's state, read in one
+/// transaction so the court and its matches agree; `None` for an unknown token.
+pub async fn court_state_by_token(
+    store: &Store,
+    token: &str,
+) -> Result<Option<CourtLookup>, StoreError> {
+    let mut tx = store.pool().begin().await?;
+    let Some((event, court, access)) = court_by_token_in(&mut tx, token).await? else {
+        return Ok(None);
+    };
+    let state = court_state_in(&mut tx, &event, &court, access).await?;
+    tx.commit().await?;
+    Ok(Some(CourtLookup {
+        event,
+        court,
+        access,
+        state,
+    }))
+}
+
+/// A court as a spectator of the event sees it: [`CourtOut`] without its scorer token or the
+/// phone count.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CourtView {
+    pub id: String,
+    pub name: String,
+    pub position: i64,
+    pub spectator_token: String,
+    pub current: Option<String>,
+    pub queue: Vec<String>,
+}
+
+/// An event match as a spectator sees it: [`EventMatch`] without its scorer token.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EventMatchView {
+    pub id: String,
+    pub label: String,
+    pub ordinal: i64,
+    pub team_a: String,
+    pub team_b: String,
+    pub court_id: Option<String>,
+    pub state: MatchState,
+    pub locked: bool,
+    pub winner: Option<Team>,
+    pub result: Option<FinalScore>,
+    pub live: Option<Score>,
+    pub spectator_token: String,
+}
+
+/// `GET /api/event-view/{token}`, and each `event` frame on its stream: [`EventDetail`] with
+/// no scorer token anywhere and no phone counts.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EventView {
+    pub event: EventSummary,
+    pub spectator_token: String,
+    pub teams: Vec<EventTeam>,
+    pub courts: Vec<CourtView>,
+    pub matches: Vec<EventMatchView>,
+    pub places: Vec<Place>,
+    pub kind_data: Option<serde_json::Value>,
+}
+
+impl From<EventDetail> for EventView {
+    fn from(d: EventDetail) -> EventView {
+        EventView {
+            event: d.event,
+            spectator_token: d.spectator_token,
+            teams: d.teams,
+            courts: d
+                .courts
+                .into_iter()
+                .map(|c| CourtView {
+                    id: c.id,
+                    name: c.name,
+                    position: c.position,
+                    spectator_token: c.spectator_token,
+                    current: c.current,
+                    queue: c.queue,
+                })
+                .collect(),
+            matches: d
+                .matches
+                .into_iter()
+                .map(|m| EventMatchView {
+                    id: m.id,
+                    label: m.label,
+                    ordinal: m.ordinal,
+                    team_a: m.team_a,
+                    team_b: m.team_b,
+                    court_id: m.court_id,
+                    state: m.state,
+                    locked: m.locked,
+                    winner: m.winner,
+                    result: m.result,
+                    live: m.live,
+                    spectator_token: m.spectator_token,
+                })
+                .collect(),
+            places: d.places,
+            kind_data: d.kind_data,
+        }
+    }
+}
+
+/// The id of the event whose spectator token is `token`, or `None`.
+pub async fn event_id_by_spectator_token(
+    store: &Store,
+    token: &str,
+) -> Result<Option<String>, StoreError> {
+    Ok(
+        sqlx::query_scalar("SELECT id FROM competitions WHERE spectator_token = ?")
+            .bind(token)
+            .fetch_optional(store.pool())
+            .await?,
+    )
+}
+
+/// The event whose spectator token is `spectator_token`, as its spectators see it, or `None`.
+/// One read transaction.
+pub async fn event_view(
+    store: &Store,
+    spectator_token: &str,
+) -> Result<Option<EventView>, StoreError> {
+    let mut tx = store.pool().begin().await?;
+    let id: Option<String> =
+        sqlx::query_scalar("SELECT id FROM competitions WHERE spectator_token = ?")
+            .bind(spectator_token)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    let ev = competition_by_id_in(&mut tx, &id)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+    let detail = detail_for_in(&mut tx, ev, None, Audience::Spectator).await?;
+    tx.commit().await?;
+    Ok(Some(detail.into()))
 }
 
 /// The event an event match belongs to, or `None` for any other match: one indexed lookup, for
