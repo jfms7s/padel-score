@@ -68,6 +68,7 @@ class MatchListModelTest {
     private fun model(result: ApiResult<List<MyMatch>>): Pair<MatchListModel, FakeListApi> {
         val api = FakeListApi(result)
         val model = MatchListModel(api, stream, QUICK)
+        model.startStream()
         scheduler.runCurrent()
         return model to api
     }
@@ -138,6 +139,7 @@ class MatchListModelTest {
     fun failed_get_keeps_rows_the_stream_already_filled() {
         val api = FakeListApi(ApiResult.Failed("io"))
         val model = MatchListModel(api, flowOf(StreamItem.Frame(listOf(first))), QUICK)
+        model.startStream()
         scheduler.runCurrent()
         assertEquals(listOf("m1"), ready(model).rows.map { it.id })
     }
@@ -150,6 +152,48 @@ class MatchListModelTest {
         scheduler.runCurrent()
         assertEquals(2, api.gets)
         assertEquals(listOf("m1"), ready(model).rows.map { it.id })
+    }
+
+    @Test
+    fun stopped_model_does_not_collect() {
+        val api = FakeListApi(ApiResult.Ok(listOf(first)))
+        val model = MatchListModel(api, stream, QUICK)
+        scheduler.runCurrent()
+        assertEquals(0, stream.subscriptionCount.value)
+        assertEquals(1, api.gets) // the GET still runs once from construction
+        emit(StreamItem.Frame(listOf(second)))
+        assertEquals(listOf("m1"), ready(model).rows.map { it.id })
+    }
+
+    @Test
+    fun stop_closes_the_stream_and_start_reconnects() {
+        val (model, api) = model(ApiResult.Ok(listOf(first)))
+        assertEquals(1, stream.subscriptionCount.value)
+        model.stopStream()
+        scheduler.runCurrent()
+        assertEquals(0, stream.subscriptionCount.value)
+        emit(StreamItem.Frame(listOf(second))) // nobody listening
+        assertEquals(listOf("m1"), ready(model).rows.map { it.id })
+
+        model.startStream()
+        model.startStream() // already started: no second collector
+        scheduler.runCurrent()
+        assertEquals(1, stream.subscriptionCount.value)
+        emit(StreamItem.Frame(listOf(second, first)))
+        assertEquals(listOf("m2", "m1"), ready(model).rows.map { it.id })
+        assertEquals(1, api.gets) // restarting does not reload
+    }
+
+    @Test
+    fun unauthorized_is_sticky_across_restart() {
+        val (model, _) = model(ApiResult.Ok(listOf(first)))
+        emit(StreamItem.Unauthorized)
+        model.stopStream()
+        model.startStream()
+        scheduler.runCurrent()
+        assertEquals(0, stream.subscriptionCount.value)
+        emit(StreamItem.Frame(listOf(first)))
+        assertEquals(ListState.Unauthorized, model.state.value)
     }
 
     private companion object {

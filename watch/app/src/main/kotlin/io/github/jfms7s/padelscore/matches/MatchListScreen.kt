@@ -29,10 +29,16 @@ import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
+import androidx.lifecycle.compose.LifecycleStartEffect
 import io.github.jfms7s.padelscore.R
 
 @Composable
 fun MatchListScreen(model: MatchListModel, onPick: (String) -> Unit, onSignOut: () -> Unit) {
+    // Started only while visible: the score screen on top, or the screen going off, closes the list stream.
+    LifecycleStartEffect(model) {
+        model.startStream()
+        onStopOrDispose { model.stopStream() }
+    }
     val state by model.state.collectAsState()
     MatchListContent(state, onPick, onRetry = model::refresh, onSignOut = onSignOut)
 }

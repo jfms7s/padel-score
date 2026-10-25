@@ -184,25 +184,21 @@ class WatchAppTest {
     }
 
     @Test
-    fun simultaneous_401s_sign_out_once() {
+    fun list_stream_closed_under_score_and_reopened_after_back() {
         val list = MutableSharedFlow<StreamItem<List<MyMatch>>>(extraBufferCapacity = 4)
-        val match = MutableSharedFlow<StreamItem<MatchView>>(replay = 1, extraBufferCapacity = 4)
-        match.tryEmit(StreamItem.Frame(view))
-        val tokens = FakeTokens("tok")
         val api = FakeApi(oneMatch)
-        launch(FakeContainer(api, tokens, list = list, match = match))
+        launch(FakeContainer(api, FakeTokens("tok"), list = list, match = flowOf(StreamItem.Frame(view))))
+        assertEquals(1, list.subscriptionCount.value)
+
         compose.onNodeWithText("Ana / Rui v João / Marta").performClick()
         compose.onNodeWithContentDescription("Point Ana / Rui").assertExists()
+        // Only the match stream is open during the match.
+        assertEquals(0, list.subscriptionCount.value)
 
-        // One revoke reaches the list stream (still open under the score screen) and the match stream together.
-        list.tryEmit(StreamItem.Unauthorized)
-        match.tryEmit(StreamItem.Unauthorized)
+        compose.runOnUiThread { back.onBackPressed() }
         compose.waitForIdle()
-
-        compose.onNodeWithText("New code").assertExists()
-        assertEquals(1, tokens.clears)
-        assertEquals(1, api.starts)
-        assertNull(nav.previousBackStackEntry)
+        assertEquals(1, list.subscriptionCount.value)
+        assertEquals(1, api.gets) // coming back reconnects the stream, not the GET
     }
 
     @Test

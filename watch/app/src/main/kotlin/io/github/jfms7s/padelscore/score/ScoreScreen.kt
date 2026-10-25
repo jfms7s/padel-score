@@ -274,7 +274,7 @@ private fun UndoBar(onUndo: () -> Unit, modifier: Modifier) {
     Box(
         modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(48.dp)
             .background(Scrim)
             .drawBehind { drawRect(HoldFill, size = Size(size.width * fill.value, size.height)) }
             .pointerInput(Unit) {
