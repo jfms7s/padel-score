@@ -18,7 +18,9 @@ const player = (id: string, name: string, archived = false): Player => ({
 	name,
 	archived,
 	created_at: 1761400000,
-	record: { wins: 0, losses: 0, draws: 0 }
+	record: { wins: 0, losses: 0, draws: 0 },
+	link: null,
+	pending_claims: 0
 });
 
 const ana = player('p-ana', 'Ana');

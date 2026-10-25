@@ -285,7 +285,10 @@ export const strings = {
 			copy: 'Copy link',
 			copied: 'Copied',
 			copyFailed: 'Copy the link above by hand.',
-			qr: 'QR code for the link'
+			qr: 'QR code for the link',
+			/** The time left on a code that expires, "9:41". */
+			timeLeft: (clock: string) => `Good for ${clock}`,
+			expired: 'This code has expired.'
 		},
 
 		errors: {
@@ -349,6 +352,73 @@ export const strings = {
 			invalid_player: 'Enter a name of 1 to 40 characters.',
 			player_exists: 'Another player already has this name.',
 			not_found: 'This player is not on your list.'
+		}
+	},
+
+	// Linking player entries to accounts, claims, and the combined history.
+	linking: {
+		/** On a player's page, unlinked. */
+		linkToAccount: 'Link to an account',
+		linkHint: 'Show this code to the player. They scan it signed in and confirm that it is them. It works once.',
+		linkCodeTitle: (name: string) => `Link code for ${name}`,
+		hideCode: 'Hide the code',
+		thisIsMe: 'This is me',
+		linkedMe: 'This player is now linked to you.',
+		unlink: 'Unlink',
+		unlinkConfirm: (name: string) => `Unlink ${name}? Their matches stay in your history.`,
+		unlinkYes: 'Yes, unlink',
+		keep: 'Keep the link',
+		unlinked: 'Unlinked.',
+		you: 'You',
+		linkedTo: (name: string) => `Linked · ${name}`,
+		claimBadge: (n: number) => (n === 1 ? '1 claim' : `${n} claims`),
+		// Previews: "5 matches · 2 events · Mar 2026 – Oct 2026".
+		match: (n: number) => (n === 1 ? '1 match' : `${n} matches`),
+		event: (n: number) => (n === 1 ? '1 event' : `${n} events`),
+		nothingYet: 'No finished matches yet',
+		range: (from: string, to: string) => `${from} – ${to}`,
+		// The page the QR code opens.
+		page: {
+			title: 'Is this you?',
+			noCode: 'This link is incomplete. Ask for a new one.',
+			is: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
+			yes: 'Yes, that’s me',
+			confirming: 'Linking…'
+		},
+		// Claims waiting for the coordinator.
+		claims: 'Claims',
+		claimsHint: 'People who say one of your players is them. Approving links the player to their account.',
+		claimFor: (claimant: string, email: string) => `${claimant} (${email})`,
+		claimOn: (name: string) => `Says they are ${name}`,
+		approve: 'Approve',
+		approveLabel: (claimant: string, name: string) => `Approve ${claimant} as ${name}`,
+		approved: (name: string) => `${name} is now linked.`,
+		decline: 'Decline',
+		declineLabel: (claimant: string, name: string) => `Decline ${claimant} as ${name}`,
+		declineConfirm: (claimant: string, name: string) => `Decline ${claimant} as ${name}?`,
+		declineYes: 'Yes, decline',
+		declined: 'Claim declined.',
+		// Their wider history, on a linked player's page.
+		allMatches: 'All their matches',
+		allMatchesHint: 'Every match across all coordinators. Other coordinators’ matches show no names.',
+		noAllMatches: 'No finished matches yet.',
+		matchLine: (a: string, b: string) => `${a} v ${b}`,
+		byCoordinator: (name: string) => `· ${name}`,
+		anotherCoordinators: 'Another coordinator’s match',
+		private: 'Their wider history is private.',
+		loadFailed: 'Couldn’t load their wider history.',
+		errors: {
+			link_code_invalid: 'This link has expired or was already used. Ask for a new one.',
+			link_overlaps: 'Two entries of one account can’t share a match or an event, and these do.',
+			player_linked: 'This player is already linked to an account.',
+			player_not_linked: 'This player isn’t linked to an account.',
+			already_yours: 'This player is already linked to you.',
+			claim_decided: 'This claim was already decided.',
+			claim_declined: 'This claim was declined, so it can’t be made again.',
+			claim_status: 'This claim has changed. Reload and try again.',
+			not_public: 'This profile isn’t public.',
+			too_many_claims: 'Too many tries. Wait a little and try again.',
+			history_private: 'Their wider history is private.'
 		}
 	},
 
