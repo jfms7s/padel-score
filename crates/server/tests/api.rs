@@ -340,16 +340,91 @@ async fn rejected_command_is_422_with_kind() {
 }
 
 #[tokio::test]
-async fn resend_is_replayed_and_not_published() {
+async fn replayed_resend_republishes_current_view() {
     let (app, state) = setup().await;
     let m = create(&app).await;
     let req = live("c1", json!([{"kind":"point","team":"a"}]));
     let (_, first) = command(&app, &m.scorer, &req).await;
+    let (status, _) = command(
+        &app,
+        &m.scorer,
+        &live("c2", json!([{"kind":"point","team":"b"}])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     let mut rx = state.hub.subscribe(&m.id);
     let (status, again) = command(&app, &m.scorer, &req).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(first, again);
-    assert!(rx.try_recv().is_err(), "a replay must not publish");
+    assert_eq!(first, again, "the resend gets the stored body");
+    // In case the first request's publish was lost, the streams get the current view.
+    let published = rx.try_recv().expect("a 200 replay republishes");
+    assert_eq!(published.revision, 2);
+    assert_eq!(published.head_seq, 2);
+}
+
+#[tokio::test]
+async fn replayed_rejection_is_not_published() {
+    let (app, state) = setup().await;
+    let m = create(&app).await;
+    let req = live("c1", json!([{"kind":"time_up"}]));
+    let (status, _) = command(&app, &m.scorer, &req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let mut rx = state.hub.subscribe(&m.id);
+    let (status, _) = command(&app, &m.scorer, &req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        rx.try_recv().is_err(),
+        "a replayed rejection changed nothing"
+    );
+}
+
+#[tokio::test]
+async fn wrong_method_is_json_405() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    for (method, path) in [
+        ("GET", format!("/api/score/{}/commands", m.scorer)),
+        ("POST", format!("/api/score/{}", m.scorer)),
+        ("DELETE", "/api/matches".to_owned()),
+        ("POST", format!("/api/view/{}/stream", m.spectator)),
+    ] {
+        let req = Request::builder()
+            .method(method)
+            .uri(&path)
+            .body(Body::empty())
+            .unwrap();
+        let (status, headers, body) = send(&app, req).await;
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "{method} {path}");
+        assert!(
+            headers[header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .contains("json")
+        );
+        assert_eq!(
+            body,
+            json!({ "error": "method_not_allowed" }),
+            "{method} {path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn bad_path_encoding_is_json_400() {
+    let (app, _) = setup().await;
+    for path in ["/api/score/%FF", "/api/view/%C3%28/stream"] {
+        let (status, _, body) = get(&app, path).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+        assert_eq!(body, json!({ "error": "bad_request" }), "{path}");
+    }
+    let (status, _, body) = post(
+        &app,
+        "/api/score/%FF/commands",
+        &live("c1", json!([{"kind":"time_up"}])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, json!({ "error": "bad_request" }));
 }
 
 #[tokio::test]
@@ -422,6 +497,9 @@ async fn lagged_stream_rereads_view() {
     let m = create(&app).await;
     let mut stream = Stream::open(&app, &format!("/api/view/{}/stream", m.spectator)).await;
     let first = stream.state().await;
+    // The fakes below never reach the store: they only fill the channel past its capacity so
+    // the receiver lags. Their revisions (100+) are above anything stored, so if the stream
+    // skipped the lag silently, the next frame would be a fake rather than the stored view.
     let view: padel_score_server::commands::MatchView =
         serde_json::from_value(first.clone()).unwrap();
     // Overflow the channel (capacity 16) with fake views the store never had.

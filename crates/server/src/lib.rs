@@ -48,6 +48,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api", axum::routing::any(api_not_found))
         .route("/api/", axum::routing::any(api_not_found))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
+        // After every route: it applies to the method routers registered so far.
+        .method_not_allowed_fallback(api::method_not_allowed)
         .fallback(web::static_handler)
         .layer(DefaultBodyLimit::max(api::MAX_BODY_BYTES))
         .with_state(state)

@@ -61,6 +61,11 @@ impl Hub {
         }
     }
 
+    /// Whether anyone is watching the match.
+    pub fn is_watched(&self, match_id: &str) -> bool {
+        self.channels().contains_key(match_id)
+    }
+
     /// The number of matches with a live channel.
     pub fn len(&self) -> usize {
         self.channels().len()

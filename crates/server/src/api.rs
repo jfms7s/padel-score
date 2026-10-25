@@ -18,7 +18,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::Router;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{FromRequest, Path, Request, State};
+use axum::extract::{FromRequest, FromRequestParts, Path, Request, State};
+use axum::http::request::Parts;
 use axum::http::{StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
@@ -65,6 +66,7 @@ pub fn routes() -> Router<AppState> {
 pub enum ApiError {
     NotFound,
     BadRequest,
+    MethodNotAllowed,
     PayloadTooLarge,
     InvalidMatch(String),
     Internal,
@@ -93,6 +95,10 @@ impl IntoResponse for ApiError {
         let (status, body) = match self {
             ApiError::NotFound => (StatusCode::NOT_FOUND, json!({ "error": "not_found" })),
             ApiError::BadRequest => (StatusCode::BAD_REQUEST, json!({ "error": "bad_request" })),
+            ApiError::MethodNotAllowed => (
+                StatusCode::METHOD_NOT_ALLOWED,
+                json!({ "error": "method_not_allowed" }),
+            ),
             ApiError::PayloadTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 json!({ "error": "payload_too_large" }),
@@ -135,6 +141,29 @@ fn json_rejection(rejection: &JsonRejection) -> ApiError {
     } else {
         ApiError::BadRequest
     }
+}
+
+/// `Path<T>` whose rejection (e.g. a segment that is not valid UTF-8 once decoded) is a JSON 400.
+pub struct ApiPath<T>(pub T);
+
+impl<T, S> FromRequestParts<S> for ApiPath<T>
+where
+    T: DeserializeOwned + Send,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        Path::<T>::from_request_parts(parts, state)
+            .await
+            .map(|Path(value)| ApiPath(value))
+            .map_err(|_| ApiError::BadRequest)
+    }
+}
+
+/// The JSON 405 for a wrong method on a defined route.
+pub async fn method_not_allowed() -> ApiError {
+    ApiError::MethodNotAllowed
 }
 
 #[derive(Debug, Deserialize)]
@@ -197,7 +226,7 @@ async fn current_view(store: &Store, match_id: &str) -> Result<MatchView, ApiErr
 
 async fn score(
     State(state): State<AppState>,
-    Path(token): Path<String>,
+    ApiPath(token): ApiPath<String>,
 ) -> Result<Json<MatchView>, ApiError> {
     let m = by_scorer(&state.store, &token).await?;
     Ok(Json(current_view(&state.store, &m.id).await?))
@@ -205,7 +234,7 @@ async fn score(
 
 async fn view(
     State(state): State<AppState>,
-    Path(token): Path<String>,
+    ApiPath(token): ApiPath<String>,
 ) -> Result<Json<MatchView>, ApiError> {
     let m = by_either(&state.store, &token).await?;
     Ok(Json(current_view(&state.store, &m.id).await?))
@@ -213,38 +242,84 @@ async fn view(
 
 async fn commands(
     State(state): State<AppState>,
-    Path(token): Path<String>,
+    ApiPath(token): ApiPath<String>,
     ApiJson(req): ApiJson<CommandRequest>,
 ) -> Result<Response, ApiError> {
     let m = by_scorer(&state.store, &token).await?;
-    let outcome = apply_command(&state.store, &m, req, now()).await?;
-    respond(&state, outcome)
+    let store = state.store.clone();
+    let match_id = m.id.clone();
+    run_detached(&state, match_id, async move {
+        apply_command(&store, &m, req, now()).await
+    })
+    .await
 }
 
 async fn replace(
     State(state): State<AppState>,
-    Path(token): Path<String>,
+    ApiPath(token): ApiPath<String>,
     ApiJson(req): ApiJson<ReplaceRequest>,
 ) -> Result<Response, ApiError> {
     let m = by_scorer(&state.store, &token).await?;
-    let outcome = replace_from(&state.store, &m, req, now()).await?;
-    respond(&state, outcome)
+    let store = state.store.clone();
+    let match_id = m.id.clone();
+    run_detached(&state, match_id, async move {
+        replace_from(&store, &m, req, now()).await
+    })
+    .await
 }
 
-/// Serve a command outcome, publishing it to the match's streams only when it was applied now
-/// (a replay, conflict, rejection or invalid request changed nothing).
-fn respond(state: &AppState, outcome: CommandOutcome) -> Result<Response, ApiError> {
+/// Run a command and its publish on their own task, then serve the outcome.
+///
+/// Drop safety: axum drops a request's future when the client goes away (a phone losing signal
+/// mid-tap). If that happened after the command's `tx.commit()` but before the publish, the
+/// command would be stored yet never reach the streams, and the client's resend would come back
+/// `Replayed`. Spawning makes commit-then-publish run to completion whatever happens to the
+/// request; dropping the `JoinHandle` detaches the task, it does not cancel it.
+async fn run_detached<F>(state: &AppState, match_id: String, work: F) -> Result<Response, ApiError>
+where
+    F: Future<Output = Result<CommandOutcome, StoreError>> + Send + 'static,
+{
+    let task_state = state.clone();
+    let outcome = tokio::spawn(async move {
+        let outcome = work.await?;
+        publish(&task_state, &match_id, &outcome).await;
+        Ok::<_, StoreError>(outcome)
+    })
+    .await
+    .map_err(internal)??;
+    respond(&outcome)
+}
+
+/// Tell the match's streams about an outcome that changed (or may have changed) the match.
+///
+/// - `Applied`: publish the new view.
+/// - A replayed 200: the first request applied, but its publish may have been lost (see
+///   [`run_detached`]; e.g. a server restart in between). Publish the *current* view as belt and
+///   braces; streams drop it by revision if they already have it.
+/// - Conflict, rejection, invalid, replayed non-200: nothing changed, nothing to publish.
+async fn publish(state: &AppState, match_id: &str, outcome: &CommandOutcome) {
+    match outcome {
+        CommandOutcome::Applied(view) => state.hub.publish(view.clone()),
+        CommandOutcome::Replayed { status: 200, .. } if state.hub.is_watched(match_id) => {
+            // A failed read is already logged by `current_view`; the resend still succeeds.
+            if let Ok(view) = current_view(&state.store, match_id).await {
+                state.hub.publish(view);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Serve a command outcome: status and body come from [`CommandOutcome::to_http`] alone.
+fn respond(outcome: &CommandOutcome) -> Result<Response, ApiError> {
     let (status, body) = outcome.to_http().map_err(internal)?;
     let status = StatusCode::from_u16(status).map_err(internal)?;
-    if let CommandOutcome::Applied(view) = outcome {
-        state.hub.publish(view);
-    }
     Ok((status, [(header::CONTENT_TYPE, "application/json")], body).into_response())
 }
 
 async fn score_stream(
     State(state): State<AppState>,
-    Path(token): Path<String>,
+    ApiPath(token): ApiPath<String>,
 ) -> Result<Response, ApiError> {
     let m = by_scorer(&state.store, &token).await?;
     stream(state, m.id).await
@@ -252,7 +327,7 @@ async fn score_stream(
 
 async fn view_stream(
     State(state): State<AppState>,
-    Path(token): Path<String>,
+    ApiPath(token): ApiPath<String>,
 ) -> Result<Response, ApiError> {
     let m = by_either(&state.store, &token).await?;
     stream(state, m.id).await
