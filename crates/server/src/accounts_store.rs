@@ -11,6 +11,8 @@
 //! [`new_token`], is returned to the caller once, and is stored only as its [`hash_token`].
 //! Emails are trimmed and lowercased here, at the store boundary.
 
+use std::fmt;
+
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
@@ -117,7 +119,7 @@ impl InviteStatus {
 }
 
 /// A freshly minted invite. `code` is the raw secret, shown once.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CreatedInvite {
     pub id: String,
     pub code: String,
@@ -156,7 +158,7 @@ impl InviteSummary {
 }
 
 /// A started device flow. `device_code` is the raw secret the watch polls with.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct StartedDevice {
     pub device_code: String,
     pub user_code: String,
@@ -184,7 +186,7 @@ impl DeviceCode {
 }
 
 /// The outcome of one device poll (RFC 8628 §3.5).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum PollOutcome {
     Pending,
     SlowDown,
@@ -220,6 +222,45 @@ pub struct PurgedAuth {
 impl PurgedAuth {
     pub fn total(&self) -> u64 {
         self.sessions + self.invites + self.device_codes + self.resets
+    }
+}
+
+// Raw secrets never reach a log line: their `Debug` output shows this instead.
+const REDACTED: &str = "<redacted>";
+
+impl fmt::Debug for CreatedInvite {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CreatedInvite")
+            .field("id", &self.id)
+            .field("code", &REDACTED)
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+impl fmt::Debug for StartedDevice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StartedDevice")
+            .field("device_code", &REDACTED)
+            .field("user_code", &self.user_code)
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+impl fmt::Debug for PollOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PollOutcome::Pending => f.write_str("Pending"),
+            PollOutcome::SlowDown => f.write_str("SlowDown"),
+            PollOutcome::Expired => f.write_str("Expired"),
+            PollOutcome::Denied => f.write_str("Denied"),
+            PollOutcome::Issued { .. } => f
+                .debug_struct("Issued")
+                .field("raw_token", &REDACTED)
+                .finish(),
+            PollOutcome::Consumed => f.write_str("Consumed"),
+        }
     }
 }
 
@@ -299,7 +340,8 @@ async fn insert_user_in(
     }
 }
 
-/// End every way the user is signed in: delete their sessions and revoke their device tokens.
+/// End every way the user is signed in: delete their sessions, revoke their device tokens, and
+/// deny their approved device codes that have not been polled yet.
 async fn revoke_credentials_in(
     conn: &mut SqliteConnection,
     user_id: &str,
@@ -313,6 +355,29 @@ async fn revoke_credentials_in(
         .bind(now)
         .bind(user_id)
         .execute(&mut *conn)
+        .await?;
+    // An approved code not yet polled would otherwise mint a token after this.
+    sqlx::query(
+        "UPDATE device_codes SET denied_at = ? \
+         WHERE approved_user_id = ? AND consumed_at IS NULL AND denied_at IS NULL",
+    )
+    .bind(now)
+    .bind(user_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Mark every unused reset code of the user used, once their password has been set.
+async fn invalidate_resets_in(
+    conn: &mut SqliteConnection,
+    user_id: &str,
+    now: i64,
+) -> Result<(), StoreError> {
+    sqlx::query("UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL")
+        .bind(now)
+        .bind(user_id)
+        .execute(conn)
         .await?;
     Ok(())
 }
@@ -471,8 +536,9 @@ impl Store {
         Ok(())
     }
 
-    /// Replace the password hash, then delete every session and revoke every device token of the
-    /// user. A caller keeping the current browser signed in mints a new session afterwards.
+    /// Replace the password hash, then delete every session, revoke every device token, deny the
+    /// approved unpolled device codes and mark the unused reset codes used, all for this user. A
+    /// caller keeping the current browser signed in mints a new session afterwards.
     pub async fn set_password(&self, id: &str, hash: &str, now: i64) -> Result<(), StoreError> {
         let mut tx = self.begin().await?;
         let done = sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
@@ -484,6 +550,7 @@ impl Store {
             return Err(StoreError::NotFound);
         }
         revoke_credentials_in(&mut tx, id, now).await?;
+        invalidate_resets_in(&mut tx, id, now).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -732,7 +799,8 @@ impl Store {
     }
 
     /// Use a reset code: set the new password hash, delete every session and revoke every
-    /// device token of the user. Returns the user id. An unknown, used or expired code is
+    /// device token of the user, deny their approved unpolled device codes, and mark their other
+    /// reset codes used. Returns the user id. An unknown, used or expired code is
     /// `NotFound` (the caller need not say which).
     pub async fn consume_reset(
         &self,
@@ -762,6 +830,7 @@ impl Store {
             return Err(StoreError::NotFound);
         }
         revoke_credentials_in(&mut tx, &user_id, now).await?;
+        invalidate_resets_in(&mut tx, &user_id, now).await?;
         tx.commit().await?;
         Ok(user_id)
     }

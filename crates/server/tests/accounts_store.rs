@@ -671,3 +671,107 @@ async fn purge_expired_auth_removes_only_expired_rows() {
     assert!(s.session_user(&session, NOW).await.unwrap().is_none());
     assert_eq!(count("users").await, 2);
 }
+
+#[tokio::test]
+async fn approved_device_code_is_denied_after_reset() {
+    let (s, _) = setup().await;
+    let (admin, user) = admin_and_user(&s).await;
+    // A reset in between approval and the poll.
+    let started = s.start_device("Watch", NOW).await.unwrap();
+    s.approve_device(&started.user_code, &user, NOW)
+        .await
+        .unwrap();
+    let code = s.create_reset(&user, &admin, NOW).await.unwrap();
+    s.consume_reset(&code, "h", NOW + 1).await.unwrap();
+    assert_eq!(
+        s.poll_device(&started.device_code, NOW + 2).await.unwrap(),
+        PollOutcome::Denied
+    );
+    // The same for a password change.
+    let started = s.start_device("Watch", NOW).await.unwrap();
+    s.approve_device(&started.user_code, &user, NOW)
+        .await
+        .unwrap();
+    s.set_password(&user, "h2", NOW + 1).await.unwrap();
+    assert_eq!(
+        s.poll_device(&started.device_code, NOW + 2).await.unwrap(),
+        PollOutcome::Denied
+    );
+    // And for disabling then re-enabling.
+    let started = s.start_device("Watch", NOW).await.unwrap();
+    s.approve_device(&started.user_code, &user, NOW)
+        .await
+        .unwrap();
+    s.set_disabled(&user, Some(NOW + 1)).await.unwrap();
+    s.set_disabled(&user, None).await.unwrap();
+    assert_eq!(
+        s.poll_device(&started.device_code, NOW + 2).await.unwrap(),
+        PollOutcome::Denied
+    );
+    assert!(s.list_devices(&user).await.unwrap().is_empty());
+    // A code still pending (not approved) is left alone and can still be approved.
+    let pending = s.start_device("Watch", NOW).await.unwrap();
+    s.set_password(&user, "h3", NOW + 1).await.unwrap();
+    s.approve_device(&pending.user_code, &user, NOW + 2)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn debug_output_redacts_secrets() {
+    let (s, _) = setup().await;
+    let (_, user) = admin_and_user(&s).await;
+    let invite = s.create_invite(&user, NOW).await.unwrap();
+    let shown = format!("{invite:?}");
+    assert!(!shown.contains(&invite.code), "{shown}");
+    assert!(
+        shown.contains("<redacted>") && shown.contains(&invite.id),
+        "{shown}"
+    );
+
+    let started = s.start_device("Watch", NOW).await.unwrap();
+    let shown = format!("{started:?}");
+    assert!(!shown.contains(&started.device_code), "{shown}");
+    assert!(
+        shown.contains("<redacted>") && shown.contains(&started.user_code),
+        "{shown}"
+    );
+
+    s.approve_device(&started.user_code, &user, NOW)
+        .await
+        .unwrap();
+    let issued = s.poll_device(&started.device_code, NOW).await.unwrap();
+    let PollOutcome::Issued { raw_token } = &issued else {
+        panic!("expected a token");
+    };
+    let shown = format!("{issued:?}");
+    assert!(!shown.contains(raw_token.as_str()), "{shown}");
+    assert!(
+        shown.contains("Issued") && shown.contains("<redacted>"),
+        "{shown}"
+    );
+    assert_eq!(format!("{:?}", PollOutcome::Pending), "Pending");
+}
+
+#[tokio::test]
+async fn using_one_reset_invalidates_others() {
+    let (s, _) = setup().await;
+    let (admin, user) = admin_and_user(&s).await;
+    let first = s.create_reset(&user, &admin, NOW).await.unwrap();
+    let second = s.create_reset(&user, &admin, NOW).await.unwrap();
+    let other_user = s.create_reset(&admin, &admin, NOW).await.unwrap();
+    s.consume_reset(&first, "h", NOW).await.unwrap();
+    assert!(matches!(
+        s.consume_reset(&second, "h", NOW).await,
+        Err(StoreError::NotFound)
+    ));
+    // Another user's code is untouched.
+    s.consume_reset(&other_user, "h", NOW).await.unwrap();
+    // A password change invalidates outstanding codes, too.
+    let third = s.create_reset(&user, &admin, NOW).await.unwrap();
+    s.set_password(&user, "h2", NOW).await.unwrap();
+    assert!(matches!(
+        s.consume_reset(&third, "h", NOW).await,
+        Err(StoreError::NotFound)
+    ));
+}
