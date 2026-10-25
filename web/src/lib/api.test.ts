@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, createMatch, getScore, getView, postCommands, replace, streamUrl } from './api';
-import type { CommandRequest, MatchView } from './types';
+import type { CommandRequest } from './types';
+import { asView } from './fixtures/load';
 import created from './fixtures/create-response.json';
 import view from './fixtures/view-golden-point-40-40.json';
 import conflict from './fixtures/commands-409-conflict.json';
@@ -37,11 +38,8 @@ afterEach(() => {
 describe('api', () => {
 	it('creates a match', async () => {
 		const calls = serve(201, created);
-		const body = {
-			format: (view as MatchView).format,
-			start: (view as MatchView).start,
-			teams: (view as MatchView).teams
-		};
+		const { format, start, teams } = asView(view);
+		const body = { format, start, teams };
 		expect(await createMatch(body)).toEqual(created);
 		expect(calls[0]?.url).toBe('/api/matches');
 		expect(calls[0]?.init?.method).toBe('POST');
@@ -101,16 +99,66 @@ describe('api', () => {
 		expect(calls[0]?.url).toBe('/api/score/tok/replace');
 	});
 
-	it('turns a network failure into a status-0 error', async () => {
+	it('turns a network failure into a retryable status-0 error', async () => {
 		vi.stubGlobal('fetch', async () => {
 			throw new TypeError('Failed to fetch');
 		});
-		await expect(getScore('tok')).rejects.toMatchObject({ status: 0, code: 'network' });
+		await expect(getScore('tok')).rejects.toMatchObject({ status: 0, code: 'network', retryable: true });
 	});
 
-	it('turns a non-JSON answer into an error', async () => {
-		vi.stubGlobal('fetch', async () => new Response('<html>bad gateway</html>', { status: 502 }));
-		await expect(getScore('tok')).rejects.toMatchObject({ status: 502, code: 'internal' });
+	it.each([
+		[502, '<html>bad gateway</html>'],
+		[503, '<html>service unavailable</html>'],
+		[504, ''],
+		[503, '{"error":"internal"}']
+	])('treats a %i gateway answer as retryable, whatever the body', async (status, body) => {
+		vi.stubGlobal('fetch', async () => new Response(body, { status }));
+		await expect(postCommands('tok', REQ)).rejects.toMatchObject({
+			status,
+			code: 'network',
+			retryable: true
+		});
+	});
+
+	it('treats a body that drops on a 200 as retryable', async () => {
+		const broken = new ReadableStream({
+			start(c) {
+				c.enqueue(new TextEncoder().encode('{"id":'));
+				c.error(new TypeError('network connection lost'));
+			}
+		});
+		vi.stubGlobal('fetch', async () => new Response(broken, { status: 200 }));
+		await expect(postCommands('tok', REQ)).rejects.toMatchObject({
+			status: 200,
+			code: 'network',
+			retryable: true
+		});
+	});
+
+	it('treats a truncated 200 body as retryable', async () => {
+		vi.stubGlobal('fetch', async () => new Response('{"id":"x","form', { status: 200 }));
+		await expect(getScore('tok')).rejects.toMatchObject({ code: 'network', retryable: true });
+	});
+
+	it('keeps a real JSON 500 internal and not retryable', async () => {
+		serve(500, { error: 'internal' });
+		await expect(postCommands('tok', REQ)).rejects.toMatchObject({
+			status: 500,
+			code: 'internal',
+			retryable: false
+		});
+	});
+
+	it('keeps a non-JSON error page that is not a gateway error not retryable', async () => {
+		vi.stubGlobal('fetch', async () => new Response('<html>oops</html>', { status: 500 }));
+		await expect(getScore('tok')).rejects.toMatchObject({ code: 'internal', retryable: false });
+	});
+
+	it('server refusals are not retryable', async () => {
+		serve(400, invalid);
+		await expect(postCommands('tok', REQ)).rejects.toMatchObject({ retryable: false });
+		serve(404, notFound);
+		await expect(getView('x')).rejects.toMatchObject({ retryable: false });
 	});
 
 	it('builds the stream URLs', () => {

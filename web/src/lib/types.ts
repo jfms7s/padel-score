@@ -1,6 +1,7 @@
 // TS mirrors of the JSON that serde writes for the engine (crates/scoring) and the server
-// (crates/server). Every union here was settled from a real serialized sample; those samples
-// live in ./fixtures and the tests load them through these types.
+// (crates/server). Every union here was settled from a real serialized sample. The samples live
+// in ./fixtures, and fixtures.test.ts checks each one against these shapes at runtime through
+// ./guards (strict: no missing, extra or mistyped field), so keep the two files in step.
 
 // ---- engine: rules and events ------------------------------------------------------------
 

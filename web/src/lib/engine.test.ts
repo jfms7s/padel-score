@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { eventsOf, initEngineSync, replayLocal } from './engine';
-import type { Event, Format, MatchView, Start } from './types';
+import type { Event, Format, Start } from './types';
+import { asView } from './fixtures/load';
 import tiebreak from './fixtures/view-tiebreak.json';
 import timedFinished from './fixtures/view-timed-finished.json';
 import replayInvalidRules from './fixtures/replay-err-invalid-rules.json';
@@ -27,7 +28,7 @@ describe('replayLocal', () => {
 
 	it('agrees with the server on recorded matches', () => {
 		for (const json of [tiebreak, timedFinished]) {
-			const view = json as MatchView;
+			const view = asView(json);
 			expect(replayLocal(view.format, view.start, eventsOf(view))).toEqual({ ok: view.score });
 		}
 	});

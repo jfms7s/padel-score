@@ -12,12 +12,18 @@ import type {
 	ReplaceRequest
 } from './types';
 
-/** A request that failed: `status` 0 means the server could not be reached. */
+/**
+ * A request that failed. `retryable` means the server may never have seen or answered it (no
+ * connection, a gateway error while it restarts, a dropped body), so a command should be queued
+ * and resent; the server's `client_id` idempotency makes a resend safe. Such failures have
+ * `code: 'network'` (`status` 0 when there was no response at all).
+ */
 export class ApiError extends Error {
 	constructor(
 		readonly status: number,
 		readonly code: ApiErrorBody['error'] | 'network',
-		message: string
+		message: string,
+		readonly retryable = false
 	) {
 		super(message);
 		this.name = 'ApiError';
@@ -32,6 +38,12 @@ export type CommandOutcome =
 
 const enc = encodeURIComponent;
 
+/** Proxy answers while the server is down or restarting. */
+const GATEWAY = new Set([502, 503, 504]);
+
+const unreachable = (status: number) =>
+	new ApiError(status, 'network', strings.networkError, true);
+
 async function call(path: string, init?: RequestInit): Promise<{ status: number; body: unknown }> {
 	let res: Response;
 	try {
@@ -40,15 +52,24 @@ async function call(path: string, init?: RequestInit): Promise<{ status: number;
 			headers: init?.body ? { 'content-type': 'application/json' } : undefined
 		});
 	} catch {
-		throw new ApiError(0, 'network', strings.networkError);
+		throw unreachable(0);
 	}
-	let body: unknown;
+	if (GATEWAY.has(res.status)) throw unreachable(res.status);
+	let text: string;
 	try {
-		body = await res.json();
+		text = await res.text();
 	} catch {
+		// The connection dropped mid-body: whatever the status, the answer never arrived.
+		throw unreachable(res.status);
+	}
+	try {
+		return { status: res.status, body: JSON.parse(text) };
+	} catch {
+		// The server only sends JSON, so an unreadable success was cut short or rewritten on the
+		// way; an unreadable error page came from something in between.
+		if (res.ok) throw unreachable(res.status);
 		throw new ApiError(res.status, 'internal', strings.serverError(res.status));
 	}
-	return { status: res.status, body };
 }
 
 function failure(status: number, body: unknown): ApiError {

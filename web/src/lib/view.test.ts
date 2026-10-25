@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fenceModel, pointLabel } from './view';
-import type { MatchView } from './types';
+import { asView as v } from './fixtures/load';
 import { strings } from './strings';
 import goldenPoint from './fixtures/view-golden-point-40-40.json';
 import starPoint from './fixtures/view-star-point.json';
@@ -15,10 +15,12 @@ import superTiebreak from './fixtures/view-super-tiebreak.json';
 import timed from './fixtures/view-timed.json';
 import timedFinished from './fixtures/view-timed-finished.json';
 import timedDraw from './fixtures/view-timed-draw.json';
+import overtime from './fixtures/view-timed-overtime.json';
+import overtimeFinished from './fixtures/view-timed-overtime-finished.json';
+import superTiebreakFinished from './fixtures/view-super-tiebreak-finished.json';
 
-// The fixtures are real responses from the server (and so serde's actual output); JSON imports
-// widen string unions to string, hence the cast.
-const v = (json: unknown) => json as MatchView;
+// The fixtures are real responses from the server (serde's actual output); `v` checks each
+// against the wire types before use.
 
 describe('pointLabel', () => {
 	it('pointLabel maps calls', () => {
@@ -106,6 +108,42 @@ describe('fenceModel', () => {
 		expect(m.callout).toBeNull();
 		expect(m.changeEnds).toBe(false);
 		expect(m.rulesLine).toBe(strings.matchOver);
+		expect(m.serveSide).toBeNull();
+		expect(m.servingPlayerName).toBeNull();
+		expect(m.a.points).toBe('');
+	});
+
+	it('reports a super tie-break win', () => {
+		const m = fenceModel(v(superTiebreakFinished));
+		expect(m.finished).toEqual({ winner: 'a' });
+		expect(m.inTieBreak).toBe(false);
+		expect(m.superTieBreak).toBe(false);
+		expect(m.a.sets).toEqual([6, 0, 1]);
+		expect(m.b.sets).toEqual([0, 6, 0]);
+		expect(m.a.setsWon).toBe(2);
+		expect(m.serveSide).toBeNull();
+		expect(m.servingPlayerName).toBeNull();
+		expect(m.a.serving || m.b.serving).toBe(false);
+		expect(m.rulesLine).toBe('Match over');
+	});
+
+	it('shows overtime in a timed match, then its winner', () => {
+		const m = fenceModel(v(overtime));
+		expect(m.rulesLine).toBe('Overtime, golden point');
+		expect(m.a.games).toBe(1);
+		expect(m.b.games).toBe(1);
+		expect(m.a.points).toBe('30');
+		expect(m.serveSide).not.toBeNull();
+		expect(m.servingPlayerName).not.toBeNull();
+
+		const done = fenceModel(v(overtimeFinished));
+		// The overtime game counts in the games shown.
+		expect(done.a.games).toBe(2);
+		expect(done.b.games).toBe(1);
+		expect(done.finished).toEqual({ winner: 'a' });
+		expect(done.serveSide).toBeNull();
+		expect(done.servingPlayerName).toBeNull();
+		expect(done.rulesLine).toBe('Match over');
 	});
 
 	it('reports a timed draw with no winner', () => {

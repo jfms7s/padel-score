@@ -20,7 +20,7 @@ export interface TeamModel {
 	name: string;
 	/** The game call ("40", "AD") or, in a tie-break, the tie-break points. Empty once the match is over. */
 	points: string;
-	/** Games in the current set; for a timed match, the whole match. */
+	/** Games in the current set; for a timed match, the whole match, any overtime game included. */
 	games: number;
 	/** This team's games in each set, the one in progress last. Empty for a timed match. */
 	sets: number[];
@@ -32,8 +32,10 @@ export interface TeamModel {
 export interface FenceModel {
 	a: TeamModel;
 	b: TeamModel;
-	serveSide: ServeSide;
-	servingPlayerName: string;
+	/** Null once the match is over: nobody serves. */
+	serveSide: ServeSide | null;
+	/** Null once the match is over. */
+	servingPlayerName: string | null;
 	/** Shown on the net when the next point decides the game. */
 	callout: typeof strings.goldenPoint | typeof strings.starPoint | null;
 	changeEnds: boolean;
@@ -71,8 +73,8 @@ export function fenceModel(view: MatchView): FenceModel {
 	return {
 		a: team('a'),
 		b: team('b'),
-		serveSide: score.side,
-		servingPlayerName: teams[score.server.team][score.server.index] ?? '',
+		serveSide: finished ? null : score.side,
+		servingPlayerName: finished ? null : (teams[score.server.team][score.server.index] ?? null),
 		callout: game?.deciding_point ? decidingCallout(deuce) : null,
 		changeEnds: score.change_ends,
 		inTieBreak: tieBreak !== null,
