@@ -7,7 +7,7 @@
 		"record": { "wins": 1, "losses": 1, "draws": 0 }
 	},
 	"placings": [
-		{ "event_id": "ev-1", "event_kind": "tournament", "place": 3, "place_to": 4, "field_size": 12, "finished_at": 1761400000 }
+		{ "event_id": "ev-1", "event_name": "Sunday cup", "event_kind": "tournament", "place": 3, "place_to": 4, "field_size": 12, "finished_at": 1761400000 }
 	],
 	"items": [
 		{

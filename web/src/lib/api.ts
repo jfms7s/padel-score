@@ -9,14 +9,19 @@ import type {
 	CreatedMatch,
 	CreateMatchRequest,
 	ErrorKind,
+	FinalRequest,
+	InvalidScore,
 	MatchView,
-	ReplaceRequest
+	ReplaceRequest,
+	Start
 } from './types';
 
-/** What some refusals add: the field a 422 names, the wait a 429 asks for. */
+/** What some refusals add: the field a 422 names, the wait a 429 asks for, the engine's reason. */
 export interface ErrorDetail {
 	field?: string;
 	retryAfterSecs?: number;
+	/** A 422 `invalid_score`: why the engine refused a typed score. */
+	reason?: InvalidScore;
 }
 
 /**
@@ -28,6 +33,7 @@ export interface ErrorDetail {
 export class ApiError extends Error {
 	readonly field?: string;
 	readonly retryAfterSecs?: number;
+	readonly reason?: InvalidScore;
 
 	constructor(
 		readonly status: number,
@@ -40,6 +46,7 @@ export class ApiError extends Error {
 		this.name = 'ApiError';
 		if (detail.field !== undefined) this.field = detail.field;
 		if (detail.retryAfterSecs !== undefined) this.retryAfterSecs = detail.retryAfterSecs;
+		if (detail.reason !== undefined) this.reason = detail.reason;
 	}
 }
 
@@ -69,11 +76,25 @@ export function setUnauthorizedHandler(handler: () => void): () => void {
 	};
 }
 
-/** What became of a command or replace request. A 409 or 422 is an answer, not a failure. */
+/**
+ * What became of a command or replace request. A 409 or 422 is an answer, not a failure.
+ * `locked`: the coordinator typed the result, so a scoring link can't change the match.
+ */
 export type CommandOutcome =
 	| { status: 'applied'; view: MatchView }
 	| { status: 'conflict'; view: MatchView }
+	| { status: 'locked'; view: MatchView }
 	| { status: 'rejected'; kind: ErrorKind; index: number };
+
+/** What became of a typed final score: as a command, or the engine's reason it can't be. */
+export type FinalOutcome =
+	| { status: 'applied'; view: MatchView }
+	| { status: 'conflict'; view: MatchView }
+	| { status: 'locked'; view: MatchView }
+	| { status: 'invalid_score'; reason: InvalidScore };
+
+/** What became of choosing who serves first. */
+export type StartOutcome = { status: 'applied'; view: MatchView } | { status: 'locked'; view: MatchView };
 
 const enc = encodeURIComponent;
 
@@ -157,6 +178,7 @@ function failure(status: number, body: unknown, retryAfter?: number): ApiError {
 		message: string;
 		field: string;
 		retry_after_secs: number;
+		reason: InvalidScore;
 	}> | null;
 	const code = typeof b?.error === 'string' ? b.error : 'internal';
 	const message = typeof b?.message === 'string' ? b.message : strings.serverError(status);
@@ -164,6 +186,7 @@ function failure(status: number, body: unknown, retryAfter?: number): ApiError {
 	if (typeof b?.field === 'string') detail.field = b.field;
 	const wait = Number.isInteger(b?.retry_after_secs) ? b?.retry_after_secs : retryAfter;
 	if (wait !== undefined) detail.retryAfterSecs = wait;
+	if (b?.error === 'invalid_score' && b.reason !== undefined) detail.reason = b.reason;
 	return new ApiError(status, code, message, false, detail);
 }
 
@@ -171,6 +194,14 @@ async function request<T>(path: string, ok: number, init?: RequestInit, timeoutM
 	const { status, body, retryAfter } = await call(path, init, timeoutMs);
 	if (status !== ok) throw failure(status, body, retryAfter);
 	return body as T;
+}
+
+/**
+ * A request to a route that needs no account (a court or viewing link): any status but `ok`
+ * throws an ApiError, and a 401 never sends the browser to sign-in.
+ */
+export function plainRequest<T>(path: string, ok = 200, init?: RequestInit): Promise<T> {
+	return request(path, ok, init, REQUEST_TIMEOUT_MS);
 }
 
 function post(body: unknown): RequestInit {
@@ -211,25 +242,48 @@ export async function accountRequest<T>(path: string, opts: AccountCall = {}): P
 	return body as T;
 }
 
-async function outcome(path: string, req: unknown): Promise<CommandOutcome> {
+/** A command-like send: 200 and 409 conflict or locked are answers; a 5xx is retryable. */
+async function answerTo(path: string, init: RequestInit): Promise<{ status: number; body: unknown }> {
 	let answer: { status: number; body: unknown };
 	try {
-		answer = await call(path, post(req), REQUEST_TIMEOUT_MS);
+		answer = await call(path, init, REQUEST_TIMEOUT_MS);
 	} catch (e) {
 		// A server error page on a command: whatever it was, a resend with the same client_id
 		// is safe, so it is retryable like any other lost answer.
 		if (e instanceof ApiError && e.status >= 500) throw unreachable(e.status);
 		throw e;
 	}
-	const { status, body } = answer;
-	if (status >= 500) throw unreachable(status);
+	if (answer.status >= 500) throw unreachable(answer.status);
+	return answer;
+}
+
+/** The view a 200, a 409 conflict or a 409 locked carries; null for any other answer. */
+function viewOutcome(status: number, body: unknown): Exclude<CommandOutcome, { status: 'rejected' }> | null {
 	const b = body as ApiErrorBody;
 	if (status === 200) return { status: 'applied', view: body as MatchView };
 	if (status === 409 && b.error === 'conflict') return { status: 'conflict', view: b.view };
+	if (status === 409 && b.error === 'locked') return { status: 'locked', view: b.view };
+	return null;
+}
+
+async function outcome(path: string, req: unknown): Promise<CommandOutcome> {
+	const { status, body } = await answerTo(path, post(req));
+	const known = viewOutcome(status, body);
+	if (known) return known;
+	const b = body as ApiErrorBody;
 	if (status === 422 && b.error === 'rejected') {
 		return { status: 'rejected', kind: b.kind, index: b.index };
 	}
 	throw failure(status, body);
+}
+
+/** A typed final score's answer, from a scoring link or the coordinator. */
+export function finalOutcome(status: number, body: unknown): FinalOutcome | null {
+	const known = viewOutcome(status, body);
+	if (known) return known;
+	const b = body as ApiErrorBody;
+	if (status === 422 && b.error === 'invalid_score') return { status: 'invalid_score', reason: b.reason };
+	return null;
 }
 
 export function createMatch(req: CreateMatchRequest): Promise<CreatedMatch> {
@@ -253,6 +307,36 @@ export function postCommands(token: string, req: CommandRequest): Promise<Comman
 /** "Keep mine" after a conflict. */
 export function replace(token: string, req: ReplaceRequest): Promise<CommandOutcome> {
 	return outcome(`/api/score/${enc(token)}/replace`, req);
+}
+
+/**
+ * Type the final score from a scoring link: the server's events become exactly that score.
+ * `base_revision` is the view the score was typed on; a log that moved since is a conflict.
+ */
+export async function postFinal(token: string, req: FinalRequest): Promise<FinalOutcome> {
+	const { status, body } = await answerTo(`/api/score/${enc(token)}/final`, post(req));
+	const out = finalOutcome(status, body);
+	if (out) return out;
+	throw failure(status, body);
+}
+
+/**
+ * Choose who serves first, before the first point. A match already started throws an
+ * ApiError `already_started`.
+ */
+export async function putStart(token: string, start: Start): Promise<StartOutcome> {
+	const { status, body } = await answerTo(`/api/score/${enc(token)}/start`, {
+		method: 'PUT',
+		body: JSON.stringify({ start })
+	});
+	const out = viewOutcome(status, body);
+	if (out && out.status !== 'conflict') return out;
+	throw failure(status, body);
+}
+
+/** A court link's API path: `/api/court/{token}`, then `rest` (say `/advance`). */
+export function courtUrl(token: string, rest = ''): string {
+	return `/api/court/${enc(token)}${rest}`;
 }
 
 /** The SSE stream of `state` events (each a MatchView) for a scoring or viewing token. */

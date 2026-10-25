@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isEvent, isFormat, isMatchView, isScore } from './guards';
+import { isEvent, isFormat, isHistoryPage, isMatchView, isMyMatch, isScore } from './guards';
 import { loadView } from './lastview';
 import { MemoryStorage } from './fixtures/queue-harness';
 import onePoint from './fixtures/view-one-point.json';
+import historyPage from './fixtures/history-page.json';
+import myMatches from './fixtures/my-matches.json';
 
 const withExtras = () => {
 	const v = structuredClone(onePoint) as Record<string, unknown> & { score: Record<string, unknown>; events: Record<string, unknown>[] };
@@ -39,5 +41,23 @@ describe('runtime guards', () => {
 		const storage = new MemoryStorage();
 		storage.setItem('padel-score:view:tok', JSON.stringify(withExtras()));
 		expect(loadView(storage, 'tok')?.revision).toBe(onePoint.revision);
+	});
+});
+
+describe('phase 6 optional fields', () => {
+	const strict = { strict: true };
+
+	it('a locked view, an event match in history and a court context pass strict checks', () => {
+		expect(isMatchView({ ...onePoint, locked: true }, strict)).toBe(true);
+		expect(isMatchView({ ...onePoint, locked: 'yes' }, strict)).toBe(false);
+
+		const page = structuredClone(historyPage) as { items: Record<string, unknown>[] };
+		page.items[0]!.event = { id: 'ev-1', name: 'Sunday cup', kind: 'tournament', label: 'Match 3' };
+		expect(isHistoryPage(page, strict)).toBe(true);
+		page.items[0]!.event = { id: 'ev-1', name: 'Sunday cup', kind: 'league', label: 'Match 3' };
+		expect(isHistoryPage(page, strict)).toBe(false);
+
+		const mine = structuredClone((myMatches as Record<string, unknown>[])[0]!);
+		expect(isMyMatch({ ...mine, context: 'Court 1 · Sunday cup' }, strict)).toBe(true);
 	});
 });

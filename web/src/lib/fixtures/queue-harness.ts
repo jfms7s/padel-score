@@ -112,6 +112,10 @@ export const applied =
 export const conflict =
 	(view: MatchView) =>
 	async (): Promise<CommandOutcome> => ({ status: 'conflict', view });
+/** The coordinator typed the result: the match is locked to this phone. */
+export const locked =
+	(view: MatchView) =>
+	async (): Promise<CommandOutcome> => ({ status: 'locked', view });
 export const offline = async (): Promise<CommandOutcome> => {
 	throw new ApiError(0, 'network', 'down', true);
 };
