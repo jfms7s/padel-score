@@ -67,6 +67,54 @@ Environment variables:
 | `PUBLIC_ORIGIN` | unset | The public URL, e.g. `https://padel.example.com`, no trailing slash. The CSRF check compares a request's `Origin` with it. Unset: it compares the `Origin` host with `Host`. |
 | `SETUP_TOKEN` | unset | The setup code for the first admin. Unset: a random one-time code is logged. |
 
+## Watch app
+
+`watch/` is a Wear OS 3+ app (built for a Galaxy Watch) that scores a match from the wrist. Pick a live match, tap a half of the screen to give that side the point, and hold Undo to take one back. It signs in with a code, so no password is typed on the watch.
+
+**Build.** Needs JDK 21 and the Android SDK:
+
+```sh
+cd watch && ./gradlew :app:assembleDebug
+```
+
+The APK is `watch/app/build/outputs/apk/debug/app-debug.apk`. The server URL it talks to defaults to the one in `watch/gradle.properties`. To point an emulator at a server on the same machine:
+
+```sh
+./gradlew :app:assembleDebug -PpadelServerUrl=http://10.0.2.2:8080
+```
+
+**CI.** The `Watch` workflow (`.github/workflows/watch.yml`) runs the tests and lint, and uploads the APK as the `padel-score-watch-debug-<sha>` artifact. It runs on pushes to `main` and on pull requests only when `watch/`, the web fixtures it tests against or the workflow itself change; every `v*` tag builds. Once the signing secrets below are set, builds on pushes to `main` and on tags are signed with the owner's key; until then, and on pull requests, they use a throwaway debug key, so a PR build cannot update an install made from `main`.
+
+**Signing setup, once.** Make a keystore and add four repository secrets:
+
+```sh
+keytool -genkeypair -v -keystore padel-watch.jks -alias padel-watch -keyalg RSA -keysize 4096 -validity 10000
+```
+
+```sh
+base64 -w0 padel-watch.jks
+```
+
+Secrets: `WATCH_KEYSTORE_B64` (the output above), `WATCH_KEYSTORE_PASSWORD`, `WATCH_KEY_ALIAS` (`padel-watch`) and `WATCH_KEY_PASSWORD`. `keytool` makes a PKCS12 keystore, which has no separate key password, so `WATCH_KEY_PASSWORD` must be the same as `WATCH_KEYSTORE_PASSWORD`, or the signed build fails. Keep `padel-watch.jks` somewhere safe and never commit it. Losing it means one reinstall of the app and a new sign-in, nothing worse.
+
+**Sideload.** On the watch, turn on Developer options, then Wi-Fi debugging. Then from a computer on the same network:
+
+```sh
+adb pair <ip>:<port>
+```
+
+```sh
+adb connect <ip>:<port>
+```
+
+```sh
+adb install -r app-debug.apk
+```
+
+**Sign in.** The watch shows a code. On the phone, while signed in, open `<server>/link` and enter it. The watch needs the server reachable from its own network: the paired phone's connection (including its VPN) or the watch's own Wi-Fi.
+
+**Signed out.** The watch returns to the sign-in screen when its device is revoked on the web Account page, when the user's password is changed, an admin resets it or the account is disabled (all device tokens are revoked), or when you pick "Sign out" in the watch's list. That last item only forgets the sign-in on the watch; it does not revoke the device on the server.
+
 ## Releases
 
 Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`. If the tagged commit is on `main` and every CI check passes on it, the workflow builds `ghcr.io/jfms7s/padel-score:vX.Y.Z`
