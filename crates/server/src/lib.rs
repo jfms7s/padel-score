@@ -26,6 +26,8 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api", axum::routing::any(api_not_found))
+        .route("/api/", axum::routing::any(api_not_found))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .fallback(web::static_handler)
         .with_state(state)

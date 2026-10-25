@@ -60,6 +60,41 @@ async fn unknown_page_falls_back_to_index() {
     assert_eq!(headers[header::CACHE_CONTROL], "no-cache");
 }
 
+#[tokio::test]
+async fn bare_api_is_json_404() {
+    let (status, _, body) = get("/api").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(String::from_utf8(body).unwrap().contains("\"not_found\""));
+}
+
+#[tokio::test]
+async fn api_slash_is_json_404() {
+    let (status, _, body) = get("/api/").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(String::from_utf8(body).unwrap().contains("\"not_found\""));
+}
+
+#[tokio::test]
+async fn missing_asset_is_404_not_index() {
+    for path in [
+        "/_app/immutable/chunks/gone.js",
+        "/missing.css",
+        "/a/b/icon.png",
+    ] {
+        let (status, _, _) = get(path).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn non_get_page_is_405() {
+    let res = app()
+        .oneshot(Request::post("/s/abc").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
 #[test]
 fn config_defaults() {
     let c = Config::from_map(&HashMap::new());

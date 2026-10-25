@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use padel_score_server::{AppState, Config, router};
 use tower_http::compression::CompressionLayer;
@@ -11,9 +12,21 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
     let config = Config::from_env();
+    if let Ok(raw) = std::env::var("PORT")
+        && !raw.trim().is_empty()
+        && raw.trim().parse::<u16>().is_err()
+    {
+        eprintln!(
+            "warning: PORT {raw:?} is not a valid port, using {}",
+            config.port
+        );
+    }
     // `padel-score healthcheck` is the container HEALTHCHECK (the image has no curl or wget).
     if std::env::args().nth(1).as_deref() == Some("healthcheck") {
-        return healthcheck(config.port).await;
+        return match tokio::time::timeout(Duration::from_secs(3), healthcheck(config.port)).await {
+            Ok(result) => result,
+            Err(_) => Err("healthcheck timed out after 3s".into()),
+        };
     }
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -37,13 +50,21 @@ async fn main() -> Result<(), BoxError> {
 
 async fn shutdown() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.ok();
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::error!(error = %e, "cannot install ctrl-c handler");
+            std::future::pending::<()>().await;
+        }
     };
     #[cfg(unix)]
     let term = async {
-        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        {
-            s.recv().await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "cannot install SIGTERM handler");
+                std::future::pending::<()>().await;
+            }
         }
     };
     #[cfg(not(unix))]
