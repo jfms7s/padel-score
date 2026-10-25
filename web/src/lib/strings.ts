@@ -119,7 +119,8 @@ export const strings = {
 		undoConflict: 'The score changed, so nothing was undone.',
 		nothingToUndo: 'Nothing to undo.',
 		failed: (message: string) => `Couldn't send that. ${message}`,
-		lockedDropped: (n: number) => `The coordinator entered the result. ${n} queued point(s) dropped.`
+		lockedDropped: (n: number) =>
+			`The coordinator entered the result. ${n} queued ${n === 1 ? 'point' : 'points'} dropped.`
 	},
 
 	// Taps made offline, and the choice when the server moved meanwhile.
