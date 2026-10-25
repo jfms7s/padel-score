@@ -181,3 +181,43 @@ fn final_score_tiebreak_rules() {
         Err(InvalidScore::ExtraSets)
     );
 }
+
+#[test]
+fn final_score_rejects_unreachable_tiebreaks() {
+    let full = fmt(BestOf3, FullSet);
+    let sup = fmt(BestOf3, SuperTieBreak);
+    let imp = |index| Err(InvalidScore::ImpossibleSet { index });
+    assert_eq!(
+        validate_final(&full, &Sets(vec![stb(7, 6, (9, 2))])),
+        imp(0)
+    );
+    assert_eq!(
+        validate_final(&full, &Sets(vec![stb(7, 6, (12, 3))])),
+        imp(0)
+    );
+    assert_eq!(
+        validate_final(&full, &Sets(vec![stb(7, 6, (8, 4))])),
+        imp(0)
+    );
+    let pre = |last| Sets(vec![s(6, 4), s(3, 6), last]);
+    assert_eq!(validate_final(&sup, &pre(stb(1, 0, (15, 3)))), imp(2));
+    assert_eq!(validate_final(&sup, &pre(stb(1, 0, (11, 5)))), imp(2));
+    assert_eq!(
+        validate_final(&full, &Sets(vec![stb(7, 6, (12, 10)), s(6, 0)])),
+        Ok(Some(Team::A))
+    );
+    assert_eq!(
+        validate_final(&sup, &pre(stb(1, 0, (12, 10)))),
+        Ok(Some(Team::A))
+    );
+}
+
+#[test]
+fn final_score_rejects_invalid_rules() {
+    assert_eq!(
+        validate_final(&fmt(One, SuperTieBreak), &Sets(vec![s(6, 4)])),
+        Err(InvalidScore::InvalidRules(
+            RulesError::SuperTieBreakNeedsMultipleSets
+        ))
+    );
+}

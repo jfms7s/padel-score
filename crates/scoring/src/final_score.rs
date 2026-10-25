@@ -1,6 +1,6 @@
 use crate::state::set_won;
 use crate::tiebreak::{SUPER_TIEBREAK_TO, TIEBREAK_TO, tiebreak_won};
-use crate::{DecidingSet, Format, SetRules, SetScore, SetsFormat, Team};
+use crate::{DecidingSet, Format, RulesError, SetRules, SetScore, SetsFormat, Team};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -24,6 +24,8 @@ pub enum FinalScore {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InvalidScore {
+    #[error("invalid rules: {0}")]
+    InvalidRules(RulesError),
     #[error("the score does not match the match format")]
     WrongFormat,
     #[error("set {index} is not a possible score")]
@@ -42,6 +44,7 @@ pub enum InvalidScore {
 
 /// Check a typed final score against the format. Returns the winner, or `None` for a draw.
 pub fn validate_final(format: &Format, score: &FinalScore) -> Result<Option<Team>, InvalidScore> {
+    format.validate().map_err(InvalidScore::InvalidRules)?;
     match (format, score) {
         (Format::Sets(rules), FinalScore::Sets(sets)) => validate_sets(rules, sets).map(Some),
         (
@@ -110,7 +113,8 @@ fn validate_sets(rules: &SetRules, sets: &[SetScore]) -> Result<Team, InvalidSco
 fn regular_set_winner(index: usize, set: &SetScore) -> Result<Team, InvalidScore> {
     let impossible = InvalidScore::ImpossibleSet { index };
     let winner = set_won(set.a, set.b).ok_or(impossible)?;
-    // Reachable only if the set was not already won one game earlier (rules out 8-6, 7-3, ...).
+    // `set_won` also accepts unreachable scores such as 8-6 or 7-3. Requiring that the set was not
+    // already won one game earlier leaves only the reachable sets: 6-0 to 6-4, 7-5 and 7-6.
     let already_won = match winner {
         Team::A => set_won(set.a.saturating_sub(1), set.b),
         Team::B => set_won(set.a, set.b.saturating_sub(1)),
@@ -120,7 +124,7 @@ fn regular_set_winner(index: usize, set: &SetScore) -> Result<Team, InvalidScore
     }
     if let Some((x, y)) = set.tiebreak {
         let is_tiebreak_set = set.a.max(set.b) == 7 && set.a.min(set.b) == 6;
-        if !is_tiebreak_set || tiebreak_won(x, y, TIEBREAK_TO) != Some(winner) {
+        if !is_tiebreak_set || reachable_tiebreak_winner(x, y, TIEBREAK_TO) != Some(winner) {
             return Err(impossible);
         }
     }
@@ -137,8 +141,19 @@ fn super_tiebreak_winner(index: usize, set: &SetScore) -> Result<Team, InvalidSc
     let (x, y) = set
         .tiebreak
         .ok_or(InvalidScore::MissingTieBreak { index })?;
-    if tiebreak_won(x, y, SUPER_TIEBREAK_TO) != Some(winner) {
+    if reachable_tiebreak_winner(x, y, SUPER_TIEBREAK_TO) != Some(winner) {
         return Err(impossible);
     }
     Ok(winner)
+}
+
+/// The winner of a tie-break to `target` at `a`-`b`, only if play could actually have ended there:
+/// it must not already have been won one point earlier (rules out 9-2, 15-3, ...).
+fn reachable_tiebreak_winner(a: u16, b: u16, target: u8) -> Option<Team> {
+    let winner = tiebreak_won(a, b, target)?;
+    let earlier = match winner {
+        Team::A => tiebreak_won(a.saturating_sub(1), b, target),
+        Team::B => tiebreak_won(a, b.saturating_sub(1), target),
+    };
+    earlier.is_none().then_some(winner)
 }
