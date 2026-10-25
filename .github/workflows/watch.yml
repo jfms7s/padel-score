@@ -4,7 +4,8 @@ name: Watch
 on:
   push:
     branches: [main]
-    # GitHub ignores the paths filter on tag pushes, so every v* tag builds a signed APK.
+    # Branch pushes and pull requests run only when one of these paths changes. GitHub ignores
+    # the paths filter on tag pushes, so every v* tag builds (signed, once the secrets are set).
     tags: ["v*"]
     paths:
       - "watch/**"
@@ -35,18 +36,27 @@ jobs:
       # Validates the wrapper jar; the cache is read-only outside the default branch.
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      # Signs the APK with the owner's key so each CI build installs over the last one and keeps
-      # the watch's sign-in. Runs only on pushes to main and tags, never on pull requests, so a
-      # fork PR never sees the secrets; without them the build uses the runner's debug key.
+      # Tests and lint never see the signing secrets.
+      - name: Test and lint
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug
+        working-directory: watch
+
+      # Signs the APK with the owner's key, once the secrets below are set, so each CI build installs
+      # over the last one and keeps the watch's sign-in. Runs only on pushes to main and tags, never on
+      # pull requests, so a fork PR never sees the secrets; without them the build uses the runner's
+      # debug key. The secrets reach only the assemble step, through its env.
       #
       # Owner setup, once:
       #   keytool -genkeypair -v -keystore padel-watch.jks -alias padel-watch \
       #     -keyalg RSA -keysize 4096 -validity 10000
+      #   keytool makes a PKCS12 keystore, which has no separate key password: set
+      #   WATCH_KEY_PASSWORD to the same value as WATCH_KEYSTORE_PASSWORD, or signing fails.
       #   Add repository secrets: WATCH_KEYSTORE_B64 (output of `base64 -w0 padel-watch.jks`),
       #   WATCH_KEYSTORE_PASSWORD, WATCH_KEY_ALIAS (padel-watch), WATCH_KEY_PASSWORD.
       #   Keep padel-watch.jks somewhere safe and never commit it. Losing it means one
       #   reinstall of the app and a new sign-in, nothing worse.
       - name: Load the signing key
+        id: signing
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
         env:
           KEYSTORE_B64: ${{ secrets.WATCH_KEYSTORE_B64 }}
@@ -64,15 +74,22 @@ jobs:
           fi
           keystore="$RUNNER_TEMP/padel-watch.jks"
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$keystore"
-          {
-            echo "WATCH_KEYSTORE_PATH=$keystore"
-            echo "WATCH_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
-            echo "WATCH_KEY_ALIAS=$KEY_ALIAS"
-            echo "WATCH_KEY_PASSWORD=$KEY_PASSWORD"
-          } >> "$GITHUB_ENV"
+          echo "keystore=$keystore" >> "$GITHUB_OUTPUT"
 
-      - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      # Without a decoded keystore every WATCH_* value is empty and Gradle falls back to the debug key.
+      - name: Build the APK
+        run: ./gradlew --no-daemon :app:assembleDebug
         working-directory: watch
+        env:
+          WATCH_KEYSTORE_PATH: ${{ steps.signing.outputs.keystore }}
+          WATCH_KEYSTORE_PASSWORD: ${{ steps.signing.outputs.keystore && secrets.WATCH_KEYSTORE_PASSWORD || '' }}
+          WATCH_KEY_ALIAS: ${{ steps.signing.outputs.keystore && secrets.WATCH_KEY_ALIAS || '' }}
+          WATCH_KEY_PASSWORD: ${{ steps.signing.outputs.keystore && secrets.WATCH_KEY_PASSWORD || '' }}
+
+      - name: Delete the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/padel-watch.jks"
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: padel-score-watch-debug-${{ github.sha }}
