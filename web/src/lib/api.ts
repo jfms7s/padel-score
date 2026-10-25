@@ -148,7 +148,7 @@ export function getScore(token: string): Promise<MatchView> {
 
 /** The read-only view; either token works. */
 export function getView(token: string): Promise<MatchView> {
-	return request(`/api/view/${enc(token)}`, 200);
+	return request(`/api/view/${enc(token)}`, 200, undefined, REQUEST_TIMEOUT_MS);
 }
 
 export function postCommands(token: string, req: CommandRequest): Promise<CommandOutcome> {

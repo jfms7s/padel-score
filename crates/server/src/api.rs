@@ -42,7 +42,7 @@ use crate::store::{NewMatch, Store, StoreError, StoredMatch, Teams};
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
 /// How often an idle SSE stream sends a keep-alive comment.
-pub const KEEP_ALIVE: Duration = Duration::from_secs(15);
+pub const KEEP_ALIVE: Duration = Duration::from_secs(10);
 
 /// The current time in unix seconds: the one clock read for the whole API.
 pub fn now() -> i64 {

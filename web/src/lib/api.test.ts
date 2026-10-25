@@ -184,7 +184,8 @@ describe('api', () => {
 
 		it.each([
 			['postCommands', () => postCommands('tok', REQ)],
-			['getScore', () => getScore('tok')]
+			['getScore', () => getScore('tok')],
+			['getView', () => getView('tok')]
 		])('%s gives up after 10 s as a retryable network failure', async (_name, run) => {
 			const signals = hang();
 			const out = run().catch((e: unknown) => e);

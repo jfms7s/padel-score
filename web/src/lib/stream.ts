@@ -1,12 +1,13 @@
 // The live score stream: the server's SSE `state` events (each a MatchView) for one match.
 //
-// Why fetch and not EventSource: the server sends a keep-alive comment (`:`) every 15 s, and
+// Why fetch and not EventSource: the server sends a keep-alive comment (`:`) every 10 s, and
 // that comment is the only sign of life while nobody scores. EventSource swallows comments, so
 // a silent but healthy stream and a dead one (a phone that slept, a proxy holding a dead TCP
 // connection) look the same to it. Reading the body with fetch and parsing the frames here sees
 // every line, so a watchdog can declare the stream offline after 20 s of silence, drop the
 // connection and reconnect with backoff.
 
+import { isMatchView } from './guards';
 import type { MatchView } from './types';
 
 /** `gone`: the server says the match doesn't exist (purged or never was); the stream stops. */
@@ -166,10 +167,15 @@ export function openStream(
 			(type, data) => {
 				alive(ctrl);
 				if (type !== 'state') return;
-				let view: MatchView;
+				let view: unknown;
 				try {
-					view = JSON.parse(data) as MatchView;
+					view = JSON.parse(data);
 				} catch {
+					console.error('stream: dropped an unreadable state frame');
+					return;
+				}
+				if (!isMatchView(view)) {
+					console.error('stream: dropped a state frame that is not a match view');
 					return;
 				}
 				if (!closed) onState(view);

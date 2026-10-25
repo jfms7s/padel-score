@@ -116,6 +116,24 @@ describe('openStream', () => {
 		expect(statuses).toEqual(['live']);
 	});
 
+	it('malformed_sse_frame_is_ignored', async () => {
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			const server = fakeServer();
+			const { states, statuses } = open(server);
+			await tick();
+			server.conns[0]?.push('event: state\ndata: {"revision":"nope"}\n\n');
+			server.conns[0]?.push('event: state\ndata: not json\n\n');
+			server.conns[0]?.push(frame(view));
+			await tick();
+			expect(states).toEqual([view]);
+			expect(statuses).toEqual(['live']);
+			expect(error).toHaveBeenCalledTimes(2);
+		} finally {
+			error.mockRestore();
+		}
+	});
+
 	it('stream_drop_marks_offline', async () => {
 		const server = fakeServer();
 		const { statuses } = open(server);
@@ -133,11 +151,11 @@ describe('openStream', () => {
 		const { statuses } = open(server);
 		await tick();
 		server.conns[0]?.push(frame(view));
-		for (let i = 0; i < 6; i++) {
-			await tick(15_000);
+		for (let i = 0; i < 9; i++) {
+			await tick(10_000);
 			server.conns[0]?.push(KEEP_ALIVE);
 		}
-		await tick(15_000);
+		await tick(10_000);
 		expect(statuses).toEqual(['live']);
 		expect(server.fetch).toHaveBeenCalledTimes(1);
 	});
@@ -230,8 +248,8 @@ describe('openStream', () => {
 		await tick(5000);
 		const conn = server.conns[0];
 		conn?.push(frame(view));
-		for (let i = 0; i < 2; i++) {
-			await tick(15_000);
+		for (let i = 0; i < 3; i++) {
+			await tick(10_000);
 			conn?.push(KEEP_ALIVE);
 		}
 		conn?.drop();
