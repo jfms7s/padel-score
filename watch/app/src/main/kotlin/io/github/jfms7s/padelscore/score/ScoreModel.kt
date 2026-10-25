@@ -12,6 +12,7 @@ import io.github.jfms7s.padelscore.net.Status
 import io.github.jfms7s.padelscore.net.StreamItem
 import io.github.jfms7s.padelscore.net.Team
 import io.github.jfms7s.padelscore.net.lastEffectiveSeq
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +22,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-enum class Feedback { None, Accepted, NotSent, MatchOver, UndoConflict }
+enum class Feedback { None, Accepted, NotSent, MatchOver, UndoConflict, NothingToUndo }
 
 /** [feedbackId] changes with every new feedback, so the screen can flash the same one twice in a row. */
 data class ScoreUi(
@@ -52,9 +53,23 @@ class ScoreModel(
 
     private var collection: Job? = null
 
-    fun point(team: Team) = send { Command.Point(team) }
+    /** A finished match takes no more points, but undo stays available (it may reopen the match). */
+    fun point(team: Team) {
+        val view = readyView() ?: return
+        if (view.score.status is Status.Finished) return
+        send(view, Command.Point(team))
+    }
 
-    fun undo() = send { view -> view.lastEffectiveSeq?.let { Command.Undo(it) } }
+    fun undo() {
+        val view = readyView() ?: return
+        val seq = view.lastEffectiveSeq
+        if (seq == null) {
+            feedback(Feedback.NothingToUndo)
+            haptics.refused()
+            return
+        }
+        send(view, Command.Undo(seq))
+    }
 
     /** Connects afresh (the flow is cold); a no-op while already collecting. */
     fun startStream() {
@@ -68,15 +83,27 @@ class ScoreModel(
         _ui.update { it.copy(live = false) }
     }
 
-    /** [command] gets the shown view and returns null when there is nothing to send. */
-    private fun send(command: (MatchView) -> Command?) {
+    /** The shown view, or null when a command cannot go out now (nothing shown, one in flight, signed out). */
+    private fun readyView(): MatchView? {
         val state = _ui.value
-        val view = state.view ?: return
-        if (state.sending || _unauthorized.value || view.score.status is Status.Finished) return
-        val next = command(view) ?: return
-        _ui.value = state.copy(sending = true, feedback = Feedback.None)
-        val request = CommandRequest(newId(), batch = false, baseRevision = view.revision, commands = listOf(next))
-        viewModelScope.launch { onResult(api.send(matchId, request)) }
+        if (state.sending || _unauthorized.value) return null
+        return state.view
+    }
+
+    private fun send(view: MatchView, command: Command) {
+        _ui.update { it.copy(sending = true, feedback = Feedback.None) }
+        val request = CommandRequest(newId(), batch = false, baseRevision = view.revision, commands = listOf(command))
+        viewModelScope.launch {
+            // The API maps failures to results, but a bug there must not leave the screen stuck on "sending".
+            val result = try {
+                api.send(matchId, request)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                SendResult.NotSent("send failed")
+            }
+            onResult(result)
+        }
     }
 
     private fun onResult(result: SendResult) {

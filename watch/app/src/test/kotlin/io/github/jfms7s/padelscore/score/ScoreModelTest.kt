@@ -35,6 +35,7 @@ class FakeSendApi : PadelApi {
     val requests = mutableListOf<Pair<String, CommandRequest>>()
     var result: SendResult = SendResult.NotSent("unset")
     var hold = false
+    var failure: Exception? = null
     private var gate = CompletableDeferred<Unit>()
 
     fun release() = gate.complete(Unit)
@@ -42,6 +43,7 @@ class FakeSendApi : PadelApi {
     override suspend fun send(matchId: String, request: CommandRequest): SendResult {
         requests += matchId to request
         if (hold) gate.await().also { gate = CompletableDeferred() }
+        failure?.let { throw it }
         return result
     }
 
@@ -205,11 +207,31 @@ class ScoreModelTest {
     }
 
     @Test
-    fun undo_with_nothing_to_undo_is_ignored() {
+    fun undo_with_nothing_to_undo_says_so_without_sending() {
         val model = model(fixtureView("view-new.json"))
         model.undo()
         scheduler.runCurrent()
         assertTrue(api.requests.isEmpty())
+        assertEquals(Feedback.NothingToUndo, model.ui.value.feedback)
+        assertFalse(model.ui.value.sending)
+        assertEquals(listOf("refused"), haptics.calls)
+    }
+
+    @Test
+    fun send_that_throws_is_not_sent_and_clears_sending() {
+        val model = model()
+        api.failure = RuntimeException("bug in the client")
+        tap(model)
+        val ui = model.ui.value
+        assertEquals(Feedback.NotSent, ui.feedback)
+        assertFalse(ui.sending)
+        assertSame(onePoint, ui.view)
+        assertEquals(listOf("notSent"), haptics.calls)
+        // The next tap goes out: nothing is stuck.
+        api.failure = null
+        api.result = SendResult.Applied(onePoint.copy(revision = 2))
+        tap(model)
+        assertEquals(2, api.requests.size)
     }
 
     @Test
@@ -296,12 +318,20 @@ class ScoreModelTest {
     }
 
     @Test
-    fun taps_on_a_finished_match_are_ignored() {
-        val model = model(fixtureView("view-finished.json"))
+    fun finished_match_ignores_points_but_sends_undo() {
+        val finished = fixtureView("view-finished.json") // revision 1, last seq 24
+        val model = model(finished)
         tap(model)
+        tap(model, Team.B)
+        assertTrue(api.requests.isEmpty())
+
+        val reopened = fixtureView("view-advantage.json").copy(revision = finished.revision + 1)
+        api.result = SendResult.Applied(reopened)
         model.undo()
         scheduler.runCurrent()
-        assertTrue(api.requests.isEmpty())
+        assertEquals(CommandRequest("id-1", false, finished.revision, listOf(Command.Undo(24))), api.requests.single().second)
+        assertSame(reopened, model.ui.value.view)
+        assertEquals(Feedback.Accepted, model.ui.value.feedback)
     }
 
     @Test
