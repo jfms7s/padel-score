@@ -40,7 +40,6 @@ pub const STAR_POINT_DEUCE: u8 = 3;
 pub enum SetsFormat {
     One,
     BestOf3,
-    BestOf5,
 }
 
 impl SetsFormat {
@@ -48,7 +47,6 @@ impl SetsFormat {
         match self {
             SetsFormat::One => 1,
             SetsFormat::BestOf3 => 2,
-            SetsFormat::BestOf5 => 3,
         }
     }
 }
@@ -83,6 +81,8 @@ pub enum RulesError {
     /// A one-set match has no deciding set to replace.
     #[error("a super tie-break needs a match of more than one set")]
     SuperTieBreakNeedsMultipleSets,
+    #[error("player index must be 0 or 1")]
+    InvalidPlayerIndex,
 }
 
 impl Format {
@@ -101,6 +101,15 @@ impl Format {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Start {
     pub first_server: Player,
+}
+
+impl Start {
+    pub fn validate(&self) -> Result<(), RulesError> {
+        if self.first_server.index > 1 {
+            return Err(RulesError::InvalidPlayerIndex);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

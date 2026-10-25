@@ -41,3 +41,21 @@ fn ev_parses_shorthand() {
         vec![Event::Point(Team::A), Event::Point(Team::B), Event::TimeUp]
     );
 }
+
+#[test]
+fn start_with_bad_player_index_is_invalid() {
+    let bad = Start {
+        first_server: Player {
+            team: Team::B,
+            index: 2,
+        },
+    };
+    assert_eq!(bad.validate(), Err(RulesError::InvalidPlayerIndex));
+    assert_eq!(start_a().validate(), Ok(()));
+}
+
+#[test]
+fn sets_to_win_counts() {
+    assert_eq!(SetsFormat::One.sets_to_win(), 1);
+    assert_eq!(SetsFormat::BestOf3.sets_to_win(), 2);
+}
