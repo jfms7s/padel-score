@@ -5,7 +5,9 @@
     clippy::panic
 )]
 
-use padel_score_server::commands::{Command, CommandOutcome, CommandRequest, apply_command};
+use padel_score_server::commands::{
+    Authority, Command, CommandOutcome, CommandRequest, apply_command,
+};
 use padel_score_server::competitions::courts::{EventMatchRow, MAX_COURTS, courts_in};
 use padel_score_server::competitions::{Competition, Kind, NewCompetition};
 use padel_score_server::db;
@@ -120,7 +122,10 @@ async fn finish(s: &Store, match_id: &str) {
         base_revision: 0,
         commands: vec![Command::Point { team: Team::A }; 24],
     };
-    match apply_command(s, &m, req, NOW).await.unwrap() {
+    match apply_command(s, &m, req, NOW, Authority::Scorer)
+        .await
+        .unwrap()
+    {
         CommandOutcome::Applied(_) => {}
         other => panic!("expected Applied, got {other:?}"),
     }

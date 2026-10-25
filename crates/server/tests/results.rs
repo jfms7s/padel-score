@@ -6,7 +6,8 @@
 )]
 
 use padel_score_server::commands::{
-    Command, CommandOutcome, CommandRequest, MatchView, ReplaceRequest, apply_command, replace_from,
+    Authority, Command, CommandOutcome, CommandRequest, MatchView, ReplaceRequest, apply_command,
+    replace_from,
 };
 use padel_score_server::db;
 use padel_score_server::results::{self, FinalScore};
@@ -79,9 +80,15 @@ fn applied(o: CommandOutcome) -> MatchView {
 /// One live request with 24 points for `team`: a 6-0 one-set match.
 async fn finish(s: &Store, m: &StoredMatch, team: Team, now: i64) -> MatchView {
     applied(
-        apply_command(s, m, live("finish", points(team, 24)), now)
-            .await
-            .unwrap(),
+        apply_command(
+            s,
+            m,
+            live("finish", points(team, 24)),
+            now,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
     )
 }
 
@@ -155,9 +162,15 @@ async fn in_progress_match_has_no_result() {
     let (s, pool) = setup().await;
     let m = new_match(&s, one_set(), Some(OWNER)).await;
     applied(
-        apply_command(&s, &m, live("c1", points(Team::A, 23)), NOW + 1)
-            .await
-            .unwrap(),
+        apply_command(
+            &s,
+            &m,
+            live("c1", points(Team::A, 23)),
+            NOW + 1,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
     );
     assert_eq!(count_rows(&pool).await, 0);
 }
@@ -179,6 +192,7 @@ async fn undo_after_finish_retracts_result() {
                 }],
             ),
             NOW + 6,
+            Authority::Scorer,
         )
         .await
         .unwrap(),
@@ -202,14 +216,21 @@ async fn refinish_counts_once() {
                 }],
             ),
             NOW + 6,
+            Authority::Scorer,
         )
         .await
         .unwrap(),
     );
     applied(
-        apply_command(&s, &m, live("again", points(Team::A, 1)), NOW + 7)
-            .await
-            .unwrap(),
+        apply_command(
+            &s,
+            &m,
+            live("again", points(Team::A, 1)),
+            NOW + 7,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
     );
     let rows = result_rows(&pool, &m.id).await;
     assert_eq!(rows.len(), 1);
@@ -232,6 +253,7 @@ async fn batch_and_replace_sync_too() {
                 commands: points(Team::B, 24),
             },
             NOW + 3,
+            Authority::Scorer,
         )
         .await
         .unwrap(),
@@ -253,6 +275,7 @@ async fn batch_and_replace_sync_too() {
                 commands: points(Team::A, 1),
             },
             NOW + 4,
+            Authority::Scorer,
         )
         .await
         .unwrap(),
@@ -278,7 +301,7 @@ async fn timed_draw_has_null_winner() {
     }
     commands.push(Command::TimeUp);
     applied(
-        apply_command(&s, &m, live("timed", commands), NOW + 2)
+        apply_command(&s, &m, live("timed", commands), NOW + 2, Authority::Scorer)
             .await
             .unwrap(),
     );
@@ -295,9 +318,15 @@ async fn rejected_command_leaves_result() {
     let (s, pool) = setup().await;
     let m = new_match(&s, one_set(), Some(OWNER)).await;
     finish(&s, &m, Team::A, NOW + 5).await;
-    let outcome = apply_command(&s, &m, live("late", points(Team::B, 1)), NOW + 9)
-        .await
-        .unwrap();
+    let outcome = apply_command(
+        &s,
+        &m,
+        live("late", points(Team::B, 1)),
+        NOW + 9,
+        Authority::Scorer,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         outcome,
         CommandOutcome::Rejected {
@@ -320,9 +349,15 @@ async fn backfill_fills_old_finished_matches() {
     // Not finished, and anonymous: neither gets a row.
     let open = new_match(&s, one_set(), Some(OWNER)).await;
     applied(
-        apply_command(&s, &open, live("c1", points(Team::A, 3)), NOW + 6)
-            .await
-            .unwrap(),
+        apply_command(
+            &s,
+            &open,
+            live("c1", points(Team::A, 3)),
+            NOW + 6,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
     );
     let anon = new_match(&s, one_set(), None).await;
     finish(&s, &anon, Team::A, NOW + 7).await;
@@ -395,7 +430,7 @@ async fn draw(s: &Store, m: &StoredMatch, now: i64) {
     }
     commands.push(Command::TimeUp);
     applied(
-        apply_command(s, m, live("timed", commands), now)
+        apply_command(s, m, live("timed", commands), now, Authority::Scorer)
             .await
             .unwrap(),
     );
@@ -441,9 +476,15 @@ async fn history_lists_finished_owned_matches_newest_first() {
     finish(&s, &newer, Team::B, NOW + 8).await;
     let open = new_match(&s, one_set(), Some(OWNER)).await;
     applied(
-        apply_command(&s, &open, live("c1", points(Team::A, 3)), NOW + 9)
-            .await
-            .unwrap(),
+        apply_command(
+            &s,
+            &open,
+            live("c1", points(Team::A, 3)),
+            NOW + 9,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
     );
     let anon = new_match(&s, one_set(), None).await;
     finish(&s, &anon, Team::A, NOW + 10).await;
@@ -559,9 +600,15 @@ async fn record_counts_both_players_of_a_team() {
     // An unfinished match counts for nobody.
     let open = match_with(&s, one_set(), OWNER, all_four(&p)).await;
     applied(
-        apply_command(&s, &open, live("c1", points(Team::B, 3)), NOW + 6)
-            .await
-            .unwrap(),
+        apply_command(
+            &s,
+            &open,
+            live("c1", points(Team::B, 3)),
+            NOW + 6,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
     );
     assert_eq!(s.record(OWNER, &p.rui).await.unwrap(), rec(0, 1, 0));
 }

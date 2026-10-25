@@ -19,6 +19,7 @@ use http_body_util::BodyExt;
 use padel_score_server::AppState;
 use padel_score_server::accounts_store::OWNED_MATCH_CANDIDATES;
 use padel_score_server::api::now;
+use padel_score_server::commands::{Authority, FinalRequest, record_final};
 use padel_scoring::{DecidingSet, DeuceRule, Format, Player, SetRules, SetsFormat, Start, Team};
 use serde_json::{Value, json};
 use support::*;
@@ -772,4 +773,50 @@ async fn owned_routes_are_no_store() {
     let res = send(&app, req(Method::GET, "/api/me/matches", None, &[])).await;
     assert_eq!(res.status, StatusCode::UNAUTHORIZED);
     assert_eq!(res.header(header::CACHE_CONTROL), Some("no-store"));
+}
+
+#[tokio::test]
+async fn owner_commands_ignore_lock() {
+    let (state, _, app, _, admin) = with_admin().await;
+    let m = create_as(&state, &app, &admin, default_body()).await;
+    let stored = state
+        .store
+        .by_scorer_token(&m.scorer)
+        .await
+        .unwrap()
+        .unwrap();
+    let req = FinalRequest {
+        client_id: "coordinator".into(),
+        base_revision: None,
+        score: padel_scoring::FinalScore::Sets(vec![padel_scoring::SetScore {
+            a: 6,
+            b: 3,
+            tiebreak: None,
+        }]),
+    };
+    let (status, body) = record_final(&state.store, &stored, req, Authority::Owner, now())
+        .await
+        .unwrap()
+        .to_http()
+        .unwrap();
+    assert_eq!(status, 200, "{body}");
+    let view: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(view["locked"], json!(true));
+
+    // The scorer token is locked out ...
+    let res = score_by_token(&app, &m.scorer, point("s1", "b", 1)).await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(res.body["error"], "locked");
+    // ... but the owner's route is not.
+    let undo = json!({ "client_id": "w1", "batch": false, "base_revision": 0,
+        "commands": [{ "kind": "undo", "target_seq": view["head_seq"] }] });
+    let path = owner_commands_path(&m.id);
+    let res = send(
+        &app,
+        as_session(&state, &admin, Method::POST, &path, Some(undo)),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.body["score"]["status"], json!("in_progress"));
+    assert_eq!(res.body["locked"], json!(true));
 }

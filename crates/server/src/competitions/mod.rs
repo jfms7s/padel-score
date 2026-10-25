@@ -17,7 +17,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
 use crate::players::player_in;
-use crate::store::{MAX_NAME_CHARS, Store, StoreError, decode, encode};
+use crate::store::{MAX_NAME_CHARS, Store, StoreError, StoredMatch, Tx, decode, encode};
 use crate::tokens::new_token;
 
 /// The most teams one event holds.
@@ -223,6 +223,17 @@ pub(crate) async fn competition_by_id_in(
         .fetch_optional(conn)
         .await?;
     Ok(row.as_ref().map(competition_from_row).transpose()?)
+}
+
+/// The event hook of a command that changed a match's log, run in its transaction after
+/// `results::sync_in`: for an event match it calls [`kinds::on_result`], which reads
+/// `match_results` to see whether the match is now finished (or no longer is, after an undo).
+/// For any other match it does nothing beyond one indexed lookup.
+pub async fn after_result_in(tx: &mut Tx<'_>, m: &StoredMatch, now: i64) -> Result<(), StoreError> {
+    if let Some((ev, link)) = courts::event_of_match_in(tx, &m.id).await? {
+        kinds::on_result(ev.kind, tx, &ev, &link.match_id, now).await?;
+    }
+    Ok(())
 }
 
 fn team_from_row(row: &SqliteRow) -> Result<EventTeam, sqlx::Error> {

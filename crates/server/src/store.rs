@@ -364,6 +364,36 @@ pub async fn touch(tx: &mut Tx<'_>, match_id: &str, now: i64) -> Result<(), Stor
     Ok(())
 }
 
+/// Lock the match's result against the scorer token: the coordinator typed it.
+pub async fn lock_result(tx: &mut Tx<'_>, match_id: &str, now: i64) -> Result<(), StoreError> {
+    let done = sqlx::query("UPDATE matches SET result_locked_at = ? WHERE id = ?")
+        .bind(now)
+        .bind(match_id)
+        .execute(&mut **tx)
+        .await?;
+    if done.rows_affected() != 1 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
+/// Replace the match's `start`. The caller checks that the log is empty.
+pub async fn set_start_in(
+    tx: &mut Tx<'_>,
+    match_id: &str,
+    start: &Start,
+) -> Result<(), StoreError> {
+    let done = sqlx::query("UPDATE matches SET start = ? WHERE id = ?")
+        .bind(encode(start)?)
+        .bind(match_id)
+        .execute(&mut **tx)
+        .await?;
+    if done.rows_affected() != 1 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
 pub async fn save_result(
     tx: &mut Tx<'_>,
     match_id: &str,

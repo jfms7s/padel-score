@@ -4,8 +4,9 @@
 //!   `Location: /s/{scorer_token}`. A signed-in caller owns it (see [`crate::owned`]); anyone
 //!   else creates an anonymous quick match.
 //! - `GET /api/score/{token}` and `GET /api/view/{token}` return the `MatchView`.
-//! - `POST /api/score/{token}/commands` and `/replace` run the command rules; their status and
-//!   body come from [`CommandOutcome::to_http`] alone.
+//! - `POST /api/score/{token}/commands`, `/replace` and `/final` (a typed final score) run the
+//!   command rules; their status and body come from [`CommandOutcome::to_http`] alone.
+//! - `PUT /api/score/{token}/start` chooses who serves first, while the log is empty.
 //! - `GET /api/score/{token}/stream` and `/api/view/{token}/stream` are SSE: the current view as
 //!   event `state` at once, then one per applied command.
 //!
@@ -24,7 +25,7 @@ use axum::http::request::Parts;
 use axum::http::{StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use futures_util::StreamExt;
 use padel_scoring::{Format, Start};
 use serde::de::DeserializeOwned;
@@ -35,7 +36,8 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::AppState;
 use crate::auth::OptionalUser;
 use crate::commands::{
-    CommandOutcome, CommandRequest, MatchView, ReplaceRequest, apply_command, replace_from, view_of,
+    Authority, CommandOutcome, CommandRequest, FinalRequest, MatchView, ReplaceRequest,
+    apply_command, record_final, replace_from, set_start, view_of,
 };
 use crate::hub::Subscription;
 use crate::players::PlayerSlots;
@@ -64,6 +66,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/view/{token}", get(view))
         .route("/api/score/{token}/commands", post(commands))
         .route("/api/score/{token}/replace", post(replace))
+        .route("/api/score/{token}/final", post(final_score))
+        .route("/api/score/{token}/start", put(start))
         .route("/api/score/{token}/stream", get(score_stream))
         .route("/api/view/{token}/stream", get(view_stream))
         .merge(crate::accounts::routes())
@@ -327,21 +331,23 @@ async fn commands(
     ApiJson(req): ApiJson<CommandRequest>,
 ) -> Result<Response, ApiError> {
     let m = by_scorer(&state.store, &token).await?;
-    run_command(&state, m, req).await
+    run_command(&state, m, req, Authority::Scorer).await
 }
 
 /// Apply a command request to `m` and serve the outcome: the one path behind both the scorer's
 /// route and the owner's (`/api/me/matches/{id}/commands`), so their shapes and idempotency
-/// are the same.
+/// are the same. `authority` is `Scorer` from the scorer's route and `Owner` from the owner's,
+/// which a coordinator's lock does not stop.
 pub(crate) async fn run_command(
     state: &AppState,
     m: StoredMatch,
     req: CommandRequest,
+    authority: Authority,
 ) -> Result<Response, ApiError> {
     let store = state.store.clone();
     let (match_id, owner) = (m.id.clone(), m.owner_user_id.clone());
     run_detached(state, match_id, owner, async move {
-        apply_command(&store, &m, req, now()).await
+        apply_command(&store, &m, req, now(), authority).await
     })
     .await
 }
@@ -355,9 +361,74 @@ async fn replace(
     let store = state.store.clone();
     let (match_id, owner) = (m.id.clone(), m.owner_user_id.clone());
     run_detached(&state, match_id, owner, async move {
-        replace_from(&store, &m, req, now()).await
+        replace_from(&store, &m, req, now(), Authority::Scorer).await
     })
     .await
+}
+
+/// The court phone's typed final score. Unlike the coordinator's, its `base_revision` is
+/// required: a typed score must not overwrite points it has not seen.
+#[derive(Debug, Deserialize)]
+struct ScorerFinalRequest {
+    client_id: String,
+    base_revision: i64,
+    score: padel_scoring::FinalScore,
+}
+
+async fn final_score(
+    State(state): State<AppState>,
+    ApiPath(token): ApiPath<String>,
+    ApiJson(req): ApiJson<ScorerFinalRequest>,
+) -> Result<Response, ApiError> {
+    let m = by_scorer(&state.store, &token).await?;
+    let req = FinalRequest {
+        client_id: req.client_id,
+        base_revision: Some(req.base_revision),
+        score: req.score,
+    };
+    let store = state.store.clone();
+    let (match_id, owner) = (m.id.clone(), m.owner_user_id.clone());
+    run_detached(&state, match_id, owner, async move {
+        record_final(&store, &m, req, Authority::Scorer, now()).await
+    })
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+struct StartRequest {
+    start: Start,
+}
+
+/// Choose who serves first. 200 with the view, published like a command's; 409
+/// `already_started` once the log has a row; 409 `locked` with the view on a locked match,
+/// the same body a command gets.
+async fn start(
+    State(state): State<AppState>,
+    ApiPath(token): ApiPath<String>,
+    ApiJson(req): ApiJson<StartRequest>,
+) -> Result<Response, ApiError> {
+    let m = by_scorer(&state.store, &token).await?;
+    let task_state = state.clone();
+    // Spawned for the same drop safety as `run_detached`: a commit is always published.
+    let result = tokio::spawn(async move {
+        let result = set_start(&task_state.store, &m, req.start, Authority::Scorer, now()).await;
+        if let Ok(view) = &result {
+            if let Some(owner) = &m.owner_user_id {
+                task_state.hub.notify_user(owner);
+            }
+            task_state.hub.publish(view.clone());
+        }
+        result.map_err(|e| (e, m.id))
+    })
+    .await
+    .map_err(internal)?;
+    match result {
+        Ok(view) => Ok(Json(view).into_response()),
+        Err((StoreError::Conflict("locked"), match_id)) => respond(&CommandOutcome::Locked(
+            current_view(&state.store, &match_id).await?,
+        )),
+        Err((e, _)) => Err(e.into()),
+    }
 }
 
 /// Run a command and its publish on their own task, then serve the outcome.
@@ -395,7 +466,8 @@ where
 /// - A replayed 200: the first request applied, but its publish may have been lost (see
 ///   [`run_detached`]; e.g. a server restart in between). Publish the *current* view as belt and
 ///   braces; streams drop it by revision if they already have it.
-/// - Conflict, rejection, invalid, replayed non-200: nothing changed, nothing to publish.
+/// - Conflict, locked, rejection, invalid, replayed non-200: nothing changed, nothing to
+///   publish.
 ///
 /// The owner's list streams are told whenever the match's streams are: they re-read the list,
 /// which also picks up a match that has just finished and drops it.

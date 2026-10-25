@@ -44,7 +44,7 @@ use crate::AppState;
 use crate::accounts;
 use crate::api::{self, ApiError, ApiJson, ApiPath, internal};
 use crate::auth::{AuthVia, Credential, CurrentUser, credential, credential_holds};
-use crate::commands::{CommandRequest, MatchView, view_of};
+use crate::commands::{Authority, CommandRequest, MatchView, view_of};
 use crate::hub::Subscription;
 use crate::store::StoredMatch;
 
@@ -214,7 +214,7 @@ async fn commands(
     ApiJson(req): ApiJson<CommandRequest>,
 ) -> Result<Response, ApiError> {
     let m = owned(&state, &user, &id).await?;
-    api::run_command(&state, m, req).await
+    api::run_command(&state, m, req, Authority::Owner).await
 }
 
 async fn match_stream(
