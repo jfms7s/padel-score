@@ -4,4 +4,14 @@
     <string name="tracer_checking">Checking the server…</string>
     <string name="tracer_server_version">Server %1$s</string>
     <string name="tracer_unreachable">Can\'t reach the server</string>
+    <string name="sign_in_title">Sign in</string>
+    <string name="sign_in_starting">Getting a code…</string>
+    <string name="sign_in_open_on_phone">On your phone, open</string>
+    <string name="sign_in_minutes_left">%1$d min left</string>
+    <string name="sign_in_expired">Code expired</string>
+    <string name="sign_in_denied">Sign-in was denied</string>
+    <string name="sign_in_too_many">Too many tries. Wait a minute.</string>
+    <string name="sign_in_unreachable">Can\'t reach the server</string>
+    <string name="sign_in_save_failed">Couldn\'t save the sign-in. Try again.</string>
+    <string name="sign_in_new_code">New code</string>
 </resources>
