@@ -164,8 +164,6 @@ struct SetsMatch {
     /// Places along the service rotation (mod 4) of the current game's server,
     /// or of the current tie-break's first server.
     rotation: u16,
-    /// Games finished in the whole match; a tie-break or super tie-break counts as one.
-    finished_games: u32,
     /// Whether the last event made the players change ends.
     change_ends: bool,
 }
@@ -180,7 +178,6 @@ impl SetsMatch {
             unit: Unit::Over,
             winner: None,
             rotation: 0,
-            finished_games: 0,
             change_ends: false,
         };
         m.unit = m.first_unit_of_set();
@@ -207,7 +204,8 @@ impl SetsMatch {
                 self.change_ends = ends_change_in_tiebreak(tb.points_played());
                 if let Some(w) = won {
                     if super_tiebreak {
-                        self.game_finished();
+                        // A super tie-break is its set's only game.
+                        self.game_finished(1);
                         let (a, b) = match w {
                             Team::A => (1, 0),
                             Team::B => (0, 1),
@@ -231,10 +229,10 @@ impl SetsMatch {
 
     /// `w` won a game (or a regular tie-break, which counts as the set's 13th game).
     fn game_won(&mut self, w: Team, tiebreak: Option<(u16, u16)>) {
-        self.game_finished();
         let g = slot(&mut self.games, w);
         *g = g.saturating_add(1);
         let [a, b] = self.games;
+        self.game_finished(u16::from(a).saturating_add(u16::from(b)));
         if let Some(set_winner) = set_won(a, b) {
             self.set_won(set_winner, SetScore { a, b, tiebreak });
         } else if a == SET_GAMES && b == SET_GAMES {
@@ -247,12 +245,12 @@ impl SetsMatch {
         }
     }
 
-    /// Count a finished game (or tie-break) and pass service to the next player in rotation.
+    /// A game (or tie-break) ended with `games_in_set` games now played in its set:
+    /// pass service to the next player in rotation and apply the change-of-ends rule.
     /// After a tie-break that player is the one after the tie-break's first server.
-    fn game_finished(&mut self) {
-        self.finished_games = self.finished_games.wrapping_add(1);
+    fn game_finished(&mut self, games_in_set: u16) {
         self.rotation = self.rotation.wrapping_add(1) % 4;
-        self.change_ends |= ends_change_after_game(self.finished_games);
+        self.change_ends |= ends_change_after_game(games_in_set);
     }
 
     fn set_won(&mut self, w: Team, set: SetScore) {

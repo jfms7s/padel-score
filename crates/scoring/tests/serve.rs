@@ -162,19 +162,26 @@ fn change_ends_after_odd_games() {
 }
 
 #[test]
-fn change_ends_counts_games_across_sets() {
-    // Set 1 6-0 (6 games): the first game of set 2 is the 7th, so ends change.
+fn change_ends_counts_games_within_set() {
+    // FIP Rule 5.1: ends change when the games played in the current set add up to odd.
+    // Set 1 6-0 (6 games, even): no change at the set end; game 1 of set 2 changes ends.
     let set1 = games(6, 0);
     assert!(!play(&bo3(), &set1).change_ends);
     assert!(play(&bo3(), &format!("{set1}aaaa")).change_ends);
-    // Set 1 6-1 (7 games): ends change on the set-ending game, not after set 2's first game.
-    let set1 = games(6, 1);
+    assert!(!play(&bo3(), &format!("{set1}aaaa aaaa")).change_ends);
+    // Set 1 6-3 (9 games, odd): ends change at the set end and again after game 1 of set 2.
+    let set1 = games(6, 3);
+    assert_eq!(play(&bo3(), &set1).sets_won, [1, 0]);
     assert!(play(&bo3(), &set1).change_ends);
-    assert!(!play(&bo3(), &format!("{set1}aaaa")).change_ends);
-    // A tie-break set is 13 games: ends change when the tie-break ends.
+    assert!(play(&bo3(), &format!("{set1}aaaa")).change_ends);
+    assert!(!play(&bo3(), &format!("{set1}aaaa aaaa")).change_ends);
+    // A 7-6 set: the tie-break is the 13th game, so ends change when it ends,
+    // and again after game 1 of set 2.
     let tb_set = format!("{}aaaaaaa", games(6, 6));
+    assert_eq!(play(&bo3(), &tb_set).sets_won, [1, 0]);
     assert!(play(&bo3(), &tb_set).change_ends);
-    assert!(!play(&bo3(), &format!("{tb_set}aaaa")).change_ends);
+    assert!(play(&bo3(), &format!("{tb_set}aaaa")).change_ends);
+    assert!(!play(&bo3(), &format!("{tb_set}aaaa aaaa")).change_ends);
 }
 
 #[test]

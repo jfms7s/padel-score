@@ -67,9 +67,10 @@ pub(crate) fn serve_side(points_played: u16, deciding_point: bool) -> ServeSide 
     }
 }
 
-/// Ends change after a game when the match-wide count of finished games is odd.
-pub(crate) fn ends_change_after_game(finished_games: u32) -> bool {
-    !finished_games.is_multiple_of(2)
+/// Ends change after a game when the games played in its set add up to an odd number
+/// (FIP Rule 5.1). A set's tie-break counts as its 13th game.
+pub(crate) fn ends_change_after_game(games_in_set: u16) -> bool {
+    !games_in_set.is_multiple_of(2)
 }
 
 /// Ends change in a tie-break (or super tie-break) after every 6 points.
