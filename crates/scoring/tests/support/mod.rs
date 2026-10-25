@@ -37,3 +37,27 @@ pub fn start_a() -> Start {
         },
     }
 }
+
+/// Golden point, best of 3, full deciding set.
+pub fn bo3() -> Format {
+    sets(
+        DeuceRule::GoldenPoint,
+        SetsFormat::BestOf3,
+        DecidingSet::FullSet,
+    )
+}
+
+/// Points for a run of games reaching `n_a`-`n_b`, each game won to love ("aaaa"/"bbbb").
+/// Games alternate A, B, A, B, ... and the leader's surplus games come last,
+/// so the set can't end before the requested score.
+pub fn games(n_a: u8, n_b: u8) -> String {
+    let level = n_a.min(n_b);
+    let mut s = "aaaabbbb".repeat(usize::from(level));
+    let (leader, surplus) = if n_a > n_b {
+        ("aaaa", n_a - n_b)
+    } else {
+        ("bbbb", n_b - n_a)
+    };
+    s.push_str(&leader.repeat(usize::from(surplus)));
+    s
+}
