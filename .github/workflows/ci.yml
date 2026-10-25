@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs every check on the tagged commit before it publishes.
+  workflow_call:
 
 permissions: {}
 

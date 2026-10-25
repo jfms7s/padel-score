@@ -23,7 +23,7 @@ Then open <http://localhost:8080>. With `podman build`, add `--format docker`, o
 
 ## Releases
 
-Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`, which builds `ghcr.io/jfms7s/padel-score:vX.Y.Z`
+Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`. If the tagged commit is on `main` and every CI check passes on it, the workflow builds `ghcr.io/jfms7s/padel-score:vX.Y.Z`
 for `linux/amd64` and `linux/arm64` (cross-compiled, no emulation) and pushes it with signed build provenance:
 
 ```sh
