@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Padel score</string>
+    <string name="tracer_checking">Checking the server…</string>
+    <string name="tracer_server_version">Server %1$s</string>
+    <string name="tracer_unreachable">Can\'t reach the server</string>
+</resources>
