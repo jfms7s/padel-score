@@ -1,0 +1,32 @@
+[package]
+name = "padel-score-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "padel_score_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "padel-score"
+path = "src/main.rs"
+
+[dependencies]
+padel-scoring = { path = "../scoring" }
+axum = "0.8"
+mime_guess = "2.0.5"
+rust-embed = "8.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.152"
+tokio = { version = "1.53.2", features = ["full"] }
+tower-http = { version = "0.7.1", features = ["trace", "compression-gzip"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+tower = { version = "0.5.3", features = ["util"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,44 @@
+pub mod config;
+pub mod web;
+
+use std::sync::Arc;
+
+use axum::Router;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Json};
+use axum::routing::get;
+use serde_json::json;
+
+pub use config::Config;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub config: Arc<Config>,
+}
+
+impl AppState {
+    pub fn new(config: Arc<Config>) -> AppState {
+        AppState { config }
+    }
+}
+
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/api/health", get(health))
+        .route("/api/{*rest}", axum::routing::any(api_not_found))
+        .fallback(web::static_handler)
+        .with_state(state)
+}
+
+async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    Json(json!({
+        "status": "ok",
+        "version": state.config.version,
+        "commit": state.config.commit,
+    }))
+}
+
+async fn api_not_found() -> impl IntoResponse {
+    (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" })))
+}

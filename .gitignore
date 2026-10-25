@@ -1,2 +1,6 @@
 /target
 .superpowers/
+/web/build
+/web/node_modules
+/web/.svelte-kit
+/web/src/lib/wasm
