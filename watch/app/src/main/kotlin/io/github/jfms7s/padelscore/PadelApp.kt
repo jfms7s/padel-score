@@ -9,6 +9,6 @@ class PadelApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        container = AppContainer(this, BuildConfig.SERVER_URL.toHttpUrl())
+        container = DefaultAppContainer(this, BuildConfig.SERVER_URL.toHttpUrl())
     }
 }

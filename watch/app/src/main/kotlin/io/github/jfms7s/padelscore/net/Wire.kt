@@ -82,6 +82,8 @@ data class ViewEvent(val seq: Long, val event: JsonElement)
 @Serializable
 data class MatchView(
     val id: String,
+    // Opaque: the screen only reads the deuce rule out of it. Null when absent.
+    val format: JsonElement? = null,
     val teams: Teams,
     val revision: Long,
     @SerialName("head_seq") val headSeq: Long,
