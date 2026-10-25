@@ -368,6 +368,21 @@ impl Store {
         Ok(self.pool.begin_with("BEGIN IMMEDIATE").await?)
     }
 
+    /// Delete anonymous matches (no owner) whose last activity is before `cutoff`, returning
+    /// their ids. One statement, so a match touched concurrently is either kept or deleted whole.
+    pub async fn purge_anonymous_idle_before(
+        &self,
+        cutoff: i64,
+    ) -> Result<Vec<String>, StoreError> {
+        let rows = sqlx::query(
+            "DELETE FROM matches WHERE owner_user_id IS NULL AND last_activity_at < ? RETURNING id",
+        )
+        .bind(cutoff)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|row| row.get("id")).collect())
+    }
+
     pub async fn create_match(&self, new: NewMatch, now: i64) -> Result<StoredMatch, StoreError> {
         new.format.validate()?;
         new.start.validate()?;

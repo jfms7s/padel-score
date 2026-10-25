@@ -61,6 +61,12 @@ impl Hub {
         }
     }
 
+    /// Drop the match's entry. The sender goes with it, so every subscriber's `recv` returns
+    /// `Closed` and its stream ends. Used when the match is purged.
+    pub fn close(&self, match_id: &str) {
+        self.channels().remove(match_id);
+    }
+
     /// Whether anyone is watching the match.
     pub fn is_watched(&self, match_id: &str) -> bool {
         self.channels().contains_key(match_id)

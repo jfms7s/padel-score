@@ -46,6 +46,7 @@ async fn main() -> Result<(), BoxError> {
     let store = Store::new(db::connect(&config.database_url).await?);
     let state = AppState::new(Arc::new(config), store);
     let streams = state.shutdown.clone();
+    tokio::spawn(padel_score_server::retention::run(state.clone()));
     let app = router(state)
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http());

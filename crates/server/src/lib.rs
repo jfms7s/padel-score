@@ -3,6 +3,7 @@ pub mod commands;
 pub mod config;
 pub mod db;
 pub mod hub;
+pub mod retention;
 pub mod store;
 pub mod tokens;
 pub mod web;

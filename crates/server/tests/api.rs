@@ -546,3 +546,15 @@ async fn hub_drops_entry_when_last_stream_goes() {
     assert_eq!(status, StatusCode::OK);
     assert!(state.hub.is_empty());
 }
+
+#[tokio::test]
+async fn closing_a_hub_entry_ends_its_stream() {
+    let (app, state) = setup().await;
+    let m = create(&app).await;
+    let mut stream = Stream::open(&app, &format!("/api/view/{}/stream", m.spectator)).await;
+    stream.state().await;
+    assert!(state.hub.is_watched(&m.id));
+    state.hub.close(&m.id);
+    assert!(!state.hub.is_watched(&m.id));
+    while stream.frame().await.is_some() {}
+}
