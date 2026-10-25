@@ -1,4 +1,7 @@
 pub mod config;
+pub mod db;
+pub mod store;
+pub mod tokens;
 pub mod web;
 
 use std::sync::Arc;
@@ -11,15 +14,17 @@ use axum::routing::get;
 use serde_json::json;
 
 pub use config::Config;
+pub use store::Store;
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
+    pub store: Store,
 }
 
 impl AppState {
-    pub fn new(config: Arc<Config>) -> AppState {
-        AppState { config }
+    pub fn new(config: Arc<Config>, store: Store) -> AppState {
+        AppState { config, store }
     }
 }
 

@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use padel_score_server::{AppState, Config, router};
+use padel_score_server::{AppState, Config, Store, db, router};
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
@@ -35,7 +35,16 @@ async fn main() -> Result<(), BoxError> {
         .init();
 
     let port = config.port;
-    let state = AppState::new(Arc::new(config));
+    if let Some(dir) = config
+        .database_url
+        .strip_prefix("sqlite://")
+        .and_then(|rest| std::path::Path::new(rest.split('?').next().unwrap_or(rest)).parent())
+        && !dir.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(dir)?;
+    }
+    let store = Store::new(db::connect(&config.database_url).await?);
+    let state = AppState::new(Arc::new(config), store);
     let app = router(state)
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http());

@@ -6,15 +6,20 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
-use padel_score_server::{AppState, Config, router};
+use padel_score_server::{AppState, Config, Store, db, router};
 use tower::ServiceExt;
 
-fn app() -> axum::Router {
-    router(AppState::new(Arc::new(Config::from_map(&HashMap::new()))))
+async fn app() -> axum::Router {
+    let store = Store::new(db::connect("sqlite::memory:").await.unwrap());
+    router(AppState::new(
+        Arc::new(Config::from_map(&HashMap::new())),
+        store,
+    ))
 }
 
 async fn get(path: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
     let res = app()
+        .await
         .oneshot(Request::get(path).body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -89,6 +94,7 @@ async fn missing_asset_is_404_not_index() {
 #[tokio::test]
 async fn non_get_page_is_405() {
     let res = app()
+        .await
         .oneshot(Request::post("/s/abc").body(Body::empty()).unwrap())
         .await
         .unwrap();
