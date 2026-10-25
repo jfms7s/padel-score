@@ -409,6 +409,7 @@ export const strings = {
 		// Claims from a match (the spectator page and the claim sheet).
 		thatsMe: 'That’s me',
 		thatsMeLabel: (name: string) => `That’s me: ${name}`,
+		barMany: 'Is one of these you?',
 		claimSentShort: 'Claim sent',
 		sheet: {
 			title: 'Is this you?',
