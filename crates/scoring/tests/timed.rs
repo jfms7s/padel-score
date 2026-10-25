@@ -201,7 +201,8 @@ fn no_change_ends_after_match_point_timed() {
 
 #[test]
 fn time_up_into_overtime_does_not_change_ends() {
-    // Time-up after an odd game: the snapshot after the game changed ends, the time-up doesn't.
+    // Regression guard: time-up never changes ends itself. Four games (an even number) are played,
+    // so nothing before the time-up changed ends either, and the overtime starts without a change.
     let s = play(&no_draws(), "aaaa bbbb aaaa bbbb t");
     assert!(s.overtime);
     assert!(!s.change_ends);
@@ -267,8 +268,8 @@ fn timed_score_round_trips_through_serde() {
     for e in ev("aaaa bbbb t ab") {
         m.apply(e).unwrap();
     }
-    let json = serde_json::to_string(&m).unwrap();
-    let back: MatchState = serde_json::from_str(&json).unwrap();
-    assert_eq!(back, m);
-    assert_eq!(back.score(), m.score());
+    let score = m.score();
+    let json = serde_json::to_string(&score).unwrap();
+    let back: Score = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, score);
 }

@@ -101,6 +101,8 @@ fn star_point_receiver_chooses_on_third_deuce() {
 fn tiebreak_service_pattern() {
     let at_six_all = games(6, 6);
     let x = play(&bo3(), &at_six_all).server;
+    // 12 games played, so the rotation is back to its first server.
+    assert_eq!(x, p(Team::A, 0));
     let n = next(x);
     let x2 = next(n);
     let expected = [x, n, n, x2, x2];
@@ -141,6 +143,8 @@ fn super_tiebreak_uses_tiebreak_service_pattern() {
     let f = sets(GoldenPoint, BestOf3, SuperTieBreak);
     let to_deciding = format!("{}{}", games(6, 0), games(0, 6));
     let x = play(&f, &to_deciding).server;
+    // 12 games played (6-0 0-6), so the rotation is back to its first server.
+    assert_eq!(x, p(Team::A, 0));
     let n = next(x);
     let x2 = next(n);
     let expected = [x, n, n, x2, x2];

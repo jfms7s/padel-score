@@ -17,6 +17,9 @@ pub use types::*;
 /// Play `events` from the start and return the resulting score.
 ///
 /// Invalid rules or start are reported at index 0; otherwise `index` is the first rejected event.
+///
+/// The server resolves an undo by removing the target event from its log and replaying, so the
+/// engine sees only `Point` and `TimeUp`.
 pub fn replay(format: &Format, start: &Start, events: &[Event]) -> Result<Score, ReplayError> {
     let mut m = MatchState::new(*format, *start).map_err(|e| ReplayError {
         index: 0,

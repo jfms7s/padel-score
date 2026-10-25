@@ -17,12 +17,13 @@ pub struct GameScore {
     pub b: PointCall,
     /// How many times this game has reached 40-40.
     pub deuces: u8,
-    /// True when the next point wins the game.
+    /// True when the game is level at the deuce that the golden point or star point decides,
+    /// so the next point wins it. Always false under the advantage rule.
     pub deciding_point: bool,
 }
 
 /// A regular game. Raw points are tracked per team; calls and deuces are derived.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Game {
     rule: DeuceRule,
     a: u16,

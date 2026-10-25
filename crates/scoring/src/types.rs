@@ -39,6 +39,7 @@ pub const STAR_POINT_DEUCE: u8 = 3;
 #[serde(rename_all = "snake_case")]
 pub enum SetsFormat {
     One,
+    #[serde(rename = "best_of_3")]
     BestOf3,
 }
 
@@ -114,6 +115,8 @@ impl Start {
     }
 }
 
+/// One thing that happened in a match. The engine only ever sees points and time-up: the server
+/// resolves an undo by removing the target event from its log and replaying the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Event {

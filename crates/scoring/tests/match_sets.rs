@@ -230,7 +230,7 @@ fn invalid_rules_are_rejected() {
 }
 
 #[test]
-fn placeholder_serve_fields_until_task_5() {
+fn empty_replay_snapshot() {
     let s = play(&bo3(), "");
     assert_eq!(s.server, start_a().first_server);
     assert_eq!(s.side, ServeSide::Right);

@@ -15,7 +15,7 @@ fn format_round_trips_as_snake_case_json() {
     let json = serde_json::to_string(&f).unwrap();
     assert_eq!(
         json,
-        r#"{"sets":{"deuce":"star_point","sets":"best_of3","deciding":"super_tie_break"}}"#
+        r#"{"sets":{"deuce":"star_point","sets":"best_of_3","deciding":"super_tie_break"}}"#
     );
     assert_eq!(serde_json::from_str::<Format>(&json).unwrap(), f);
 }

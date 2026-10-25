@@ -1,5 +1,4 @@
 use crate::Team;
-use serde::{Deserialize, Serialize};
 
 /// Points needed to win a regular tie-break.
 pub const TIEBREAK_TO: u8 = 7;
@@ -7,7 +6,7 @@ pub const TIEBREAK_TO: u8 = 7;
 pub const SUPER_TIEBREAK_TO: u8 = 10;
 
 /// A tie-break (first to `target`, win by 2). Use `SUPER_TIEBREAK_TO` for a super tie-break.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TieBreak {
     target: u8,
     a: u16,

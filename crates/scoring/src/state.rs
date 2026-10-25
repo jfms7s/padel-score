@@ -69,9 +69,9 @@ pub struct Score {
     /// match with no overtime. Standings count regulation games only (spec §4.3 step 2).
     pub regulation_games: [u16; 2],
     pub current: Current,
-    /// Who serves the next point.
+    /// Who serves the next point. Once `status` is `Finished` it carries no meaning.
     pub server: Player,
-    /// Where the next serve goes from.
+    /// Where the next serve goes from. Once `status` is `Finished` it carries no meaning.
     pub side: ServeSide,
     /// The players change ends now: true only in the snapshot right after the event that caused it,
     /// and never once the match is over.
@@ -82,14 +82,15 @@ pub struct Score {
 }
 
 /// A match in progress. Feed it events with `apply`; read it with `score`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// State is rebuilt with `replay` from the event log, never deserialized.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchState {
     start: Start,
     mode: Mode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Mode {
     Sets(SetsMatch),
     Timed(TimedMatch),
@@ -170,7 +171,7 @@ impl Score {
 
 /// A timed (non-stop) match: games accumulate with no sets and no tie-breaks
 /// until time is up.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct TimedMatch {
     deuce: DeuceRule,
     draws_allowed: bool,
@@ -188,8 +189,7 @@ struct TimedMatch {
 }
 
 /// What is being played in a timed match.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum TimedUnit {
     Game(Game),
     /// The match is over; `winner` is `None` for a draw.
@@ -304,8 +304,7 @@ impl TimedMatch {
 }
 
 /// What is being played in a sets-format match.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Unit {
     Game(Game),
     TieBreak {
@@ -316,7 +315,7 @@ enum Unit {
     Over,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SetsMatch {
     rules: SetRules,
     finished: Vec<SetScore>,
