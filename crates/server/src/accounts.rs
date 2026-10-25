@@ -12,7 +12,8 @@
 //! - `GET /api/auth/me` is the signed-in [`Me`], by cookie or device token.
 //! - `POST /api/auth/password` takes `{current_password, new_password}`, session only. It signs
 //!   the user out everywhere (sessions and device tokens), then signs the caller back in on a
-//!   new session: 204.
+//!   new session: 204. Wrong current passwords are limited like logins, on the email's
+//!   `login_email` budget plus a `user:{id}` key.
 //!
 //! Every response here carries `Referrer-Policy: no-referrer`: they carry or consume secrets.
 
@@ -180,19 +181,25 @@ fn signed_in(state: &AppState, status: StatusCode, raw: &str, body: Option<Me>) 
     }
 }
 
-/// Count one attempt from `key` on each limiter, both counted even if one refuses; a refusal is
-/// 429 with the longer wait.
-fn acquire_all(
+/// Count one attempt on each limiter in order, stopping at the first refusal (429): a later
+/// limiter is never touched once an earlier one refuses, so a refused address opens no email
+/// window. The slots already taken stay counted, as a failure's do.
+fn acquire_in_order(
     attempts: &[(&crate::ratelimit::RateLimiter, &str)],
     t: i64,
 ) -> Result<(), ApiError> {
-    let waits: Vec<u64> = attempts
-        .iter()
-        .filter_map(|(limiter, key)| limiter.try_acquire(key, t).err())
-        .collect();
-    match waits.into_iter().max() {
-        Some(retry_after) => Err(ApiError::TooMany { retry_after }),
-        None => Ok(()),
+    for (limiter, key) in attempts {
+        limiter
+            .try_acquire(key, t)
+            .map_err(|retry_after| ApiError::TooMany { retry_after })?;
+    }
+    Ok(())
+}
+
+/// Give back every slot [`acquire_in_order`] took at `t`, after a success.
+fn refund_all(attempts: &[(&crate::ratelimit::RateLimiter, &str)], t: i64) {
+    for (limiter, key) in attempts {
+        limiter.refund(key, t);
     }
 }
 
@@ -220,7 +227,7 @@ async fn setup(
 ) -> Result<Response, ApiError> {
     let t = now();
     let ip_key = rate_key(ip);
-    acquire_all(&[(&state.limits.login_ip, &ip_key)], t)?;
+    acquire_in_order(&[(&state.limits.login_ip, &ip_key)], t)?;
     if state.store.user_count().await? > 0 {
         return Err(ApiError::Conflict("setup_done"));
     }
@@ -263,7 +270,8 @@ struct LoginBody {
     password: String,
 }
 
-/// The recipe of [`crate::ratelimit`]: reserve both limits, then check; refund on success. The
+/// The recipe of [`crate::ratelimit`]: reserve the address, then (only if it passed) the email;
+/// check; refund on success. The
 /// email limiter is keyed by the SHA-256 of the normalized email, so an oversized email cannot
 /// bloat its memory.
 async fn login(
@@ -277,13 +285,11 @@ async fn login(
     let email = normalize_email(&body.email);
     let email_key = hash_token(&email);
     let limits = &state.limits;
-    acquire_all(
-        &[
-            (&limits.login_ip, &ip_key),
-            (&limits.login_email, &email_key),
-        ],
-        t,
-    )?;
+    let attempts = [
+        (&limits.login_ip, ip_key.as_str()),
+        (&limits.login_email, email_key.as_str()),
+    ];
+    acquire_in_order(&attempts, t)?;
     let permits = &state.password_permits;
     let user = match state.store.user_by_email(&email).await? {
         None => {
@@ -299,8 +305,7 @@ async fn login(
             found.user
         }
     };
-    limits.login_ip.refund(&ip_key, t);
-    limits.login_email.refund(&email_key, t);
+    refund_all(&attempts, t);
     // Session fixation: never keep a presented session; always mint a new one.
     if let Some(old) = session_token(&headers, &state.config) {
         state.store.delete_session(old).await?;
@@ -354,19 +359,27 @@ async fn change_password(
         other => other,
     };
     check_password(&body.new_password).map_err(new_password)?;
+    let user_id = &caller.user.id;
+    // The login recipe on the email's limiter, so the current-password check is no oracle.
+    let t = now();
+    let email_key = hash_token(&normalize_email(&caller.user.email));
+    let user_key = format!("user:{user_id}");
+    let limiter = &state.limits.login_email;
+    let attempts = [(limiter, email_key.as_str()), (limiter, user_key.as_str())];
+    acquire_in_order(&attempts, t)?;
     let permits = &state.password_permits;
     let current = state
         .store
-        .user_by_email(&caller.user.email)
+        .password_hash_by_id(user_id)
         .await?
         .ok_or(ApiError::Unauthorized)?;
-    if !verify_password(permits, &body.current_password, &current.password_hash).await {
+    if !verify_password(permits, &body.current_password, &current).await {
         return Err(ApiError::InvalidCredentials);
     }
+    refund_all(&attempts, t);
     let hash = hash_password(permits, &body.new_password)
         .await
         .map_err(new_password)?;
-    let user_id = &caller.user.id;
     state.store.set_password(user_id, &hash, now()).await?;
     let raw = state.store.create_session(user_id, now()).await?;
     tracing::info!(user_id = %user_id, "password changed");

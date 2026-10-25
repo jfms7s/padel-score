@@ -62,11 +62,12 @@ async fn main() -> Result<(), BoxError> {
     let state = AppState::new(Arc::new(config), store);
     // Logs the one-time setup code while there are no users and SETUP_TOKEN is unset.
     padel_score_server::accounts::init_setup_code(&state).await?;
-    // Hash the dummy now, so the first unknown-email login is not a timing outlier.
-    tokio::spawn({
-        let permits = state.password_permits.clone();
-        async move { padel_score_server::auth::warm_dummy(&permits).await }
-    });
+    // Hash the dummy now, so the first unknown-email login is not a timing outlier. A server
+    // that cannot hash fails closed instead of serving logins.
+    if let Err(error) = padel_score_server::auth::warm_dummy(&state.password_permits).await {
+        tracing::error!(%error, "cannot start");
+        std::process::exit(1);
+    }
     let streams = state.shutdown.clone();
     tokio::spawn(padel_score_server::retention::run(state.clone()));
     tokio::spawn(padel_score_server::ratelimit::run_sweeper(

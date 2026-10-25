@@ -775,3 +775,19 @@ async fn using_one_reset_invalidates_others() {
         Err(StoreError::NotFound)
     ));
 }
+
+#[tokio::test]
+async fn password_hash_by_id_reads_the_current_hash() {
+    let (s, _) = setup().await;
+    let (_, user) = admin_and_user(&s).await;
+    assert_eq!(
+        s.password_hash_by_id(&user).await.unwrap().as_deref(),
+        Some("$argon2id$fake")
+    );
+    s.set_password(&user, "$argon2id$new", NOW).await.unwrap();
+    assert_eq!(
+        s.password_hash_by_id(&user).await.unwrap().as_deref(),
+        Some("$argon2id$new")
+    );
+    assert_eq!(s.password_hash_by_id("nobody").await.unwrap(), None);
+}

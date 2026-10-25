@@ -76,31 +76,43 @@ pub async fn verify_password(permits: &Arc<Semaphore>, pw: &str, phc: &str) -> b
 }
 
 /// Verify `pw` against a dummy hash, for a login whose email is unknown, so it takes as long as
-/// a real verify. The dummy is the hash of a random password, made once at first use.
+/// a real verify. The dummy is the hash of a random password, made by [`warm_dummy`] at
+/// startup (or here, at first use).
 pub async fn verify_dummy(permits: &Arc<Semaphore>, pw: &str) {
     let pw = pw.to_owned();
     // The outcome is meaningless (it never matches); only the time spent counts.
-    let _ = blocking(permits, move || verify_blocking(&pw, dummy_phc())).await;
+    let _ = blocking(permits, move || match dummy_phc() {
+        Ok(phc) => verify_blocking(&pw, phc),
+        Err(e) => {
+            tracing::error!(error = %e, "cannot make the dummy password hash");
+            false
+        }
+    })
+    .await;
 }
 
 /// Make the dummy hash now, at startup, so the first unknown-email login does not also pay for
-/// hashing it and stand out by its timing.
-pub async fn warm_dummy(permits: &Arc<Semaphore>) {
-    if blocking(permits, || dummy_phc().len()).await.is_err() {
-        tracing::error!("cannot warm the dummy password hash");
+/// hashing it and stand out by its timing. An error means the server cannot hash at all; the
+/// caller fails closed and stops.
+pub async fn warm_dummy(permits: &Arc<Semaphore>) -> Result<(), String> {
+    match blocking(permits, || dummy_phc().map(|_| ())).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(format!("cannot make the dummy password hash: {e}")),
+        Err(_) => Err("cannot make the dummy password hash".to_owned()),
     }
 }
 
 static DUMMY_PHC: OnceLock<String> = OnceLock::new();
 
-/// Called on the blocking pool: the first call hashes.
-fn dummy_phc() -> &'static str {
-    DUMMY_PHC.get_or_init(|| {
-        hash_blocking(&new_token()).unwrap_or_else(|e| {
-            tracing::error!(error = %e, "cannot make the dummy password hash");
-            String::new()
-        })
-    })
+/// Called on the blocking pool: the first successful call hashes and keeps the result; a failed
+/// hash is never kept, so there is never an empty dummy.
+fn dummy_phc() -> Result<&'static str, argon2::password_hash::Error> {
+    if let Some(phc) = DUMMY_PHC.get() {
+        return Ok(phc);
+    }
+    let phc = hash_blocking(&new_token())?;
+    // A racing first call may have set it already; either hash is as good.
+    Ok(DUMMY_PHC.get_or_init(|| phc))
 }
 
 fn hash_blocking(pw: &str) -> Result<String, argon2::password_hash::Error> {
@@ -388,7 +400,7 @@ mod tests {
 
     #[tokio::test]
     async fn warm_dummy_makes_the_dummy() {
-        warm_dummy(&permits()).await;
+        warm_dummy(&permits()).await.unwrap();
         assert!(DUMMY_PHC.get().unwrap().starts_with("$argon2id$"));
     }
 

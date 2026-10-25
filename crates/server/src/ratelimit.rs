@@ -21,10 +21,17 @@
 //! Checking first and counting a failure afterwards races: N concurrent wrong passwords all pass
 //! the check before any failure is counted. So a login reserves first and refunds on success:
 //!
-//! 1. `let t = now();` then `try_acquire(&rate_key(ip), t)` on `login_ip` and
-//!    `try_acquire(&email, t)` on `login_email`, both up front, both counted even if one refuses;
-//!    any refusal is `ApiError::TooMany` with the longer wait, before any argon2 work.
-//! 2. On a successful login, `refund` both with the same `t`. A failure keeps its slot.
+//! 1. `let t = now();` then `try_acquire(&rate_key(ip), t)` on `login_ip` FIRST. Only if the
+//!    address passes, `try_acquire(&hash_token(&email), t)` on `login_email`. A refused address
+//!    never opens or counts an email window, so a flood from one address cannot evict other
+//!    emails' windows or burn their allowance. Any refusal is `ApiError::TooMany`, before any
+//!    argon2 work.
+//! 2. On a successful login, `refund` every limiter that was acquired, with the same `t`. A
+//!    failure keeps its slots.
+//!
+//! A password change by a signed-in user follows the same recipe on `login_email` alone, with
+//! the user's email key and then a `user:{id}` key, so the current-password check is not an
+//! unlimited oracle and shares the email's budget with login.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -180,7 +187,8 @@ impl RateLimiter {
 pub struct Limits {
     /// Login failures per client address (reserve, then refund on success) ([`crate::client_ip::rate_key`]): 10 a minute.
     pub login_ip: RateLimiter,
-    /// Login failures per normalized email (reserve, then refund on success), from any address: 5 a minute.
+    /// Login and password-change failures per email (its SHA-256) and per `user:{id}` (reserve,
+    /// then refund on success), from any address: 5 a minute.
     pub login_email: RateLimiter,
     /// `POST /api/device/start` per client address: 10 a minute.
     pub device_start: RateLimiter,

@@ -498,6 +498,17 @@ impl Store {
         Ok(row.as_ref().map(user_from_row).transpose()?)
     }
 
+    /// The user's password hash, for a password check by a signed-in user; `None` for an unknown
+    /// id.
+    pub async fn password_hash_by_id(&self, id: &str) -> Result<Option<String>, StoreError> {
+        Ok(
+            sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
+                .bind(id)
+                .fetch_optional(self.pool())
+                .await?,
+        )
+    }
+
     /// Disable the user as of `at` (`Some`), or enable them (`None`). Disabling deletes their
     /// sessions and revokes their device tokens; enabling brings neither back. The last enabled
     /// admin cannot be disabled (`Conflict("last_admin")`). Disabling twice keeps the first time.

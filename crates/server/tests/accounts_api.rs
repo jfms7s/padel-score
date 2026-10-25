@@ -749,3 +749,53 @@ async fn anonymous_quick_match_still_works_after_setup() {
     // Phase 2 responses are untouched by the auth headers.
     assert!(!res.headers.contains_key(header::REFERRER_POLICY));
 }
+
+#[tokio::test]
+async fn change_password_wrong_current_is_rate_limited() {
+    let (state, app, raw) = with_admin().await;
+    let c = cookie(&state, &raw);
+    for i in 0..5 {
+        let res =
+            change_password(&app, &[("cookie", &c)], "wrong password", "new password 1").await;
+        assert_eq!(res.status, StatusCode::UNAUTHORIZED, "attempt {i}");
+    }
+    let res = change_password(&app, &[("cookie", &c)], "wrong password", "new password 1").await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(res.headers.contains_key(header::RETRY_AFTER));
+    // Refused before the check: even the right password is held off now, and nothing changed.
+    let res = change_password(&app, &[("cookie", &c)], PASSWORD, "new password 1").await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(me(&app, &[("cookie", &c)]).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn successful_password_change_refunds_limits() {
+    let (state, app, raw) = with_admin().await;
+    let mut c = cookie(&state, &raw);
+    for _ in 0..4 {
+        change_password(&app, &[("cookie", &c)], "wrong password", "new password 1").await;
+    }
+    // Two successes in a row (swapping passwords) both pass: each refunds its slot.
+    for (current, new) in [(PASSWORD, "new password 1"), ("new password 1", PASSWORD)] {
+        let res = change_password(&app, &[("cookie", &c)], current, new).await;
+        assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.body);
+        c = cookie(&state, &res.session(&state).unwrap());
+    }
+}
+
+#[tokio::test]
+async fn ip_refusal_does_not_create_email_windows() {
+    let (state, _, _) = with_admin().await;
+    let app = app_from(&state, 77);
+    for i in 0..10 {
+        let res = login(&app, &format!("n{i}@x.test"), "wrong password").await;
+        assert_eq!(res.status, StatusCode::UNAUTHORIZED, "attempt {i}");
+    }
+    let before = state.limits.login_email.len();
+    assert_eq!(before, 10);
+    for i in 0..5 {
+        let res = login(&app, &format!("fresh{i}@x.test"), "wrong password").await;
+        assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    }
+    assert_eq!(state.limits.login_email.len(), before);
+}
