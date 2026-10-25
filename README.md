@@ -83,7 +83,7 @@ The APK is `watch/app/build/outputs/apk/debug/app-debug.apk`. The server URL it 
 ./gradlew :app:assembleDebug -PpadelServerUrl=http://10.0.2.2:8080
 ```
 
-**CI.** The `Watch` workflow (`.github/workflows/watch.yml`) runs the tests and lint, and uploads the APK as the `padel-score-watch-debug-<sha>` artifact. Builds on pushes to `main` and on tags are signed with the owner's key; pull request builds use a throwaway debug key, so a PR build cannot update an install made from `main`.
+**CI.** The `Watch` workflow (`.github/workflows/watch.yml`) runs the tests and lint, and uploads the APK as the `padel-score-watch-debug-<sha>` artifact. It runs on pushes to `main` and on pull requests only when `watch/`, the web fixtures it tests against or the workflow itself change; every `v*` tag builds. Once the signing secrets below are set, builds on pushes to `main` and on tags are signed with the owner's key; until then, and on pull requests, they use a throwaway debug key, so a PR build cannot update an install made from `main`.
 
 **Signing setup, once.** Make a keystore and add four repository secrets:
 
@@ -95,7 +95,7 @@ keytool -genkeypair -v -keystore padel-watch.jks -alias padel-watch -keyalg RSA 
 base64 -w0 padel-watch.jks
 ```
 
-Secrets: `WATCH_KEYSTORE_B64` (the output above), `WATCH_KEYSTORE_PASSWORD`, `WATCH_KEY_ALIAS` (`padel-watch`) and `WATCH_KEY_PASSWORD`. Keep `padel-watch.jks` somewhere safe and never commit it. Losing it means one reinstall of the app and a new sign-in, nothing worse.
+Secrets: `WATCH_KEYSTORE_B64` (the output above), `WATCH_KEYSTORE_PASSWORD`, `WATCH_KEY_ALIAS` (`padel-watch`) and `WATCH_KEY_PASSWORD`. `keytool` makes a PKCS12 keystore, which has no separate key password, so `WATCH_KEY_PASSWORD` must be the same as `WATCH_KEYSTORE_PASSWORD`, or the signed build fails. Keep `padel-watch.jks` somewhere safe and never commit it. Losing it means one reinstall of the app and a new sign-in, nothing worse.
 
 **Sideload.** On the watch, turn on Developer options, then Wi-Fi debugging. Then from a computer on the same network:
 
