@@ -28,6 +28,9 @@
 	let fresh = $state<CreatedInvite | null>(null);
 	let inviteFailure = $state<string | null>(null);
 	let deviceFailure = $state<string | null>(null);
+	/** Whether each list has loaded: the empty state is for a list that did, never for an error. */
+	let invitesLoaded = $state(false);
+	let devicesLoaded = $state(false);
 
 	let current = $state('');
 	let next = $state('');
@@ -49,9 +52,15 @@
 		if (s.status !== 'signed_in') return;
 		// Each section loads on its own, so one failing leaves the rest usable.
 		const [inv, dev] = await Promise.allSettled([listInvites(), listDevices()]);
-		if (inv.status === 'fulfilled') invites = inv.value;
+		if (inv.status === 'fulfilled') {
+			invites = inv.value;
+			invitesLoaded = true;
+		}
 		else inviteFailure = authMessage(inv.reason);
-		if (dev.status === 'fulfilled') devices = dev.value;
+		if (dev.status === 'fulfilled') {
+			devices = dev.value;
+			devicesLoaded = true;
+		}
 		else deviceFailure = authMessage(dev.reason);
 		ready = true;
 	}
@@ -73,7 +82,13 @@
 			pwBusy = false;
 		}
 		// The change signed every watch out.
-		if (pwDone) void listDevices().then((list) => (devices = list), () => {});
+		if (pwDone) void listDevices().then(
+				(list) => {
+					devices = list;
+					devicesLoaded = true;
+				},
+				() => {}
+			);
 	}
 
 	async function act(run: () => Promise<void>, onFail: (m: string) => void) {
@@ -94,6 +109,7 @@
 				inviteFailure = null;
 				fresh = await createInvite();
 				invites = await listInvites();
+				invitesLoaded = true;
 			},
 			(m) => (inviteFailure = m)
 		);
@@ -105,6 +121,7 @@
 				await revokeInvite(id);
 				if (fresh?.id === id) fresh = null;
 				invites = await listInvites();
+				invitesLoaded = true;
 			},
 			(m) => (inviteFailure = m)
 		);
@@ -115,6 +132,7 @@
 				deviceFailure = null;
 				await revokeDevice(id);
 				devices = await listDevices();
+				devicesLoaded = true;
 			},
 			(m) => (deviceFailure = m)
 		);
@@ -150,7 +168,9 @@
 			<LinkCode url={origin + fresh.url} title={a.newInvite} hint={a.newInviteHint} />
 		{/if}
 		{#if inviteFailure}<p class="error" role="alert">{inviteFailure}</p>{/if}
-		{#if invites.length === 0}
+		{#if !invitesLoaded}
+			<!-- The error above says why. -->
+		{:else if invites.length === 0}
 			<p class="hint">{a.noInvites}</p>
 		{:else}
 			<ul class="list" aria-label={a.invites}>
@@ -179,7 +199,9 @@
 		<h2>{a.devices}</h2>
 		<p class="hint">{a.devicesHint}</p>
 		{#if deviceFailure}<p class="error" role="alert">{deviceFailure}</p>{/if}
-		{#if devices.length === 0}
+		{#if !devicesLoaded}
+			<!-- The error above says why. -->
+		{:else if devices.length === 0}
 			<p class="hint">{a.noDevices}</p>
 		{:else}
 			<ul class="list" aria-label={a.devices}>

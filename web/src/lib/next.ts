@@ -16,6 +16,8 @@ export function safeNext(raw: string | null | undefined): string {
 	if (typeof raw !== 'string' || raw.length > MAX_NEXT) return HOME;
 	if (!raw.startsWith('/') || raw.startsWith('//')) return HOME;
 	if (/[\s\\\u0000-\u001f\u007f]/.test(raw)) return HOME;
+	// Dot segments (plain or percent-encoded) resolve away, and `/.//evil` resolves to `//evil`.
+	if (/%2e/i.test(raw) || hasDotSegment(raw)) return HOME;
 	let url: URL;
 	try {
 		url = new URL(raw, BASE);
@@ -23,8 +25,15 @@ export function safeNext(raw: string | null | undefined): string {
 		return HOME;
 	}
 	if (url.origin !== BASE) return HOME;
+	if (url.pathname.startsWith('//') || url.pathname.startsWith('/\\')) return HOME;
 	if (url.pathname === '/login') return HOME;
 	return url.pathname + url.search;
+}
+
+/** Whether the path part has a `.` or `..` segment. */
+function hasDotSegment(raw: string): boolean {
+	const path = raw.split(/[?#]/, 1)[0] ?? '';
+	return path.split('/').some((seg) => seg === '.' || seg === '..');
 }
 
 /** The sign-in page, coming back to `next` (when it is worth keeping) afterwards. */

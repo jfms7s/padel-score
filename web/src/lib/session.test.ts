@@ -52,6 +52,40 @@ describe('session', () => {
 		await expect(bootSession()).resolves.toEqual({ status: 'unavailable' });
 	});
 
+	it('a 5xx from /api/auth/me is unavailable, not signed out', async () => {
+		serve(500, { error: 'internal' });
+		await expect(bootSession()).resolves.toEqual({ status: 'unavailable' });
+		serve(502, '<html>bad gateway</html>');
+		await expect(bootSession()).resolves.toEqual({ status: 'unavailable' });
+	});
+
+	it('does not keep unavailable: the next call asks again', async () => {
+		serve(503, {});
+		await bootSession();
+		const fetch = serve(200, me);
+		await expect(bootSession()).resolves.toEqual({ status: 'signed_in', me });
+		expect(fetch).toHaveBeenCalledTimes(1);
+		// Once known, it is kept.
+		await bootSession();
+		expect(fetch).toHaveBeenCalledTimes(1);
+	});
+
+	it('asks again when the browser comes back online', async () => {
+		const target = new EventTarget();
+		vi.stubGlobal('addEventListener', target.addEventListener.bind(target));
+		vi.stubGlobal('removeEventListener', target.removeEventListener.bind(target));
+		serve(503, {});
+		await bootSession();
+		const fetch = serve(200, me);
+		target.dispatchEvent(new Event('online'));
+		await vi.waitFor(() => expect(get(session)).toEqual({ status: 'signed_in', me }));
+		expect(fetch).toHaveBeenCalledTimes(1);
+		// Only once: a later online event asks nothing.
+		target.dispatchEvent(new Event('online'));
+		await Promise.resolve();
+		expect(fetch).toHaveBeenCalledTimes(1);
+	});
+
 	it('treats an answer of the wrong shape as signed out', async () => {
 		serve(200, { id: 1 });
 		await expect(bootSession()).resolves.toEqual({ status: 'signed_out' });

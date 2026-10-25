@@ -52,8 +52,10 @@ import resetLink from './fixtures/reset-link-created.json';
 import myMatches from './fixtures/my-matches.json';
 import setupNeeded from './fixtures/setup-status-needed.json';
 import setupDone from './fixtures/setup-status-done.json';
-import deviceLookup from './fixtures/contract-device-lookup.json';
-import devicesList from './fixtures/contract-devices-list.json';
+import deviceLookup from './fixtures/device-lookup.json';
+import devicesList from './fixtures/devices-list.json';
+import deviceUsed from './fixtures/device-409-used.json';
+import deviceNotFound from './fixtures/device-404-not-found.json';
 import unauthorized from './fixtures/auth-401-unauthorized.json';
 import invalidCredentials from './fixtures/login-401-invalid-credentials.json';
 import forbidden from './fixtures/admin-403-forbidden.json';
@@ -108,6 +110,13 @@ describe('the auth client', () => {
 			status: 409,
 			code: 'setup_done'
 		});
+
+		serve(409, deviceUsed);
+		const used = await fail(approveDevice('ABCD-EFGH'));
+		expect(used).toMatchObject({ status: 409, code: 'device_code_used' });
+		expect(authMessage(used)).toBe(strings.auth.errors.device_code_used);
+		serve(404, deviceNotFound);
+		expect(await fail(lookupDevice('ZZZZ-ZZZZ'))).toMatchObject({ status: 404, code: 'not_found' });
 
 		serve(410, inviteInvalid);
 		const gone = await fail(lookupInvite('code'));
@@ -322,6 +331,8 @@ describe('account guards against the recorded answers', () => {
 	it('Device', () => {
 		expect(isDeviceLookup(deviceLookup, STRICT)).toBe(true);
 		for (const d of devicesList) expect(isDevice(d, STRICT)).toBe(true);
+		expect(devicesList.some((d) => 'last_used_at' in d)).toBe(true);
+		expect(devicesList.some((d) => !('last_used_at' in d))).toBe(true);
 		expect(isDevice({ ...devicesList[0], last_used_at: 'soon' })).toBe(false);
 		expect(isDevice({ ...devicesList[0], last_used_at: null })).toBe(true);
 	});

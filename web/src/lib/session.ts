@@ -27,13 +27,40 @@ export const session: Readable<Session> = { subscribe: store.subscribe };
 
 let booting: Promise<Session> | null = null;
 
-/** Load the session once; later calls share the first answer. */
+/** The server didn't answer the question (offline, restarting, failing): ask again later. */
+const unanswered = (e: unknown) => !(e instanceof ApiError) || e.code === 'network' || e.status >= 500;
+
+let retryArmed = false;
+
+/** Ask again the next time the browser comes back online. */
+function retryWhenOnline(): void {
+	if (retryArmed || typeof globalThis.addEventListener !== 'function') return;
+	retryArmed = true;
+	const again = () => {
+		globalThis.removeEventListener('online', again);
+		retryArmed = false;
+		if (booting === null) void bootSession();
+	};
+	globalThis.addEventListener('online', again);
+}
+
+/**
+ * Load the session once; later calls share the answer. `unavailable` is not kept: the next call,
+ * or the browser coming back online, asks again.
+ */
 export function bootSession(): Promise<Session> {
-	booting ??= getMe().then(
+	if (booting) return booting;
+	const attempt: Promise<Session> = getMe().then(
 		(me) => update({ status: 'signed_in', me }),
-		(e: unknown) => update(e instanceof ApiError && e.code === 'network' ? { status: 'unavailable' } : { status: 'signed_out' })
+		(e: unknown) => {
+			if (!unanswered(e)) return update({ status: 'signed_out' });
+			if (booting === attempt) booting = null;
+			retryWhenOnline();
+			return update({ status: 'unavailable' });
+		}
 	);
-	return booting;
+	booting = attempt;
+	return attempt;
 }
 
 /** After setup, sign-in or accepting an invite. */
@@ -65,5 +92,6 @@ export async function requireSignedIn(): Promise<Session> {
 /** Forget everything (tests). */
 export function resetSession(): void {
 	booting = null;
+	retryArmed = false;
 	update(LOADING);
 }

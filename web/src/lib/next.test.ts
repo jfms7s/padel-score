@@ -12,6 +12,13 @@ describe('the next path guard', () => {
 			'\\\\evil.example',
 			'/\t/evil.example',
 			'/\n/evil.example',
+			// Dot segments that resolve to a protocol-relative path.
+			'/.//evil.example',
+			'/%2e%2e//evil.example/x',
+			'/a/..//evil',
+			'/%2E/evil',
+			'/a/./b',
+			'/..',
 			' /account',
 			'account',
 			'',
