@@ -27,20 +27,33 @@ pub struct Game {
     rule: DeuceRule,
     a: u16,
     b: u16,
+    won_by: Option<Team>,
 }
 
 impl Game {
     pub fn new(rule: DeuceRule) -> Game {
-        Game { rule, a: 0, b: 0 }
+        Game {
+            rule,
+            a: 0,
+            b: 0,
+            won_by: None,
+        }
     }
 
     /// Award a point; returns the winner if this point ends the game.
+    ///
+    /// The result is latched: once a winner has been returned, later calls return
+    /// that same winner and change nothing (the score and `points_played` stay fixed).
     pub fn point(&mut self, team: Team) -> Option<Team> {
+        if self.won_by.is_some() {
+            return self.won_by;
+        }
         match team {
             Team::A => self.a = self.a.saturating_add(1),
             Team::B => self.b = self.b.saturating_add(1),
         }
-        self.winner()
+        self.won_by = self.winner();
+        self.won_by
     }
 
     pub fn points_played(&self) -> u16 {
@@ -73,7 +86,7 @@ impl Game {
     /// For a level game at deuce: would the next point win outright?
     fn next_point_wins(&self) -> bool {
         self.sudden_death_total()
-            .is_some_and(|total| self.a + 1 >= total)
+            .is_some_and(|total| self.a >= total.saturating_sub(1))
     }
 
     fn winner(&self) -> Option<Team> {
