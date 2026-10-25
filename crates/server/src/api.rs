@@ -84,6 +84,9 @@ pub enum ApiError {
     },
     /// 409, with the snake_case code from [`StoreError::Conflict`].
     Conflict(&'static str),
+    /// 410, with a snake_case code: a secret code (an invite, a reset link) that cannot be used.
+    /// One answer for every reason, so a code's state cannot be probed.
+    Gone(&'static str),
     /// 422: the named request field fails its policy.
     Validation {
         field: &'static str,
@@ -145,6 +148,7 @@ impl IntoResponse for ApiError {
                     .into_response();
             }
             ApiError::Conflict(code) => (StatusCode::CONFLICT, json!({ "error": code })),
+            ApiError::Gone(code) => (StatusCode::GONE, json!({ "error": code })),
             ApiError::Validation { field } => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 json!({ "error": "validation", "field": field }),

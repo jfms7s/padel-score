@@ -2,9 +2,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use padel_score_server::{AppState, Config, Store, db, router};
+use padel_score_server::{AppState, Config, Store, db, router, trace_layer};
 use tower_http::compression::CompressionLayer;
-use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -76,7 +75,7 @@ async fn main() -> Result<(), BoxError> {
     ));
     let app = router(state)
         .layer(CompressionLayer::new())
-        .layer(TraceLayer::new_for_http());
+        .layer(trace_layer());
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!(%addr, "listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;

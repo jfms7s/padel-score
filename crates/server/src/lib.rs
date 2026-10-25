@@ -16,13 +16,15 @@ pub mod web;
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{DefaultBodyLimit, MatchedPath, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 use serde_json::json;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
+use tower_http::classify::{ServerErrorsAsFailures, SharedClassifier};
+use tower_http::trace::{MakeSpan, TraceLayer};
 
 pub use config::Config;
 pub use hub::Hub;
@@ -82,4 +84,36 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn api_not_found() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" })))
+}
+
+/// The request trace layer `main.rs` serves with: tower-http's HTTP defaults, except that each
+/// request's span names its matched route template (`/api/invites/{key}`), never the URI. Paths
+/// can carry secrets (invite codes, phase 2 scorer tokens) and a query string anything, so
+/// neither may reach a log. A request no route matched (the static web files) logs its path,
+/// without the query.
+///
+/// Add it with [`Router::layer`] on the router from [`router`]: only there do requests already
+/// carry their [`MatchedPath`].
+pub fn trace_layer() -> TraceLayer<SharedClassifier<ServerErrorsAsFailures>, RouteSpan> {
+    TraceLayer::new_for_http().make_span_with(RouteSpan)
+}
+
+/// The [`MakeSpan`] of [`trace_layer`]: a `request` span at debug level with the method, the
+/// matched route and the HTTP version.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RouteSpan;
+
+impl<B> MakeSpan<B> for RouteSpan {
+    fn make_span(&mut self, request: &axum::http::Request<B>) -> tracing::Span {
+        let route = request
+            .extensions()
+            .get::<MatchedPath>()
+            .map_or_else(|| request.uri().path(), MatchedPath::as_str);
+        tracing::debug_span!(
+            "request",
+            method = %request.method(),
+            route,
+            version = ?request.version(),
+        )
+    }
 }

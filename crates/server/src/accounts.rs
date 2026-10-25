@@ -15,12 +15,33 @@
 //!   new session: 204. Wrong current passwords are limited like logins, on the email's
 //!   `login_email` budget plus a `user:{id}` key.
 //!
-//! Every response here carries `Referrer-Policy: no-referrer`: they carry or consume secrets.
+//! Invites (Task 5). Codes travel only in URL fragments (`/invite#<code>`), which browsers never
+//! send; the PWA reads the fragment and puts the code in the API path itself.
+//!
+//! - `POST /api/invites` (session only) is 201 `{id, url: "/invite#<code>", expires_at}`; past
+//!   [`crate::accounts_store::MAX_ACTIVE_INVITES`] active ones it is 409 `too_many_invites`.
+//! - `GET /api/invites` (session only) lists the caller's invites,
+//!   `[{id, created_at, expires_at, status, used_by_name?}]`, never their codes.
+//! - `DELETE /api/invites/{id}` (session only) revokes one of the caller's own: 204. Anyone
+//!   else's is 404, like an unknown one; a used one is 409 `invite_used`.
+//! - `GET /api/invites/{code}` (public) is `{invited_by_name, expires_at}`. Unknown, used,
+//!   expired, revoked and disabled-creator invites are all the same 410 `invite_invalid`.
+//! - `POST /api/invites/{code}/accept` (public) takes `{email, display_name, password}`, checked
+//!   as setup checks them (422 naming the field), and creates the user signed in: 201 [`Me`]
+//!   with the session cookie. An unusable invite is 410 `invite_invalid`, a taken email 409
+//!   `email_taken`.
+//!
+//! The public code routes (invite lookup and accept) share the `invite_lookup` limiter by
+//! client address: every call counts, success or not, so a code cannot be guessed at speed.
+//!
+//! Every response here carries `Referrer-Policy: no-referrer` and `Cache-Control: no-store`:
+//! they carry or consume secrets. Request logs name the matched route, never the path (see
+//! [`crate::trace_layer`]), so a code in a path never reaches a log.
 
 use std::sync::PoisonError;
 
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
@@ -28,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::AppState;
-use crate::accounts_store::{NewUser, User, normalize_email};
+use crate::accounts_store::{InviteStatus, NewUser, User, normalize_email};
 use crate::api::{ApiError, ApiJson, now};
 use crate::auth::{
     CurrentUser, SessionUser, check_csrf, check_password, clear_session_cookie, hash_password,
@@ -52,14 +73,23 @@ pub fn routes() -> Router<AppState> {
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/me", get(me))
         .route("/api/auth/password", post(change_password))
-        .layer(axum::middleware::map_response(no_referrer))
+        .route("/api/invites", get(list_invites).post(create_invite))
+        .route(
+            "/api/invites/{key}",
+            get(lookup_invite).delete(revoke_invite),
+        )
+        .route("/api/invites/{key}/accept", post(accept_invite))
+        .layer(axum::middleware::map_response(secret_headers))
 }
 
-async fn no_referrer(mut res: Response) -> Response {
-    res.headers_mut().insert(
+/// `Referrer-Policy: no-referrer` and `Cache-Control: no-store` on every response.
+async fn secret_headers(mut res: Response) -> Response {
+    let headers = res.headers_mut();
+    headers.insert(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     res
 }
 
@@ -384,6 +414,166 @@ async fn change_password(
     let raw = state.store.create_session(user_id, now()).await?;
     tracing::info!(user_id = %user_id, "password changed");
     Ok(signed_in(&state, StatusCode::NO_CONTENT, &raw, None))
+}
+
+// Invites.
+
+/// Where the PWA's invite page lives; the code follows in the fragment.
+const INVITE_PAGE: &str = "/invite";
+
+/// `{page}#{code}`: the only form a code leaves the server in.
+fn fragment_url(page: &str, code: &str) -> String {
+    format!("{page}#{code}")
+}
+
+/// Count one call of a public code route against the address's `invite_lookup` budget.
+fn limit_code_route(state: &AppState, ip: std::net::IpAddr) -> Result<(), ApiError> {
+    let key = rate_key(ip);
+    acquire_in_order(&[(&state.limits.invite_lookup, &key)], now())
+}
+
+#[derive(Serialize)]
+struct CreatedInviteBody {
+    id: String,
+    url: String,
+    expires_at: i64,
+}
+
+async fn create_invite(
+    State(state): State<AppState>,
+    SessionUser(caller): SessionUser,
+) -> Result<Response, ApiError> {
+    let invite = state.store.create_invite(&caller.user.id, now()).await?;
+    tracing::info!(user_id = %caller.user.id, invite_id = %invite.id, "invite created");
+    let body = CreatedInviteBody {
+        url: fragment_url(INVITE_PAGE, &invite.code),
+        id: invite.id,
+        expires_at: invite.expires_at,
+    };
+    Ok((StatusCode::CREATED, Json(body)).into_response())
+}
+
+#[derive(Serialize)]
+struct InviteListItem {
+    id: String,
+    created_at: i64,
+    expires_at: i64,
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    used_by_name: Option<String>,
+}
+
+fn status_name(status: InviteStatus) -> &'static str {
+    match status {
+        InviteStatus::Valid => "active",
+        InviteStatus::Used => "used",
+        InviteStatus::Expired => "expired",
+        InviteStatus::Revoked => "revoked",
+    }
+}
+
+async fn list_invites(
+    State(state): State<AppState>,
+    SessionUser(caller): SessionUser,
+) -> Result<Json<Vec<InviteListItem>>, ApiError> {
+    let t = now();
+    let invites = state.store.list_invites(&caller.user.id).await?;
+    Ok(Json(
+        invites
+            .into_iter()
+            .map(|i| InviteListItem {
+                status: status_name(i.status(t)),
+                id: i.id,
+                created_at: i.created_at,
+                expires_at: i.expires_at,
+                used_by_name: i.used_by_name,
+            })
+            .collect(),
+    ))
+}
+
+async fn revoke_invite(
+    State(state): State<AppState>,
+    SessionUser(caller): SessionUser,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .store
+        .revoke_invite(&caller.user.id, &id, now())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+const INVITE_INVALID: ApiError = ApiError::Gone("invite_invalid");
+
+async fn lookup_invite(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Path(code): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    limit_code_route(&state, ip)?;
+    match state.store.invite_by_code(&code, now()).await? {
+        Some(info) if info.status == InviteStatus::Valid => Ok(Json(json!({
+            "invited_by_name": info.created_by_name,
+            "expires_at": info.expires_at,
+        }))),
+        _ => Err(INVITE_INVALID),
+    }
+}
+
+#[derive(Deserialize)]
+struct AcceptBody {
+    email: String,
+    display_name: String,
+    password: String,
+}
+
+/// Validate, check the invite (so a dead code costs no argon2 work), hash outside the
+/// transaction, then create the user and use the invite in one transaction, which checks the
+/// invite again.
+async fn accept_invite(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Path(code): Path<String>,
+    headers: HeaderMap,
+    ApiJson(body): ApiJson<AcceptBody>,
+) -> Result<Response, ApiError> {
+    limit_code_route(&state, ip)?;
+    let valid = validate_user(&body.email, &body.display_name, &body.password)?;
+    let usable = state
+        .store
+        .invite_by_code(&code, now())
+        .await?
+        .is_some_and(|info| info.status == InviteStatus::Valid);
+    if !usable {
+        return Err(INVITE_INVALID);
+    }
+    let password_hash = hash_password(&state.password_permits, &body.password).await?;
+    let new = NewUser {
+        email: valid.email,
+        display_name: valid.display_name,
+        password_hash,
+    };
+    let user = match state.store.accept_invite(&code, new, now()).await {
+        Ok(user) => user,
+        Err(StoreError::Conflict("email_taken")) => {
+            return Err(ApiError::Conflict("email_taken"));
+        }
+        Err(StoreError::NotFound | StoreError::Conflict(_)) => return Err(INVITE_INVALID),
+        Err(e) => return Err(e.into()),
+    };
+    tracing::info!(user_id = %user.id, invited_by = ?user.invited_by, "invite accepted");
+    // As at login: a session this browser presented (someone else's) ends; the new one replaces it.
+    if let Some(old) = session_token(&headers, &state.config) {
+        state.store.delete_session(old).await?;
+    }
+    let raw = state.store.create_session(&user.id, now()).await?;
+    Ok(signed_in(
+        &state,
+        StatusCode::CREATED,
+        &raw,
+        Some(Me::from(&user)),
+    ))
 }
 
 #[cfg(test)]
