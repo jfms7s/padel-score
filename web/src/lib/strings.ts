@@ -57,6 +57,82 @@ export const strings = {
 		tryAgain: 'Try again'
 	},
 
+	// The change of ends cue.
+	changeEnds: {
+		short: 'Change ends',
+		leadInSet: (name: string, hi: number, lo: number, set: number) =>
+			`Change ends. ${name} lead ${hi}–${lo} in set ${set}.`,
+		levelInSet: (a: number, b: number, set: number) => `Change ends. ${a}–${b} in set ${set}.`,
+		tookSet: (name: string, set: number, hi: number, lo: number) =>
+			`Change ends. ${name} took set ${set} ${hi}–${lo}.`,
+		tieBreakLead: (name: string, hi: number, lo: number) =>
+			`Change ends. ${name} lead ${hi}–${lo} in the tie-break.`,
+		tieBreakLevel: (a: number, b: number) => `Change ends. ${a}–${b} in the tie-break.`,
+		lead: (name: string, hi: number, lo: number) => `Change ends. ${name} lead ${hi}–${lo}.`,
+		level: (a: number, b: number) => `Change ends. ${a}–${b}.`
+	},
+
+	// The fence screen.
+	fence: {
+		pointTo: (team: string) => `Point to ${team}`,
+		pointShort: (player: string) => `Point ${player}`,
+		undo: 'Undo',
+		undoLabel: 'Undo last point',
+		undoHint: 'Press and hold to undo',
+		synced: 'Synced',
+		offline: 'Offline, will sync',
+		connecting: 'Connecting',
+		sending: 'Sending',
+		games: 'Games',
+		sets: 'Sets',
+		set: (n: number) => `Set ${n}`,
+		superTieBreakShort: 'STB',
+		serving: 'Serving',
+		servingFrom: {
+			right: 'serving from the right',
+			left: 'serving from the left',
+			receiver_chooses: 'receiver picks the side'
+		},
+		ballTitle: (player: string, side: 'right' | 'left' | 'centre') =>
+			side === 'centre'
+				? `${player} serves, the receiver picks the side`
+				: `${player} serves from the ${side}, behind the baseline`,
+		wins: (team: string) => `${team} win`,
+		draw: 'Draw',
+		newMatch: 'New match',
+		share: 'Share',
+		layout: { auto: 'Layout: auto', court: 'Layout: court', board: 'Layout: board' },
+		layoutHint: 'Switch layout',
+		loading: 'Loading the match',
+		notFound: "This match doesn't exist, or it has expired.",
+		loadFailed: "Couldn't load the match.",
+		home: 'Home',
+		rejected: {
+			match_over: 'The match is over.',
+			not_timed: 'This match has no clock.',
+			already_time_up: 'Time is already up.',
+			invalid_rules: 'The match rules are invalid.'
+		},
+		undoConflict: 'The score changed, so nothing was undone.',
+		nothingToUndo: 'Nothing to undo.',
+		failed: (message: string) => `Couldn't send that. ${message}`
+	},
+
+	// The share sheet.
+	share: {
+		title: 'Share this match',
+		scoring: 'Scoring',
+		viewing: 'Viewing',
+		scoringHint: 'Anyone with this code can score.',
+		viewingHint: 'Read only, for the bench and the bar.',
+		copy: 'Copy link',
+		copied: 'Copied',
+		copyFailed: 'Copy the link above by hand.',
+		close: 'Close',
+		noViewing: 'The viewing link is on the phone that started the match.',
+		qr: (what: string) => `QR code for the ${what.toLowerCase()} link`
+	},
+
 	// API failures.
 	networkError: "Can't reach the server.",
 	serverError: (status: number) => `The server answered ${status}.`

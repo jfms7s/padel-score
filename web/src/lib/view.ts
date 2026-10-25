@@ -1,7 +1,7 @@
 // The fence screen's view model: everything the scoreboard shows, worked out from a MatchView.
 
 import { strings } from './strings';
-import type { DeuceRule, Format, MatchView, PointCall, ServeSide, Team } from './types';
+import type { DeuceRule, Format, MatchView, PointCall, ServeSide, SetScore, Team } from './types';
 
 const CALLS: Record<PointCall, string> = {
 	love: '0',
@@ -15,6 +15,21 @@ export function pointLabel(call: PointCall): string {
 	return CALLS[call];
 }
 
+/** One team's side of one set. */
+export interface SetDetail {
+	games: number;
+	/**
+	 * Tie-break points to show: on a finished set decided by a tie-break, the loser's points
+	 * (the small "7-6⁵" figure, on the loser only); on a finished super tie-break, both teams'
+	 * points, which are that set's score. Null otherwise, and always for the set in progress.
+	 */
+	tiebreak: number | null;
+	/** The deciding set of a best of 3 played as a super tie-break (its games are 1–0). */
+	superTieBreak: boolean;
+	/** Whether this team won the set; null while it is being played. */
+	won: boolean | null;
+}
+
 export interface TeamModel {
 	/** "Ana / Rui". */
 	name: string;
@@ -24,6 +39,8 @@ export interface TeamModel {
 	games: number;
 	/** This team's games in each set, the one in progress last. Empty for a timed match. */
 	sets: number[];
+	/** The same sets in detail, for the scoreboard. */
+	setDetails: SetDetail[];
 	setsWon: number;
 	/** Serves the next point. Never true once the match is over. */
 	serving: boolean;
@@ -65,6 +82,7 @@ export function fenceModel(view: MatchView): FenceModel {
 			points: game ? pointLabel(game[t]) : tieBreak ? String(tieBreak[t]) : '',
 			games: score.games[i],
 			sets: score.sets.map((s) => s[t]),
+			setDetails: score.sets.map((s, n) => setDetail(s, t, n, n < score.sets.length - 1 || !!finished, format)),
 			setsWon: score.sets_won[i],
 			serving: !finished && score.server.team === t
 		};
@@ -82,6 +100,17 @@ export function fenceModel(view: MatchView): FenceModel {
 		finished: finished ? { winner: finished.winner } : null,
 		rulesLine: rulesLine(view, tieBreak !== null, tieBreak?.super_tiebreak ?? false, !!finished)
 	};
+}
+
+function setDetail(set: SetScore, t: Team, n: number, over: boolean, format: Format): SetDetail {
+	const other: Team = t === 'a' ? 'b' : 'a';
+	const superTieBreak = 'sets' in format && format.sets.deciding === 'super_tie_break' && n === 2;
+	if (!over) return { games: set[t], tiebreak: null, superTieBreak, won: null };
+	const i = t === 'a' ? 0 : 1;
+	const tb = set.tiebreak;
+	const won = superTieBreak && tb ? tb[i] > tb[1 - i] : set[t] > set[other];
+	const tiebreak = !tb ? null : superTieBreak ? tb[i] : won ? null : tb[i];
+	return { games: set[t], tiebreak: tiebreak ?? null, superTieBreak, won };
 }
 
 function decidingCallout(deuce: DeuceRule): FenceModel['callout'] {

@@ -23,6 +23,8 @@ export interface Setup {
 
 export interface RecentMatch {
 	scorer_token: string;
+	/** Missing on entries saved before the share sheet needed it. */
+	spectator_token?: string;
 	label: string;
 	created_at: number;
 }
@@ -135,6 +137,7 @@ const MAX_TIME = 8.64e15; // the largest time a Date can hold
 const isRecent = (v: unknown): v is RecentMatch =>
 	isObject(v) &&
 	typeof v.scorer_token === 'string' &&
+	(v.spectator_token === undefined || typeof v.spectator_token === 'string') &&
 	typeof v.label === 'string' &&
 	typeof v.created_at === 'number' &&
 	Number.isFinite(v.created_at) &&
@@ -160,10 +163,21 @@ export function addRecent(storage: StorageLike, entry: RecentMatch): void {
 	}
 }
 
+/** The spectator token remembered for a scorer token, if this device started the match. */
+export function recentSpectator(storage: StorageLike, scorerToken: string): string | null {
+	return listRecent(storage).find((r) => r.scorer_token === scorerToken)?.spectator_token ?? null;
+}
+
 export const MAX_NAME_LENGTH = 40;
 
-export function scorerPath(token: string): string {
-	return `/s/${encodeURIComponent(token)}`;
+/**
+ * The fence screen's path. The spectator token rides in the fragment (`#v=`), which the
+ * browser never sends to the server: MatchView doesn't carry it, and the scorer page needs it
+ * for the share sheet, on this device after a reload and on any device the link is shared to.
+ */
+export function scorerPath(token: string, spectatorToken?: string): string {
+	const path = `/s/${encodeURIComponent(token)}`;
+	return spectatorToken ? `${path}#v=${encodeURIComponent(spectatorToken)}` : path;
 }
 
 /**
@@ -175,15 +189,17 @@ export async function afterCreate(opts: {
 	storage: StorageLike;
 	setup: Setup;
 	scorerToken: string;
+	spectatorToken: string;
 	teams: Teams;
 	now: number;
 	go: (path: string) => Promise<unknown>;
 }): Promise<{ navigated: boolean; path: string }> {
-	const path = scorerPath(opts.scorerToken);
+	const path = scorerPath(opts.scorerToken, opts.spectatorToken);
 	try {
 		saveLastSetup(opts.storage, opts.setup);
 		addRecent(opts.storage, {
 			scorer_token: opts.scorerToken,
+			spectator_token: opts.spectatorToken,
 			label: matchLabel(opts.teams),
 			created_at: opts.now
 		});

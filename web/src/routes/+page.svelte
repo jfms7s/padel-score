@@ -21,7 +21,7 @@
 		<ul>
 			{#each recent as match (match.scorer_token)}
 				<li>
-					<a href={scorerPath(match.scorer_token)}>
+					<a href={scorerPath(match.scorer_token, match.spectator_token)}>
 						<span class="label">{match.label}</span>
 						<time datetime={new Date(match.created_at).toISOString()}>
 							{new Date(match.created_at).toLocaleDateString()}

@@ -8,6 +8,8 @@ import {
 	loadLastSetup,
 	afterCreate,
 	matchLabel,
+	recentSpectator,
+	scorerPath,
 	DEUCE_RULES,
 	SETS_FORMATS,
 	DECIDING_SETS,
@@ -143,6 +145,24 @@ describe('recent matches', () => {
 		expect(() => addRecent(throwing, { scorer_token: 'a', label: 'l', created_at: 1 })).not.toThrow();
 	});
 
+	it('keeps the spectator token, and entries saved before it existed', () => {
+		const raw = JSON.stringify([
+			{ scorer_token: 'a', label: 'l', created_at: 1, spectator_token: 'v' },
+			{ scorer_token: 'b', label: 'l', created_at: 1 },
+			{ scorer_token: 'c', label: 'l', created_at: 1, spectator_token: 7 }
+		]);
+		const st = fakeStorage({ [RECENT_KEY]: raw });
+		expect(listRecent(st).map((r) => r.scorer_token)).toEqual(['a', 'b']);
+		expect(recentSpectator(st, 'a')).toBe('v');
+		expect(recentSpectator(st, 'b')).toBeNull();
+		expect(recentSpectator(throwing, 'a')).toBeNull();
+	});
+
+	it('scorer links carry the spectator token in the fragment', () => {
+		expect(scorerPath('a/b')).toBe('/s/a%2Fb');
+		expect(scorerPath('a', 'v w')).toBe('/s/a#v=v%20w');
+	});
+
 	it('labels a match from the team names', () => {
 		expect(matchLabel({ a: ['Ana', 'Rui'], b: ['João', 'Marta'] })).toBe('Ana / Rui v João / Marta');
 	});
@@ -221,6 +241,7 @@ describe('afterCreate', () => {
 		storage,
 		setup: named(),
 		scorerToken: 'tok/en',
+		spectatorToken: 'spec',
 		teams: named().teams,
 		now: 5,
 		go
@@ -230,9 +251,13 @@ describe('afterCreate', () => {
 		const st = fakeStorage();
 		const seen: string[] = [];
 		const r = await afterCreate(args(st, async (p) => void seen.push(p)));
-		expect(r).toEqual({ navigated: true, path: '/s/tok%2Fen' });
-		expect(seen).toEqual(['/s/tok%2Fen']);
-		expect(listRecent(st)).toHaveLength(1);
+		expect(r).toEqual({ navigated: true, path: '/s/tok%2Fen#v=spec' });
+		expect(seen).toEqual(['/s/tok%2Fen#v=spec']);
+		expect(listRecent(st)).toEqual([
+			{ scorer_token: 'tok/en', spectator_token: 'spec', label: 'Ana / Rui v João / Marta', created_at: 5 }
+		]);
+		expect(recentSpectator(st, 'tok/en')).toBe('spec');
+		expect(recentSpectator(st, 'other')).toBeNull();
 	});
 
 	it('navigates even when saving throws', async () => {
@@ -248,6 +273,6 @@ describe('afterCreate', () => {
 				throw new Error('nav');
 			})
 		);
-		expect(r).toEqual({ navigated: false, path: '/s/tok%2Fen' });
+		expect(r).toEqual({ navigated: false, path: '/s/tok%2Fen#v=spec' });
 	});
 });

@@ -183,4 +183,46 @@ describe('fenceModel', () => {
 		expect(m.b.points).toBe('15');
 		expect(m.rulesLine).toBe('Non-stop, golden point');
 	});
+
+	it('details finished sets, with tie-break points for the loser', () => {
+		const base = v(finished);
+		const view = {
+			...base,
+			score: {
+				...base.score,
+				sets: [
+					{ a: 7, b: 6, tiebreak: [7, 5] as [number, number] },
+					{ a: 4, b: 6, tiebreak: null },
+					{ a: 6, b: 7, tiebreak: [9, 11] as [number, number] }
+				]
+			}
+		};
+		const m = fenceModel(view);
+		expect(m.a.setDetails).toEqual([
+			{ games: 7, tiebreak: null, superTieBreak: false, won: true },
+			{ games: 4, tiebreak: null, superTieBreak: false, won: false },
+			{ games: 6, tiebreak: 9, superTieBreak: false, won: false }
+		]);
+		expect(m.b.setDetails).toEqual([
+			{ games: 6, tiebreak: 5, superTieBreak: false, won: false },
+			{ games: 6, tiebreak: null, superTieBreak: false, won: true },
+			{ games: 7, tiebreak: null, superTieBreak: false, won: true }
+		]);
+	});
+
+	it('details a super tie-break set by its points', () => {
+		const m = fenceModel(v(superTiebreakFinished));
+		expect(m.a.setDetails.at(-1)).toEqual({ games: 1, tiebreak: 10, superTieBreak: true, won: true });
+		expect(m.b.setDetails.at(-1)).toEqual({ games: 0, tiebreak: 0, superTieBreak: true, won: false });
+		expect(m.a.setDetails[0]).toEqual({ games: 6, tiebreak: null, superTieBreak: false, won: true });
+	});
+
+	it('leaves the set in progress undecided, even in its tie-break', () => {
+		const m = fenceModel(v(tiebreak));
+		expect(m.a.setDetails).toEqual([{ games: 6, tiebreak: null, superTieBreak: false, won: null }]);
+		const sup = fenceModel(v(superTiebreak));
+		expect(sup.a.setDetails.at(-1)).toEqual({ games: 0, tiebreak: null, superTieBreak: true, won: null });
+		expect(sup.b.setDetails[1]).toEqual({ games: 6, tiebreak: null, superTieBreak: false, won: true });
+		expect(fenceModel(v(timed)).a.setDetails).toEqual([]);
+	});
 });

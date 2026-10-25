@@ -55,6 +55,7 @@
 			storage: safeStorage(),
 			setup,
 			scorerToken: created.scorer_token,
+			spectatorToken: created.spectator_token,
 			teams: req.teams,
 			now: Date.now(),
 			go: (path) => goto(path)
