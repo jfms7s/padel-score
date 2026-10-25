@@ -102,6 +102,8 @@ pub enum ApiError {
     },
     /// 422 `invalid_player`: a player name that is blank or too long.
     InvalidPlayer,
+    /// 422 `invalid_score`: a typed final score the engine refuses, with the reason.
+    InvalidScore(padel_scoring::InvalidScore),
     Internal,
 }
 
@@ -121,6 +123,8 @@ impl From<StoreError> for ApiError {
             StoreError::InvalidPlayers(msg) => ApiError::InvalidMatch(msg.to_owned()),
             StoreError::InvalidPlayerName => ApiError::InvalidPlayer,
             StoreError::Conflict(code) => ApiError::Conflict(code),
+            StoreError::InvalidField(field) => ApiError::Validation { field },
+            StoreError::InvalidScore(e) => ApiError::InvalidScore(e),
             StoreError::Corrupt(_) | StoreError::Db(_) => internal(e),
         }
     }
@@ -169,6 +173,10 @@ impl IntoResponse for ApiError {
             ApiError::InvalidPlayer => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 json!({ "error": "invalid_player" }),
+            ),
+            ApiError::InvalidScore(reason) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "error": "invalid_score", "reason": reason }),
             ),
             ApiError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,

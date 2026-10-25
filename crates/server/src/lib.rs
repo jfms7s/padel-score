@@ -4,6 +4,7 @@ pub mod api;
 pub mod auth;
 pub mod client_ip;
 pub mod commands;
+pub mod competitions;
 pub mod config;
 pub mod db;
 pub mod device;

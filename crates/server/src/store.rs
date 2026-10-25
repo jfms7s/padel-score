@@ -27,7 +27,7 @@ macro_rules! select_matches {
     ($rest:literal) => {
         concat!(
             "SELECT id, scorer_token, spectator_token, format, start, teams, revision, \
-             owner_user_id, created_at, last_activity_at FROM matches ",
+             owner_user_id, created_at, last_activity_at, result_locked_at FROM matches ",
             $rest
         )
     };
@@ -46,6 +46,11 @@ pub enum StoreError {
     /// The write would break a uniqueness or state rule, e.g. a taken email or a used invite.
     /// The code is a snake_case error name, served as a 409.
     Conflict(&'static str),
+    /// A request field that fails its policy (a blank name, a format of the wrong kind); the
+    /// name is served as `422 validation` with that field.
+    InvalidField(&'static str),
+    /// A typed final score the engine refuses.
+    InvalidScore(padel_scoring::InvalidScore),
     /// The stored log contradicts itself, e.g. the engine rejects an event already stored as
     /// effective. Never expected; the request is refused rather than shown a wrong score.
     Corrupt(String),
@@ -61,6 +66,8 @@ impl fmt::Display for StoreError {
             StoreError::InvalidPlayers(msg) => write!(f, "invalid players: {msg}"),
             StoreError::NotFound => write!(f, "not found"),
             StoreError::Conflict(code) => write!(f, "conflict: {code}"),
+            StoreError::InvalidField(field) => write!(f, "invalid field: {field}"),
+            StoreError::InvalidScore(e) => write!(f, "invalid score: {e}"),
             StoreError::Corrupt(msg) => write!(f, "corrupt match log: {msg}"),
             StoreError::Db(e) => write!(f, "database error: {e}"),
         }
@@ -135,6 +142,8 @@ pub struct StoredMatch {
     pub owner_user_id: Option<String>,
     pub created_at: i64,
     pub last_activity_at: i64,
+    /// Set when the coordinator typed the result; scorer-token writes are then refused.
+    pub result_locked_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,11 +198,11 @@ fn json_error(e: serde_json::Error) -> sqlx::Error {
     sqlx::Error::Decode(Box::new(e))
 }
 
-fn encode<T: Serialize>(value: &T) -> Result<String, sqlx::Error> {
+pub(crate) fn encode<T: Serialize>(value: &T) -> Result<String, sqlx::Error> {
     serde_json::to_string(value).map_err(json_error)
 }
 
-fn decode<'a, T: Deserialize<'a>>(text: &'a str) -> Result<T, sqlx::Error> {
+pub(crate) fn decode<'a, T: Deserialize<'a>>(text: &'a str) -> Result<T, sqlx::Error> {
     serde_json::from_str(text).map_err(json_error)
 }
 
@@ -209,6 +218,7 @@ pub(crate) fn match_from_row(row: &SqliteRow) -> Result<StoredMatch, sqlx::Error
         owner_user_id: row.try_get("owner_user_id")?,
         created_at: row.try_get("created_at")?,
         last_activity_at: row.try_get("last_activity_at")?,
+        result_locked_at: row.try_get("result_locked_at")?,
     })
 }
 
@@ -432,6 +442,7 @@ impl Store {
             owner_user_id: new.owner_user_id,
             created_at: now,
             last_activity_at: now,
+            result_locked_at: None,
         };
         sqlx::query(
             "INSERT INTO matches (id, scorer_token, spectator_token, format, start, teams, \

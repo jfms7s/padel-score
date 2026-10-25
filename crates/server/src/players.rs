@@ -102,7 +102,7 @@ fn player_from_row(row: &SqliteRow) -> Result<Player, sqlx::Error> {
     })
 }
 
-async fn player_in(
+pub(crate) async fn player_in(
     conn: &mut SqliteConnection,
     owner: &str,
     id: &str,
