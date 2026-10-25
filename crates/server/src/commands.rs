@@ -19,6 +19,7 @@
 use padel_scoring::{ErrorKind, Event, Format, ReplayError, Score, Start, Team, replay};
 use serde::{Deserialize, Serialize};
 
+use crate::results;
 use crate::store::{
     EventState, Store, StoreError, StoredEvent, StoredMatch, Teams, Tx, append, events_in,
     find_result_in, mark, match_by_id_in, save_result, touch,
@@ -366,7 +367,11 @@ async fn execute(
         .await?
         .ok_or(StoreError::NotFound)?;
     let events = events_in(&mut tx, match_id).await?;
-    let outcome = CommandOutcome::Applied(view_of(&m, &events).map_err(corrupt)?);
+    let view = view_of(&m, &events).map_err(corrupt)?;
+    // The results projection follows the log in the same transaction (rejected or conflicting
+    // commands return above and write nothing).
+    results::sync_in(&mut tx, &m, &view.score, now).await?;
+    let outcome = CommandOutcome::Applied(view);
     save(&mut tx, match_id, client_id, &outcome).await?;
     tx.commit().await?;
     Ok(outcome)

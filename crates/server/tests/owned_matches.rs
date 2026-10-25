@@ -17,6 +17,7 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use http_body_util::BodyExt;
 use padel_score_server::AppState;
+use padel_score_server::accounts_store::OWNED_MATCH_CANDIDATES;
 use padel_score_server::api::now;
 use padel_scoring::{DecidingSet, DeuceRule, Format, Player, SetRules, SetsFormat, Start, Team};
 use serde_json::{Value, json};
@@ -240,6 +241,26 @@ async fn finished_matches_drop_out() {
         json!({ "finished": { "winner": "a" } })
     );
 
+    let res = list_by_session(&state, &app, &admin).await;
+    assert_eq!(ids(&res.body), [live.id]);
+}
+
+#[tokio::test]
+async fn finished_matches_do_not_crowd_out_live_ones() {
+    let (state, pool, app, _, admin) = with_admin().await;
+    let live = create_as(&state, &app, &admin, default_body()).await;
+    sqlx::query("UPDATE matches SET last_activity_at = last_activity_at - 1000 WHERE id = ?")
+        .bind(&live.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // More finished matches than the store hands over as candidates, all more recent.
+    let finished = OWNED_MATCH_CANDIDATES + 5;
+    for i in 0..finished {
+        let done = create_as(&state, &app, &admin, default_body()).await;
+        let res = score_by_token(&app, &done.scorer, point(&format!("f{i}"), "a", 24)).await;
+        assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    }
     let res = list_by_session(&state, &app, &admin).await;
     assert_eq!(ids(&res.body), [live.id]);
 }

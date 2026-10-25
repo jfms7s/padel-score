@@ -315,11 +315,88 @@ export const strings = {
 		}
 	},
 
+	// The player list, and picking players for a match.
+	players: {
+		title: 'Players',
+		back: 'Home',
+		intro: 'Pick these players when you start a match, and their wins and losses add up.',
+		add: 'Add a player',
+		addLabel: 'New player name',
+		adding: 'Adding…',
+		added: (name: string) => `${name} is on your list.`,
+		restored: (name: string) => `${name} is back on your list.`,
+		already: (name: string) => `${name} is already on your list.`,
+		none: 'No players yet. Add the people you play with.',
+		archived: 'Archived',
+		archivedHint: 'Archived players keep their record, and are not offered for new matches.',
+		rename: 'Rename',
+		openLabel: (name: string) => `Open ${name}’s page`,
+		renameLabel: (name: string) => `Rename ${name}`,
+		newName: (name: string) => `New name for ${name}`,
+		save: 'Save',
+		cancel: 'Cancel',
+		archive: 'Archive',
+		archiveLabel: (name: string) => `Archive ${name}`,
+		restore: 'Restore',
+		restoreLabel: (name: string) => `Restore ${name}`,
+		record: (wins: number, losses: number, draws: number) => `${wins} W · ${losses} L · ${draws} D`,
+		// The picker in the new-match form.
+		suggestions: (slot: string) => `Players for ${slot}`,
+		addToList: (name: string) => `Add ‘${name}’ to my players`,
+		fromList: 'From your players',
+		listFailed: "Couldn't load your players, so names are typed only.",
+		errors: {
+			invalid_player: 'Enter a name of 1 to 40 characters.',
+			player_exists: 'Another player already has this name.',
+			not_found: 'This player is not on your list.'
+		}
+	},
+
+	// The history page, a player's page, and the result row they share.
+	history: {
+		title: 'Past matches',
+		link: 'History',
+		back: 'Home',
+		empty: 'Finished matches you started while signed in show up here.',
+		loadMore: 'Load more',
+		/** A timed match that went to overtime: the tied games, then this. */
+		overtimeScore: (games: string) => `${games}, overtime`,
+		winner: 'winner',
+		draw: 'Draw',
+		finalView: 'Final view',
+		finalViewLabel: (a: string, b: string) => `Final view of ${a} v ${b}`,
+		outcome: { win: 'Won', loss: 'Lost', draw: 'Drawn' },
+		record: 'Record',
+		/** The record's three numbers: the short label shown, and the word read out. */
+		recordParts: [
+			{ key: 'wins', short: 'W', long: 'Won' },
+			{ key: 'losses', short: 'L', long: 'Lost' },
+			{ key: 'draws', short: 'D', long: 'Drawn' }
+		],
+		placings: 'Placings',
+		/** "3rd–4th of 12, tournament". */
+		placing: (place: number, to: number, size: number, kind: 'tournament' | 'non_stop') =>
+			`${to > place ? `${ordinal(place)}–${ordinal(to)}` : ordinal(place)} of ${size}, ${kind === 'tournament' ? 'tournament' : 'non-stop'}`,
+		matches: 'Matches',
+		noMatches: 'No finished matches with this player yet.',
+		archived: 'Archived. Their record is kept.',
+		backToPlayers: 'Players'
+	},
+
 	// Home, signed in.
+	yourPages: 'Your players and history',
 	myMatches: 'My matches',
 	noMyMatches: 'Matches you start while signed in show up here, on any device.',
 
 	// API failures.
+	signedOutPlayers: "You've been signed out. Sign in again to use your players.",
 	networkError: "Can't reach the server.",
 	serverError: (status: number) => `The server answered ${status}.`
 } as const;
+
+/** 1st, 2nd, 3rd, 4th, 11th, 21st. */
+function ordinal(n: number): string {
+	const tens = n % 100;
+	if (tens >= 11 && tens <= 13) return `${n}th`;
+	return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}

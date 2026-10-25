@@ -152,8 +152,9 @@ fn label(m: &StoredMatch) -> String {
     format!("{a1} / {a2} v {b1} / {b2}")
 }
 
-/// The caller's live matches. The store hands over the newest candidates by activity; whether
-/// one is finished takes a replay, done here, keeping the first [`LIVE_LIMIT`] still going.
+/// The caller's live matches. The store hands over the newest candidates by activity that have
+/// no stored result; each is replayed here anyway, as a safety net for one finished before the
+/// results backfill ran, keeping the first [`LIVE_LIMIT`] still going.
 pub async fn live_list(state: &AppState, user: &CurrentUser) -> Result<Vec<OwnedMatch>, ApiError> {
     let with_tokens = user.via == AuthVia::Session;
     let candidates = state.store.live_matches_for_owner(&user.user.id).await?;

@@ -45,6 +45,7 @@ fn new_match() -> NewMatch {
             b: ["Cris".into(), "Dani".into()],
         },
         owner_user_id: None,
+        players: Default::default(),
     }
 }
 

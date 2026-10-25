@@ -46,6 +46,7 @@ async fn new_match(s: &Store) -> StoredMatch {
                 b: ["Cris".into(), "Dani".into()],
             },
             owner_user_id: None,
+            players: Default::default(),
         },
         NOW,
     )

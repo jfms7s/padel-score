@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { createMatch } from '#lib/api.ts';
+	import { ApiError, createMatch } from '#lib/api.ts';
+	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
+	import { listPlayers } from '#lib/players.ts';
+	import { bootSession } from '#lib/session.ts';
 	import { safeStorage } from '#lib/storage.ts';
 	import { strings } from '#lib/strings.ts';
 	import {
@@ -15,13 +18,51 @@
 		setSets,
 		toCreateRequest
 	} from '#lib/setup.ts';
+	import type { Player } from '#lib/types.ts';
 
 	const t = strings.setup;
+	const TEAMS = ['a', 'b'] as const;
+	const slots = [
+		{ team: 'a', index: 0, n: 1, label: t.teamPlayer('A', 1) },
+		{ team: 'a', index: 1, n: 2, label: t.teamPlayer('A', 2) },
+		{ team: 'b', index: 0, n: 3, label: t.teamPlayer('B', 1) },
+		{ team: 'b', index: 1, n: 4, label: t.teamPlayer('B', 2) }
+	] as const;
 
 	let setup = $state(defaultSetup());
 	$effect(() => {
 		setup = loadLastSetup(safeStorage());
 	});
+
+	/** The signed-in user's players; null while unknown, signed out or unreadable (plain inputs). */
+	let players = $state<Player[] | null>(null);
+	let playersFailed = $state(false);
+	$effect(() => {
+		void loadPlayers();
+	});
+
+	async function loadPlayers() {
+		const s = await bootSession();
+		if (s.status !== 'signed_in') return;
+		try {
+			players = await listPlayers({ quiet: true });
+		} catch {
+			playersFailed = true;
+		}
+	}
+
+	/** The players picked in every slot but this one. */
+	function takenBesides(team: 'a' | 'b', index: number): string[] {
+		return slots
+			.filter((s) => s.team !== team || s.index !== index)
+			.map((s) => setup.players[s.team][s.index])
+			.filter((id): id is string => id !== null);
+	}
+
+	function added(player: Player) {
+		if (!players) return;
+		players = [...players.filter((p) => p.id !== player.id), player];
+	}
 
 	let busy = $state(false);
 	let failure = $state<string | null>(null);
@@ -46,7 +87,12 @@
 		try {
 			created = await createMatch(req);
 		} catch (e) {
-			failure = e instanceof Error ? e.message : '';
+			failure =
+				e instanceof ApiError && e.code === 'invalid_match' && e.message === 'players need an account'
+					? strings.signedOutPlayers
+					: e instanceof Error
+						? e.message
+						: '';
 			busy = false;
 			return;
 		}
@@ -112,15 +158,29 @@
 		<div class="field" role="group" aria-labelledby="l-teams">
 			<span class="label" id="l-teams">{t.teams}</span>
 			<div class="teams">
-				<div class="team-in a">
-					<input bind:value={setup.teams.a[0]} placeholder={t.player(1)} aria-label={t.teamPlayer('A', 1)} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
-					<input bind:value={setup.teams.a[1]} placeholder={t.player(2)} aria-label={t.teamPlayer('A', 2)} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
-				</div>
-				<div class="team-in b">
-					<input bind:value={setup.teams.b[0]} placeholder={t.player(3)} aria-label={t.teamPlayer('B', 1)} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
-					<input bind:value={setup.teams.b[1]} placeholder={t.player(4)} aria-label={t.teamPlayer('B', 2)} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
-				</div>
+				{#each TEAMS as team (team)}
+					<div class="team-in {team}">
+						{#each slots.filter((s) => s.team === team) as slot (slot.n)}
+							<div class="slot">
+								{#if players}
+									<PlayerPicker
+										bind:value={setup.teams[team][slot.index]}
+										bind:playerId={setup.players[team][slot.index]}
+										{players}
+										taken={takenBesides(team, slot.index)}
+										placeholder={t.player(slot.n)}
+										label={slot.label}
+										onadd={added}
+									/>
+								{:else}
+									<input bind:value={setup.teams[team][slot.index]} placeholder={t.player(slot.n)} aria-label={slot.label} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/each}
 			</div>
+			{#if playersFailed}<p class="hint" role="status">{strings.players.listFailed}</p>{/if}
 		</div>
 
 		<div class="field" role="group" aria-labelledby="l-first">
@@ -245,7 +305,7 @@
 		background: transparent;
 		padding: 2px 0;
 	}
-	.team-in input + input {
+	.slot + .slot {
 		border-top: 1px solid var(--line);
 	}
 	.hint {

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { isEvent, isFormat, isMatchView, isScore } from './guards';
+import { isEvent, isFormat, isHistoryPage, isMatchView, isPlayerList, isPlayerPage, isScore } from './guards';
 import { asView } from './fixtures/load';
 
 const STRICT = { strict: true } as const;
@@ -26,6 +26,15 @@ describe('fixtures match the wire types', () => {
 		const frame = readFileSync(new URL('./fixtures/stream-state.txt', import.meta.url), 'utf8');
 		const data = frame.split('\n').find((l) => l.startsWith('data: '))!.slice(6);
 		expect(isMatchView(JSON.parse(data), STRICT)).toBe(true);
+	});
+
+	it('the player list, history and player page samples match', () => {
+		expect(isPlayerList(fixture('players-list'), STRICT)).toBe(true);
+		expect(isHistoryPage(fixture('history-page'), STRICT)).toBe(true);
+		expect(isPlayerPage(fixture('player-page'), STRICT)).toBe(true);
+		const drifted = structuredClone(fixture('player-page')) as { items: Record<string, unknown>[] };
+		drifted.items[0]!.outcome = 'won';
+		expect(isPlayerPage(drifted)).toBe(false);
 	});
 
 	it('the engine sample is a Score', () => {

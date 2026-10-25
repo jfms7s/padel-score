@@ -575,6 +575,7 @@ async fn codes_never_appear_in_logs() {
                     b: ["C".to_owned(), "D".to_owned()],
                 },
                 owner_user_id: None,
+                players: Default::default(),
             },
             now(),
         )

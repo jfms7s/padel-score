@@ -37,8 +37,9 @@ pub const POLL_SLACK_SECS: i64 = 1;
 pub const MAX_ACTIVE_INVITES: i64 = 20;
 /// A device token's `last_used_at` is written at most this often.
 pub const LAST_USED_RESOLUTION_SECS: i64 = 60;
-/// How many owned matches [`Store::live_matches_for_owner`] returns as candidates.
-pub const OWNED_MATCH_CANDIDATES: i64 = 200;
+/// How many owned matches [`Store::live_matches_for_owner`] returns as candidates: a little
+/// over the 20 the live list keeps, as a match whose log will not replay is skipped.
+pub const OWNED_MATCH_CANDIDATES: i64 = 25;
 /// Device tokens start with this, so a Bearer token is recognisable as one.
 pub const DEVICE_TOKEN_PREFIX: &str = "pdl_";
 /// The leading chars of a device token kept in clear, for the device list.
@@ -1174,16 +1175,18 @@ impl Store {
     // Owned matches.
 
     /// The candidates for the user's live matches: their newest [`OWNED_MATCH_CANDIDATES`]
-    /// matches by last activity, newest first. Whether a match is finished takes the engine
-    /// (replaying its log), which the store does not run, so the caller filters out the finished
-    /// ones and keeps the first 20. A live match is one being scored, so it sits near the top.
+    /// matches by last activity, newest first, leaving out those with a `match_results` row
+    /// (every finished owned match has one). The caller still checks each candidate's status,
+    /// as a match finished before the startup backfill ran has no row yet. A live match is one
+    /// being scored, so it sits near the top.
     pub async fn live_matches_for_owner(
         &self,
         user_id: &str,
     ) -> Result<Vec<StoredMatch>, StoreError> {
         let rows = sqlx::query(select_matches!(
-            "WHERE owner_user_id = ? ORDER BY last_activity_at DESC, created_at DESC, rowid DESC \
-             LIMIT ?"
+            "WHERE owner_user_id = ? \
+             AND NOT EXISTS (SELECT 1 FROM match_results r WHERE r.match_id = matches.id) \
+             ORDER BY last_activity_at DESC, created_at DESC, rowid DESC LIMIT ?"
         ))
         .bind(user_id)
         .bind(OWNED_MATCH_CANDIDATES)
