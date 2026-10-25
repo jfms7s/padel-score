@@ -1,7 +1,10 @@
 package io.github.jfms7s.padelscore.score
 
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -9,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.jfms7s.padelscore.net.Command
 import io.github.jfms7s.padelscore.net.MatchView
@@ -41,6 +45,15 @@ class ScoreScreenTest {
     }
 
     private fun sentCommands(): List<Command> = api.requests.flatMap { it.second.commands }
+
+    /** Holds Undo past its 600 ms threshold; needs `mainClock.autoAdvance = false`. */
+    private fun holdUndo() {
+        val undo = compose.onNodeWithText("Undo")
+        undo.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(700)
+        undo.performTouchInput { up() }
+        compose.mainClock.advanceTimeByFrame()
+    }
 
     @Test
     fun tapping_left_half_sends_point_a() {
@@ -106,10 +119,72 @@ class ScoreScreenTest {
         compose.onNodeWithText("Ana / Rui win").assertExists()
         compose.onNodeWithContentDescription("Point Ana / Rui").assertIsNotEnabled().performClick()
         compose.onNodeWithContentDescription("Point João / Marta").assertIsNotEnabled().performClick()
-        compose.onNodeWithText("Undo").assertDoesNotExist()
         assertTrue(api.requests.isEmpty())
         compose.onNodeWithText("Back to matches").performClick()
         assertEquals(1, done)
+    }
+
+    @Test
+    fun finished_match_keeps_undo_below_banner_and_back() {
+        show(fixtureView("view-finished.json"))
+        val banner = compose.onNodeWithText("Ana / Rui win").getUnclippedBoundsInRoot()
+        val back = compose.onNodeWithText("Back to matches").assertHeightIsAtLeast(48.dp).getUnclippedBoundsInRoot()
+        val undo = compose.onNodeWithText("Undo").assertHeightIsAtLeast(48.dp).getUnclippedBoundsInRoot()
+        assertTrue("banner above back", banner.bottom <= back.top)
+        assertTrue("back above undo", back.bottom <= undo.top)
+        assertTrue("undo on screen", undo.bottom <= 227.dp)
+    }
+
+    @Test
+    fun long_press_undo_on_finished_match_sends_undo_and_reopened_view_drops_banner() {
+        val finished = fixtureView("view-finished.json") // revision 1, last effective seq 24
+        api.result = SendResult.Applied(fixtureView("view-one-point.json").copy(revision = finished.revision + 1))
+        show(finished)
+        compose.mainClock.autoAdvance = false
+        holdUndo()
+        assertEquals(listOf(Command.Undo(24)), sentCommands())
+        compose.onNodeWithText("Ana / Rui win").assertDoesNotExist()
+        compose.onNodeWithText("Back to matches").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Point Ana / Rui").assertIsEnabled().assert(hasText("15"))
+    }
+
+    @Test
+    fun notice_on_finished_match_takes_banner_place_clear_of_undo() {
+        api.result = SendResult.NotSent("network error")
+        show(fixtureView("view-finished.json"))
+        compose.mainClock.autoAdvance = false
+        holdUndo()
+        compose.onNodeWithText("Not sent").assertExists()
+        compose.onNodeWithText("Ana / Rui win").assertDoesNotExist()
+        val back = compose.onNodeWithText("Back to matches").getUnclippedBoundsInRoot()
+        val undo = compose.onNodeWithText("Undo").getUnclippedBoundsInRoot()
+        assertTrue("back above undo", back.bottom <= undo.top)
+        compose.mainClock.advanceTimeBy(3_100)
+        compose.onNodeWithText("Not sent").assertDoesNotExist()
+        compose.onNodeWithText("Ana / Rui win").assertExists()
+    }
+
+    @Test
+    fun match_over_notice_clears_after_three_seconds() {
+        api.result = SendResult.NotFound
+        show(fixtureView("view-one-point.json"))
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithContentDescription("Point Ana / Rui").performClick()
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Match over").assertExists()
+        compose.mainClock.advanceTimeBy(3_100)
+        compose.onNodeWithText("Match over").assertDoesNotExist()
+    }
+
+    @Test
+    fun undo_with_nothing_to_undo_shows_notice_then_clears() {
+        show(fixtureView("view-new.json"))
+        compose.mainClock.autoAdvance = false
+        holdUndo()
+        assertTrue(api.requests.isEmpty())
+        compose.onNodeWithText("Nothing to undo").assertExists()
+        compose.mainClock.advanceTimeBy(3_100)
+        compose.onNodeWithText("Nothing to undo").assertDoesNotExist()
     }
 
     @Test

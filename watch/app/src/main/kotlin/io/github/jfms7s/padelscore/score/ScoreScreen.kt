@@ -82,6 +82,7 @@ private val HoldFill = Color.White.copy(alpha = 0.3f)
 private const val UNDO_HOLD_MS = 600
 private const val ACCEPTED_FLASH_MS = 400L
 private const val NOTICE_MS = 3_000L
+private val UndoBarHeight = 48.dp
 
 /** The stream runs only while the screen is started: the screen going off stops it, wrist raise reconnects. */
 @Composable
@@ -115,11 +116,19 @@ private fun ScoreContent(ui: ScoreUi, onPoint: (Team) -> Unit, onUndo: () -> Uni
             }
             TopBar(ui, view, Modifier.align(Alignment.TopCenter))
             if (finished != null) {
-                FinishedBanner(view, finished, onDone, Modifier.align(Alignment.Center))
+                // Anchored just above the undo bar and growing upward, so a taller notice never pushes into it.
+                FinishedBanner(
+                    view,
+                    finished,
+                    feedback,
+                    onDone,
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = UndoBarHeight + 8.dp),
+                )
             } else {
-                Notice(feedback, Modifier.align(Alignment.Center))
-                UndoBar(onUndo, Modifier.align(Alignment.BottomCenter))
+                Notice(feedback, Modifier.align(Alignment.Center).padding(horizontal = 28.dp))
             }
+            // Undo stays on a finished match too: it takes back the winning point and reopens the match.
+            UndoBar(onUndo, Modifier.align(Alignment.BottomCenter))
         }
     }
 }
@@ -133,8 +142,8 @@ private fun visibleFeedback(ui: ScoreUi): Feedback {
     LaunchedEffect(id) {
         val shownFor = when (kind) {
             Feedback.Accepted -> ACCEPTED_FLASH_MS
-            Feedback.NotSent, Feedback.UndoConflict -> NOTICE_MS
-            Feedback.None, Feedback.MatchOver -> return@LaunchedEffect
+            Feedback.NotSent, Feedback.UndoConflict, Feedback.MatchOver, Feedback.NothingToUndo -> NOTICE_MS
+            Feedback.None -> return@LaunchedEffect
         }
         delay(shownFor)
         expiredId = id
@@ -227,17 +236,19 @@ private fun Chip(text: String, color: Color = Color.White) {
     )
 }
 
+private fun hasNotice(feedback: Feedback) = feedback != Feedback.None && feedback != Feedback.Accepted
+
 @Composable
 private fun Notice(feedback: Feedback, modifier: Modifier) {
     val text = when (feedback) {
         Feedback.NotSent -> R.string.score_not_sent
         Feedback.MatchOver -> R.string.score_match_over
         Feedback.UndoConflict -> R.string.score_undo_conflict
+        Feedback.NothingToUndo -> R.string.score_nothing_to_undo
         Feedback.None, Feedback.Accepted -> return
     }
     Column(
         modifier
-            .padding(horizontal = 28.dp)
             .background(Scrim, RoundedCornerShape(16.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -274,7 +285,7 @@ private fun UndoBar(onUndo: () -> Unit, modifier: Modifier) {
     Box(
         modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(UndoBarHeight)
             .background(Scrim)
             .drawBehind { drawRect(HoldFill, size = Size(size.width * fill.value, size.height)) }
             .pointerInput(Unit) {
@@ -301,8 +312,15 @@ private fun UndoBar(onUndo: () -> Unit, modifier: Modifier) {
     }
 }
 
+/** A notice (say, an undo that was not sent) takes the winner line's place for its few seconds. */
 @Composable
-private fun FinishedBanner(view: MatchView, finished: Status.Finished, onDone: () -> Unit, modifier: Modifier) {
+private fun FinishedBanner(
+    view: MatchView,
+    finished: Status.Finished,
+    feedback: Feedback,
+    onDone: () -> Unit,
+    modifier: Modifier,
+) {
     val winner = finished.winner
     val banner = if (winner == null) {
         stringResource(R.string.score_draw)
@@ -314,14 +332,18 @@ private fun FinishedBanner(view: MatchView, finished: Status.Finished, onDone: (
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            banner,
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.background(Scrim, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
-        )
+        if (hasNotice(feedback)) {
+            Notice(feedback, Modifier)
+        } else {
+            Text(
+                banner,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.background(Scrim, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
         Button(onClick = onDone, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(R.string.score_back))
         }

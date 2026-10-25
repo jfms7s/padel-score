@@ -34,6 +34,7 @@
     <string name="score_not_sent">Not sent</string>
     <string name="score_match_over">Match over</string>
     <string name="score_undo_conflict">Score changed, nothing undone</string>
+    <string name="score_nothing_to_undo">Nothing to undo</string>
     <string name="score_win">%1$s win</string>
     <string name="score_draw">Draw</string>
     <string name="score_back">Back to matches</string>
