@@ -29,6 +29,9 @@
 	let links = $state.raw<MyLink[]>([]);
 	let claims = $state.raw<MyClaim[]>([]);
 	let privacy = $state.raw<Privacy | null>(null);
+	// The radio group's value: follows the stored setting, but the group writes it as soon as one is
+	// picked, so a failed save has to put it back (see `choose`).
+	let picked = $derived(privacy?.visibility);
 
 	let ready = $state(false);
 	let loadFailure = $state<string | null>(null);
@@ -134,6 +137,8 @@
 			privacyDone = true;
 		} catch (e) {
 			privacyFailure = linkMessage(e);
+			// The group already shows the unsaved choice; snap it back to the stored one.
+			picked = privacy?.visibility;
 		} finally {
 			busy = false;
 		}
@@ -245,7 +250,7 @@
 							type="radio"
 							name="visibility"
 							value={v}
-							checked={privacy.visibility === v}
+							bind:group={picked}
 							onchange={() => choose(v)}
 						/>
 						<span class="what"

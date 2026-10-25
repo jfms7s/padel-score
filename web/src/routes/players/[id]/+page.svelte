@@ -6,6 +6,7 @@
 	import ResultRow from '#lib/components/ResultRow.svelte';
 	import { ApiError } from '#lib/api.ts';
 	import {
+		codeDeadline,
 		createLinkCode,
 		linkLabel,
 		linkMe,
@@ -33,6 +34,8 @@
 	// Linking.
 	let origin = $state('');
 	let code = $state<CreatedLinkCode | null>(null);
+	// When the code runs out on this device's clock.
+	let codeUntil = $state(0);
 	let linkFailure = $state<string | null>(null);
 	let linkDone = $state<string | null>(null);
 	let confirmingUnlink = $state(false);
@@ -134,7 +137,10 @@
 		linkFailure = null;
 		try {
 			const made = await createLinkCode(wanted);
-			if (wanted === id) code = made;
+			if (wanted === id) {
+				code = made;
+				codeUntil = codeDeadline(made.expires_in, Date.now());
+			}
 		} catch (e) {
 			if (wanted === id) {
 				code = null;
@@ -205,7 +211,7 @@
 						url={origin + code.url}
 						title={l.linkCodeTitle(player.name)}
 						hint={l.linkHint}
-						expiresAt={code.expires_at}
+						deadline={codeUntil}
 						onexpire={newCode}
 					/>
 				{/if}

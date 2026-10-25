@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	PENDING_LINK_KEY,
 	claimBadgeCount,
+	codeDeadline,
 	linkLabel,
 	outcomeText,
 	previewText,
@@ -125,5 +126,25 @@ describe('claimBadgeCount', () => {
 	it('sums pending claims over the list', () => {
 		expect(claimBadgeCount([])).toBe(0);
 		expect(claimBadgeCount([{ pending_claims: 1 }, { pending_claims: 0 }, { pending_claims: 2 }])).toBe(3);
+	});
+});
+
+describe('codeDeadline', () => {
+	const ttl = 600;
+	it('counts the server-reported time from when the response arrived', () => {
+		const received = Date.parse('2026-10-25T12:00:00Z');
+		expect(codeDeadline(ttl, received)).toBe(received + 600_000);
+	});
+	it('gives a full code lifetime however wrong the client clock is', () => {
+		for (const skew of [15 * 60_000, -15 * 60_000]) {
+			const received = Date.now() + skew;
+			const deadline = codeDeadline(ttl, received);
+			// Fresh at arrival (not already expired), and ten minutes of it left.
+			expect(deadline).toBeGreaterThan(received);
+			expect(deadline - received).toBe(600_000);
+		}
+	});
+	it('never lies in the past for a bad value', () => {
+		expect(codeDeadline(-5, 1000)).toBe(1000);
 	});
 });

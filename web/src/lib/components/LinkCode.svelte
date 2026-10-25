@@ -4,15 +4,15 @@
 	import QRCode from 'qrcode';
 	import { strings } from '#lib/strings.ts';
 
-	// `expiresAt` (Unix seconds) shows the time left, and `onexpire` is called once when it runs out
-	// (the page then makes a new code and passes the new url).
+	// `deadline` (ms on this device's clock, from `codeDeadline`) shows the time left, and `onexpire`
+	// is called once when it runs out (the page then makes a new code and passes the new url).
 	let {
 		url,
 		title,
 		hint,
-		expiresAt,
+		deadline,
 		onexpire
-	}: { url: string; title: string; hint: string; expiresAt?: number; onexpire?: () => void } = $props();
+	}: { url: string; title: string; hint: string; deadline?: number; onexpire?: () => void } = $props();
 
 	const s = strings.auth.share;
 	let code = $state('');
@@ -40,18 +40,18 @@
 	});
 
 	let now = $state(Date.now());
-	const left = $derived(expiresAt === undefined ? null : Math.max(0, Math.ceil(expiresAt - now / 1000)));
+	const left = $derived(deadline === undefined ? null : Math.max(0, Math.ceil((deadline - now) / 1000)));
 	const clock = $derived(
 		left === null ? '' : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
 	);
 
 	$effect(() => {
-		if (expiresAt === undefined) return;
-		const at = expiresAt;
+		if (deadline === undefined) return;
+		const at = deadline;
 		let fired = false;
 		const tick = () => {
 			now = Date.now();
-			if (!fired && now / 1000 >= at) {
+			if (!fired && now >= at) {
 				fired = true;
 				onexpire?.();
 			}
