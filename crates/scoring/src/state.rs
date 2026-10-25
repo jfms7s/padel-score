@@ -1,3 +1,6 @@
+use crate::serve::{
+    ends_change_after_game, ends_change_in_tiebreak, in_rotation, serve_side, tiebreak_server,
+};
 use crate::{
     DecidingSet, ErrorKind, Event, Format, Game, GameScore, Player, RulesError, SUPER_TIEBREAK_TO,
     ServeSide, SetRules, Start, TIEBREAK_TO, Team, TieBreak,
@@ -60,10 +63,14 @@ pub struct Score {
     pub sets: Vec<SetScore>,
     pub sets_won: [u8; 2],
     /// Games in the current set; for a timed match, the whole match.
+    /// Once the match is over it shows the final set's games, so a super tie-break set shows 1-0 or 0-1.
     pub games: [u16; 2],
     pub current: Current,
+    /// Who serves the next point.
     pub server: Player,
+    /// Where the next serve goes from.
     pub side: ServeSide,
+    /// The players change ends now: true only in the snapshot right after the event that caused it.
     pub change_ends: bool,
     pub overtime: bool,
     pub time_up: bool,
@@ -115,14 +122,13 @@ impl MatchState {
 }
 
 impl Score {
-    /// A score with nothing played. Serving is fixed at the first server until Task 5.
+    /// A score with nothing played.
     fn blank(start: Start) -> Score {
         Score {
             sets: Vec::new(),
             sets_won: [0, 0],
             games: [0, 0],
             current: Current::None,
-            // TODO(Task 5): serving and side.
             server: start.first_server,
             side: ServeSide::Right,
             change_ends: false,
@@ -155,6 +161,13 @@ struct SetsMatch {
     games: [u8; 2],
     unit: Unit,
     winner: Option<Team>,
+    /// Places along the service rotation (mod 4) of the current game's server,
+    /// or of the current tie-break's first server.
+    rotation: u16,
+    /// Games finished in the whole match; a tie-break or super tie-break counts as one.
+    finished_games: u32,
+    /// Whether the last event made the players change ends.
+    change_ends: bool,
 }
 
 impl SetsMatch {
@@ -166,6 +179,9 @@ impl SetsMatch {
             games: [0, 0],
             unit: Unit::Over,
             winner: None,
+            rotation: 0,
+            finished_games: 0,
+            change_ends: false,
         };
         m.unit = m.first_unit_of_set();
         m
@@ -179,14 +195,19 @@ impl SetsMatch {
         match &mut self.unit {
             Unit::Over => return Err(ErrorKind::MatchOver),
             Unit::Game(game) => {
+                self.change_ends = false;
                 if let Some(w) = game.point(team) {
                     self.game_won(w, None);
                 }
             }
             Unit::TieBreak { tb, super_tiebreak } => {
-                if let Some(w) = tb.point(team) {
-                    let points = Some(tb.points());
-                    if *super_tiebreak {
+                let won = tb.point(team);
+                let points = Some(tb.points());
+                let super_tiebreak = *super_tiebreak;
+                self.change_ends = ends_change_in_tiebreak(tb.points_played());
+                if let Some(w) = won {
+                    if super_tiebreak {
+                        self.game_finished();
                         let (a, b) = match w {
                             Team::A => (1, 0),
                             Team::B => (0, 1),
@@ -210,6 +231,7 @@ impl SetsMatch {
 
     /// `w` won a game (or a regular tie-break, which counts as the set's 13th game).
     fn game_won(&mut self, w: Team, tiebreak: Option<(u16, u16)>) {
+        self.game_finished();
         let g = slot(&mut self.games, w);
         *g = g.saturating_add(1);
         let [a, b] = self.games;
@@ -223,6 +245,14 @@ impl SetsMatch {
         } else {
             self.unit = Unit::Game(Game::new(self.rules.deuce));
         }
+    }
+
+    /// Count a finished game (or tie-break) and pass service to the next player in rotation.
+    /// After a tie-break that player is the one after the tie-break's first server.
+    fn game_finished(&mut self) {
+        self.finished_games = self.finished_games.wrapping_add(1);
+        self.rotation = self.rotation.wrapping_add(1) % 4;
+        self.change_ends |= ends_change_after_game(self.finished_games);
     }
 
     fn set_won(&mut self, w: Team, set: SetScore) {
@@ -255,7 +285,19 @@ impl SetsMatch {
 
     fn score(&self, start: Start) -> Score {
         let [a, b] = self.games;
+        let first = start.first_server;
         let mut sets = self.finished.clone();
+        let (server, side) = match &self.unit {
+            Unit::Over => (in_rotation(first, self.rotation), ServeSide::Right),
+            Unit::Game(game) => (
+                in_rotation(first, self.rotation),
+                serve_side(game.points_played(), game.score().deciding_point),
+            ),
+            Unit::TieBreak { tb, .. } => (
+                tiebreak_server(first, self.rotation, tb.points_played()),
+                serve_side(tb.points_played(), false),
+            ),
+        };
         let current = match &self.unit {
             Unit::Over => Current::None,
             Unit::Game(game) => {
@@ -291,6 +333,9 @@ impl SetsMatch {
             sets_won: self.sets_won,
             games: [u16::from(a), u16::from(b)],
             current,
+            server,
+            side,
+            change_ends: self.change_ends,
             status,
             ..Score::blank(start)
         }

@@ -7,7 +7,7 @@ mod tiebreak;
 mod types;
 
 pub use game::{Game, GameScore, PointCall};
-pub use serve::ServeSide;
+pub use serve::{ServeSide, serve_order};
 pub use state::{Current, MatchState, Score, SetScore, Status};
 pub use tiebreak::{SUPER_TIEBREAK_TO, TIEBREAK_TO, TieBreak};
 pub use types::*;
