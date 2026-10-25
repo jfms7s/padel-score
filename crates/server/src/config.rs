@@ -49,8 +49,25 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// `net` with its host bits cleared, and an IPv4-mapped IPv6 net (`::ffff:10.42.0.0/112`) as
+/// the IPv4 net it maps (`10.42.0.0/16`). Client IPs are canonicalized to IPv4 the same way
+/// ([`crate::client_ip`]), so a mapped entry left as IPv6 would never match and every client
+/// behind that proxy would share the proxy's key.
+fn canonical_net(net: IpNet) -> IpNet {
+    let net = net.trunc();
+    if let IpNet::V6(v6) = net
+        && v6.prefix_len() >= 96
+        && let Some(v4) = v6.network().to_ipv4_mapped()
+        && let Ok(mapped) = ipnet::Ipv4Net::new(v4, v6.prefix_len() - 96)
+    {
+        return IpNet::V4(mapped);
+    }
+    net
+}
+
 /// Parse `TRUSTED_PROXIES`: comma-separated CIDRs (`10.42.0.0/16`) or bare IPs (`192.0.2.1`,
-/// taken as a /32 or /128). Blank entries are skipped; any other bad entry is an error.
+/// taken as a /32 or /128). IPv4-mapped entries become IPv4 ([`canonical_net`]). Blank entries
+/// are skipped; any other bad entry is an error.
 pub fn parse_trusted_proxies(raw: &str) -> Result<Vec<IpNet>, ConfigError> {
     raw.split(',')
         .map(str::trim)
@@ -58,12 +75,8 @@ pub fn parse_trusted_proxies(raw: &str) -> Result<Vec<IpNet>, ConfigError> {
         .map(|entry| {
             entry
                 .parse::<IpNet>()
-                .or_else(|_| {
-                    entry
-                        .parse::<IpAddr>()
-                        .map(|ip| IpNet::from(ip.to_canonical()))
-                })
-                .map(|net| net.trunc())
+                .or_else(|_| entry.parse::<IpAddr>().map(IpNet::from))
+                .map(canonical_net)
                 .map_err(|_| ConfigError::TrustedProxy(entry.to_owned()))
         })
         .collect()
@@ -132,7 +145,7 @@ impl Config {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::panic)]
+#[allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
 mod tests {
     use super::*;
 
@@ -161,6 +174,16 @@ mod tests {
             shown,
             ["10.42.0.0/16", "192.0.2.1/32", "2001:db8::/32", "::1/128"]
         );
+    }
+
+    #[test]
+    fn ipv4_mapped_trusted_proxies_are_canonicalized_to_ipv4() {
+        let c = config(&[("TRUSTED_PROXIES", "::ffff:10.42.0.0/112, ::ffff:192.0.2.1")]);
+        let shown: Vec<String> = c.trusted_proxies.iter().map(ToString::to_string).collect();
+        assert_eq!(shown, ["10.42.0.0/16", "192.0.2.1/32"]);
+        // A v6 net wider than the mapped range stays v6.
+        let c = config(&[("TRUSTED_PROXIES", "::/64")]);
+        assert_eq!(c.trusted_proxies[0].to_string(), "::/64");
     }
 
     #[test]

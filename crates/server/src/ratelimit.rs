@@ -9,7 +9,22 @@
 //! Memory is bounded: at most [`MAX_KEYS`] keys are remembered, the oldest window is forgotten
 //! first past that, and expired windows are swept on every call and by [`run_sweeper`].
 //!
+//! The trade-off of that bound, accepted by the plan: a flood of over 10,000 distinct keys inside
+//! one window (many addresses, or many made-up emails) evicts older windows early, so a key can
+//! get a fresh allowance sooner than its window. Memory stays bounded either way, and an IPv6
+//! client is keyed by its /64, so one subscriber cannot flood on its own.
+//!
 //! Keys are strings: [`crate::client_ip::rate_key`] for addresses, a normalized email, a user id.
+//!
+//! # Limiting failures only (login): reserve, then refund
+//!
+//! Checking first and counting a failure afterwards races: N concurrent wrong passwords all pass
+//! the check before any failure is counted. So a login reserves first and refunds on success:
+//!
+//! 1. `let t = now();` then `try_acquire(&rate_key(ip), t)` on `login_ip` and
+//!    `try_acquire(&email, t)` on `login_email`, both up front, both counted even if one refuses;
+//!    any refusal is `ApiError::TooMany` with the longer wait, before any argon2 work.
+//! 2. On a successful login, `refund` both with the same `t`. A failure keeps its slot.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -41,11 +56,9 @@ struct Inner {
 
 /// A fixed-window limiter: `limit` counted calls per key per `window_secs`.
 ///
-/// Two ways to use it:
-/// - [`try_acquire`](RateLimiter::try_acquire) counts every call, allowed or not, and decides
-///   (firstdime's `consume`). For routes limited on every request.
-/// - [`check`](RateLimiter::check) decides without counting and [`hit`](RateLimiter::hit) counts
-///   without deciding. For limits on failures only, like login: check first, hit on failure.
+/// [`try_acquire`](RateLimiter::try_acquire) counts every call, allowed or not, and decides
+/// in one locked step (firstdime's `consume`), so concurrent callers can never exceed `limit`.
+/// [`refund`](RateLimiter::refund) gives one slot back; see the module docs for login.
 ///
 /// A refusal is `Err(retry_after)`: whole seconds until the window ends, at least 1. `now` is
 /// unix seconds, passed in so tests control the clock. The mutex is never held across an await.
@@ -76,22 +89,17 @@ impl RateLimiter {
         }
     }
 
-    /// Decide whether `key` is still allowed, without counting a call.
-    pub fn check(&self, key: &str, now: i64) -> Result<(), u64> {
+    /// Give back one call counted for `key` by a `try_acquire` at `acquired_at` (pass the same
+    /// `now`). Only the window that call was counted in is touched: if it has ended, or `key` has
+    /// no window, this does nothing. The count never goes below zero.
+    pub fn refund(&self, key: &str, acquired_at: i64) {
         let mut inner = self.lock();
-        self.sweep_in(&mut inner, now);
-        match inner.windows.get(key) {
-            Some(window) if self.is_live(window, now) && window.count >= self.limit => {
-                Err(self.retry_after(window.start, now))
-            }
-            _ => Ok(()),
+        if let Some(window) = inner.windows.get_mut(key)
+            && window.start <= acquired_at
+            && self.is_live(window, acquired_at)
+        {
+            window.count = window.count.saturating_sub(1);
         }
-    }
-
-    /// Count one call (say, a failure) for `key`, without deciding.
-    pub fn hit(&self, key: &str, now: i64) {
-        let mut inner = self.lock();
-        self.count(&mut inner, key, now);
     }
 
     /// Forget every expired window.
@@ -170,9 +178,9 @@ impl RateLimiter {
 /// The named limiters the account routes use. All windows are one minute.
 #[derive(Debug)]
 pub struct Limits {
-    /// Login FAILURES per client address ([`crate::client_ip::rate_key`]): 10 a minute.
+    /// Login failures per client address (reserve, then refund on success) ([`crate::client_ip::rate_key`]): 10 a minute.
     pub login_ip: RateLimiter,
-    /// Login FAILURES per normalized email, from any address: 5 a minute.
+    /// Login failures per normalized email (reserve, then refund on success), from any address: 5 a minute.
     pub login_email: RateLimiter,
     /// `POST /api/device/start` per client address: 10 a minute.
     pub device_start: RateLimiter,
@@ -233,20 +241,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hit_and_try_acquire_share_one_count() {
-        let limiter = RateLimiter::new(2, 60);
-        limiter.hit("k", 0);
-        assert_eq!(limiter.try_acquire("k", 0), Ok(()));
-        assert_eq!(limiter.try_acquire("k", 0), Err(60));
-    }
-
-    #[test]
     fn a_reopened_window_moves_to_the_back_of_the_eviction_order() {
         let limiter = RateLimiter::new(1, 60);
-        limiter.hit("a", 0);
-        limiter.hit("b", 1);
+        limiter.try_acquire("a", 0).unwrap();
+        limiter.try_acquire("b", 1).unwrap();
         // "a" expires and reopens later than "b": "b" is now the oldest.
-        limiter.hit("a", 60);
+        limiter.try_acquire("a", 60).unwrap();
         let inner = limiter.lock();
         let order: Vec<&str> = inner.order.values().map(String::as_str).collect();
         assert_eq!(order, ["b", "a"]);

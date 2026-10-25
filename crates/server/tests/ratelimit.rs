@@ -178,16 +178,6 @@ fn limit_then_retry_after() {
     assert_eq!(limiter.try_acquire("k", t + 59), Err(1));
     // Other keys have their own allowance.
     assert_eq!(limiter.try_acquire("other", t), Ok(()));
-
-    // check/hit: only hits count (login failures), and check never consumes.
-    let failures = RateLimiter::new(2, 60);
-    for _ in 0..10 {
-        assert_eq!(failures.check("f", t), Ok(()));
-    }
-    failures.hit("f", t);
-    assert_eq!(failures.check("f", t + 1), Ok(()));
-    failures.hit("f", t + 1);
-    assert_eq!(failures.check("f", t + 20), Err(40));
 }
 
 #[test]
@@ -201,11 +191,6 @@ fn window_resets() {
     assert_eq!(limiter.try_acquire("k", t + 60), Ok(()));
     assert_eq!(limiter.try_acquire("k", t + 61), Ok(()));
     assert_eq!(limiter.try_acquire("k", t + 62), Err(58));
-
-    let failures = RateLimiter::new(1, 60);
-    failures.hit("f", t);
-    assert_eq!(failures.check("f", t + 59), Err(1));
-    assert_eq!(failures.check("f", t + 60), Ok(()));
 }
 
 #[test]
@@ -234,6 +219,57 @@ fn limiter_bounded_at_10000_keys() {
     assert_eq!(limiter.len(), 1);
     limiter.sweep(t + 300);
     assert_eq!(limiter.len(), 0);
+}
+
+#[test]
+fn concurrent_acquires_never_exceed_limit() {
+    let limiter = Arc::new(RateLimiter::new(10, 60));
+    let t = 1_000_000;
+    let allowed: usize = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..64)
+            .map(|_| {
+                let limiter = Arc::clone(&limiter);
+                scope.spawn(move || {
+                    (0..8)
+                        .filter(|_| limiter.try_acquire("login", t).is_ok())
+                        .count()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).sum()
+    });
+    assert_eq!(allowed, 10);
+}
+
+#[test]
+fn refund_only_affects_current_window() {
+    let limiter = RateLimiter::new(2, 60);
+    let t = 1_000_000;
+    // Reserve-then-refund: a successful login gives its slot back.
+    assert_eq!(limiter.try_acquire("k", t), Ok(()));
+    limiter.refund("k", t);
+    assert_eq!(limiter.try_acquire("k", t + 1), Ok(()));
+    assert_eq!(limiter.try_acquire("k", t + 1), Ok(()));
+    assert_eq!(limiter.try_acquire("k", t + 1), Err(59));
+
+    // A refund never goes below zero: extra refunds buy no extra allowance.
+    let limiter = RateLimiter::new(1, 60);
+    assert_eq!(limiter.try_acquire("z", t), Ok(()));
+    for _ in 0..5 {
+        limiter.refund("z", t);
+    }
+    assert_eq!(limiter.try_acquire("z", t), Ok(()));
+    assert_eq!(limiter.try_acquire("z", t), Err(60));
+
+    // A refund for an acquire made in an earlier window does not touch the next window.
+    let limiter = RateLimiter::new(1, 60);
+    assert_eq!(limiter.try_acquire("w", t), Ok(()));
+    assert_eq!(limiter.try_acquire("w", t + 60), Ok(()));
+    limiter.refund("w", t);
+    assert_eq!(limiter.try_acquire("w", t + 61), Err(59));
+    // Nor does a refund for a key with no window create one.
+    limiter.refund("absent", t);
+    assert_eq!(limiter.len(), 1);
 }
 
 // End to end.

@@ -41,6 +41,14 @@ async fn main() -> Result<(), BoxError> {
         )
         .init();
 
+    let trusted_proxies = config.trusted_proxies.len();
+    if trusted_proxies == 0 {
+        tracing::warn!(
+            "no TRUSTED_PROXIES: the TCP peer is the client IP; behind a reverse proxy every client shares its key"
+        );
+    } else {
+        tracing::info!(trusted_proxies, "trusted proxies configured");
+    }
     let port = config.port;
     if let Some(dir) = config
         .database_url
