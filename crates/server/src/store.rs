@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
-use crate::players::{PlayerSlots, resolve_slots_in};
+use crate::players::{PlayerSlots, insert_match_players_in, resolve_slots_in};
 use crate::tokens::new_token;
 
 pub type Tx<'a> = sqlx::Transaction<'a, sqlx::Sqlite>;
@@ -383,6 +383,70 @@ pub async fn save_result(
     Ok(())
 }
 
+/// Create a match inside the caller's transaction: validate the rules, resolve the picked
+/// players into names, and insert the match and its `match_players` rows.
+pub async fn create_match_in(
+    tx: &mut Tx<'_>,
+    new: NewMatch,
+    now: i64,
+) -> Result<StoredMatch, StoreError> {
+    new.format.validate()?;
+    new.start.validate()?;
+    let mut teams = new.teams.normalized()?;
+    let picked =
+        resolve_slots_in(tx, new.owner_user_id.as_deref(), &new.players, &mut teams).await?;
+    let teams = teams.normalized()?;
+    let stored = StoredMatch {
+        id: uuid::Uuid::new_v4().to_string(),
+        scorer_token: new_token(),
+        spectator_token: new_token(),
+        format: new.format,
+        start: new.start,
+        teams,
+        revision: 0,
+        owner_user_id: new.owner_user_id,
+        created_at: now,
+        last_activity_at: now,
+        result_locked_at: None,
+    };
+    sqlx::query(
+        "INSERT INTO matches (id, scorer_token, spectator_token, format, start, teams, \
+         revision, owner_user_id, created_at, last_activity_at) \
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+    )
+    .bind(&stored.id)
+    .bind(&stored.scorer_token)
+    .bind(&stored.spectator_token)
+    .bind(encode(&stored.format)?)
+    .bind(encode(&stored.start)?)
+    .bind(encode(&stored.teams)?)
+    .bind(&stored.owner_user_id)
+    .bind(now)
+    .bind(now)
+    .execute(&mut **tx)
+    .await?;
+    let rows: Vec<_> = picked
+        .iter()
+        .map(|(team, position, id)| (*team, *position, id.as_str()))
+        .collect();
+    insert_match_players_in(tx, &stored.id, &rows).await?;
+    Ok(stored)
+}
+
+/// Give the match a fresh scorer token, so the old link no longer finds it. The spectator token
+/// stays.
+pub async fn rotate_scorer_token_in(tx: &mut Tx<'_>, match_id: &str) -> Result<(), StoreError> {
+    let done = sqlx::query("UPDATE matches SET scorer_token = ? WHERE id = ?")
+        .bind(new_token())
+        .bind(match_id)
+        .execute(&mut **tx)
+        .await?;
+    if done.rows_affected() != 1 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct Store {
     pool: SqlitePool,
@@ -419,58 +483,8 @@ impl Store {
     }
 
     pub async fn create_match(&self, new: NewMatch, now: i64) -> Result<StoredMatch, StoreError> {
-        new.format.validate()?;
-        new.start.validate()?;
-        let mut teams = new.teams.normalized()?;
         let mut tx = self.begin().await?;
-        let picked = resolve_slots_in(
-            &mut tx,
-            new.owner_user_id.as_deref(),
-            &new.players,
-            &mut teams,
-        )
-        .await?;
-        let teams = teams.normalized()?;
-        let stored = StoredMatch {
-            id: uuid::Uuid::new_v4().to_string(),
-            scorer_token: new_token(),
-            spectator_token: new_token(),
-            format: new.format,
-            start: new.start,
-            teams,
-            revision: 0,
-            owner_user_id: new.owner_user_id,
-            created_at: now,
-            last_activity_at: now,
-            result_locked_at: None,
-        };
-        sqlx::query(
-            "INSERT INTO matches (id, scorer_token, spectator_token, format, start, teams, \
-             revision, owner_user_id, created_at, last_activity_at) \
-             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
-        )
-        .bind(&stored.id)
-        .bind(&stored.scorer_token)
-        .bind(&stored.spectator_token)
-        .bind(encode(&stored.format)?)
-        .bind(encode(&stored.start)?)
-        .bind(encode(&stored.teams)?)
-        .bind(&stored.owner_user_id)
-        .bind(now)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
-        for (team, position, player_id) in picked {
-            sqlx::query(
-                "INSERT INTO match_players (match_id, team, position, player_id) VALUES (?, ?, ?, ?)",
-            )
-            .bind(&stored.id)
-            .bind(team)
-            .bind(position)
-            .bind(player_id)
-            .execute(&mut *tx)
-            .await?;
-        }
+        let stored = create_match_in(&mut tx, new, now).await?;
         tx.commit().await?;
         Ok(stored)
     }

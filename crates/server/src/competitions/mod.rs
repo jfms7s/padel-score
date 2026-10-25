@@ -5,6 +5,7 @@
 //! both share. Like `players.rs`, it takes `now` as a parameter, writes inside
 //! [`Store::begin`], and exposes `*_in` variants for callers already in a transaction.
 
+pub mod courts;
 pub mod kinds;
 pub mod non_stop;
 pub mod places;
@@ -206,6 +207,18 @@ pub async fn competition_in(
 ) -> Result<Option<Competition>, StoreError> {
     let row = sqlx::query(select_competitions!("WHERE owner_user_id = ? AND id = ?"))
         .bind(owner)
+        .bind(id)
+        .fetch_optional(conn)
+        .await?;
+    Ok(row.as_ref().map(competition_from_row).transpose()?)
+}
+
+/// The event `id` whoever owns it: for a caller that came in by a token, not as the owner.
+pub(crate) async fn competition_by_id_in(
+    conn: &mut SqliteConnection,
+    id: &str,
+) -> Result<Option<Competition>, StoreError> {
+    let row = sqlx::query(select_competitions!("WHERE id = ?"))
         .bind(id)
         .fetch_optional(conn)
         .await?;
