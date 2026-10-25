@@ -55,6 +55,8 @@ Signed in, you also get:
 - **Picking players for a match**: on New match, each name field suggests players from your list, or adds the typed name to it. A typed name that isn't picked stays free text and is never added on its own.
 - **History** (`/history`): your finished matches, newest first, with the winner, the score and a link to the final view.
 - **Player pages** (`/players/{id}`): a player's wins, losses and draws, any placings, and their matches, each marked won, lost or drawn.
+- **Linking** (`/players`, `/link-player`): link a player to an account, either by a QR code the coordinator shows (the player confirms "That's me"), or by a claim the player sends from a match they played in ("That's me" on the match view) and the coordinator approves. Unlink any time; the coordinator's own records never change.
+- **My results** (`/profile`): one record, placings and match list across every coordinator you've played for, your linked entries and claims, and who can see your history: only you, coordinators you've played for (the default), or anyone with your profile link (`/p/{token}`), which shows no other people's names and can be replaced at any time.
 
 Records come from the match's own score, so an undo that un-finishes a match takes it out of history and the records again. Anonymous matches are in no one's history.
 

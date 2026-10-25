@@ -157,6 +157,7 @@
 		{@const me = $session.me}
 		<p>{a.signedInAs(me.display_name, me.email)}</p>
 		<div class="actions">
+			<a class="secondary" href="/profile">{strings.linking.profile.link}</a>
 			<a class="secondary" href="/link">{a.link}</a>
 			{#if me.is_admin}<a class="secondary" href="/admin">{a.admin}</a>{/if}
 		</div>
