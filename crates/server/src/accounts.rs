@@ -445,7 +445,7 @@ const INVITE_PAGE: &str = "/invite";
 const RESET_PAGE: &str = "/reset";
 
 /// `{page}#{code}`: the only form a code leaves the server in.
-fn fragment_url(page: &str, code: &str) -> String {
+pub(crate) fn fragment_url(page: &str, code: &str) -> String {
     format!("{page}#{code}")
 }
 

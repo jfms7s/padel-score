@@ -9,6 +9,7 @@ pub mod db;
 pub mod device;
 pub mod hub;
 pub mod linking;
+pub mod linking_api;
 pub mod owned;
 pub mod players;
 pub mod players_api;

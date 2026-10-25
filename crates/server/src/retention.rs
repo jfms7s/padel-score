@@ -21,7 +21,7 @@ pub async fn purge_inactive(store: &Store, now: i64) -> Result<Vec<String>, Stor
 }
 
 /// One purge pass: delete the idle anonymous matches, then end the live streams of the purged
-/// ones, and delete the expired sessions, invites, device codes and reset codes. Owned matches
+/// ones, and delete the expired sessions, invites, device codes, reset codes and link codes. Owned matches
 /// are never purged. Returns how many matches were purged; a failure is logged and counts as
 /// none.
 pub async fn purge_once(state: &AppState, now: i64) -> usize {
@@ -31,6 +31,7 @@ pub async fn purge_once(state: &AppState, now: i64) -> usize {
             invites = auth.invites,
             device_codes = auth.device_codes,
             resets = auth.resets,
+            link_codes = auth.link_codes,
             "expired auth records purged"
         ),
         Err(error) => tracing::error!(%error, "auth records purge failed"),

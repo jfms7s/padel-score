@@ -69,6 +69,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::accounts::routes())
         .merge(crate::owned::routes())
         .merge(crate::players_api::routes())
+        .merge(crate::linking_api::routes())
         .merge(crate::device::routes())
 }
 
