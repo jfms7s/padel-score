@@ -221,6 +221,7 @@ fn invalid_rules_are_rejected() {
             team: Team::A,
             index: 2,
         },
+        other_first_server: 0,
     };
     assert_eq!(
         MatchState::new(bo3(), bad_start).unwrap_err(),

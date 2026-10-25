@@ -275,7 +275,7 @@ impl TimedMatch {
     }
 
     fn score(&self, start: Start) -> Score {
-        let server = in_rotation(start.first_server, self.rotation);
+        let server = in_rotation(&start, self.rotation);
         let (current, side, status) = match &self.unit {
             TimedUnit::Game(game) => {
                 let gs = game.score();
@@ -447,16 +447,15 @@ impl SetsMatch {
 
     fn score(&self, start: Start) -> Score {
         let [a, b] = self.games;
-        let first = start.first_server;
         let mut sets = self.finished.clone();
         let (server, side) = match &self.unit {
-            Unit::Over => (in_rotation(first, self.rotation), ServeSide::Right),
+            Unit::Over => (in_rotation(&start, self.rotation), ServeSide::Right),
             Unit::Game(game) => (
-                in_rotation(first, self.rotation),
+                in_rotation(&start, self.rotation),
                 serve_side(game.points_played(), game.score().deciding_point),
             ),
             Unit::TieBreak { tb, .. } => (
-                tiebreak_server(first, self.rotation, tb.points_played()),
+                tiebreak_server(&start, self.rotation, tb.points_played()),
                 serve_side(tb.points_played(), false),
             ),
         };

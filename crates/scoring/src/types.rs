@@ -101,11 +101,13 @@ impl Format {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Start {
     pub first_server: Player,
+    /// The index (0 or 1) of the player who serves first for the team that receives first.
+    pub other_first_server: u8,
 }
 
 impl Start {
     pub fn validate(&self) -> Result<(), RulesError> {
-        if self.first_server.index > 1 {
+        if self.first_server.index > 1 || self.other_first_server > 1 {
             return Err(RulesError::InvalidPlayerIndex);
         }
         Ok(())

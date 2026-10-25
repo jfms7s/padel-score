@@ -230,6 +230,7 @@ fn play(format: &Format, points: &str) -> Score {
             team: Team::A,
             index: 0,
         },
+        other_first_server: 0,
     };
     let events: Vec<Event> = points
         .chars()

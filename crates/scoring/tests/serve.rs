@@ -16,9 +16,16 @@ fn p(team: Team, index: u8) -> Player {
     Player { team, index }
 }
 
-/// The player after `x` in the rotation that starts with A0.
+fn start(first_server: Player, other_first_server: u8) -> Start {
+    Start {
+        first_server,
+        other_first_server,
+    }
+}
+
+/// The player after `x` in the rotation of `start_a()`.
 fn next(x: Player) -> Player {
-    let order = serve_order(p(Team::A, 0));
+    let order = serve_order(&start_a());
     let i = order.iter().position(|&o| o == x).unwrap();
     order[(i + 1) % 4]
 }
@@ -26,13 +33,25 @@ fn next(x: Player) -> Player {
 #[test]
 fn order_alternates_teams() {
     assert_eq!(
-        serve_order(p(Team::A, 0)),
+        serve_order(&start_a()),
         [p(Team::A, 0), p(Team::B, 0), p(Team::A, 1), p(Team::B, 1)]
     );
     assert_eq!(
-        serve_order(p(Team::B, 1)),
+        serve_order(&start(p(Team::B, 1), 0)),
         [p(Team::B, 1), p(Team::A, 0), p(Team::B, 0), p(Team::A, 1)]
     );
+}
+
+#[test]
+fn receiving_pair_chooses_first_server() {
+    let st = start(p(Team::A, 0), 1);
+    assert_eq!(
+        serve_order(&st),
+        [p(Team::A, 0), p(Team::B, 1), p(Team::A, 1), p(Team::B, 0)]
+    );
+    let play_from = |s: &str| replay(&bo3(), &st, &ev(s)).unwrap().server;
+    assert_eq!(play_from("aaaa"), p(Team::B, 1));
+    assert_eq!(play_from("aaaa aaaa aaaa"), p(Team::B, 0));
 }
 
 #[test]

@@ -35,6 +35,7 @@ pub fn start_a() -> Start {
             team: Team::A,
             index: 0,
         },
+        other_first_server: 0,
     }
 }
 

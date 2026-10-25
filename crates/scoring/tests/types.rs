@@ -49,9 +49,24 @@ fn start_with_bad_player_index_is_invalid() {
             team: Team::B,
             index: 2,
         },
+        other_first_server: 0,
     };
     assert_eq!(bad.validate(), Err(RulesError::InvalidPlayerIndex));
     assert_eq!(start_a().validate(), Ok(()));
+}
+
+#[test]
+fn start_rejects_bad_other_first_server() {
+    let bad = Start {
+        other_first_server: 2,
+        ..start_a()
+    };
+    assert_eq!(bad.validate(), Err(RulesError::InvalidPlayerIndex));
+    let ok = Start {
+        other_first_server: 1,
+        ..start_a()
+    };
+    assert_eq!(ok.validate(), Ok(()));
 }
 
 #[test]

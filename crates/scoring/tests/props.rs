@@ -43,8 +43,9 @@ fn format() -> impl Strategy<Value = Format> {
 }
 
 fn start() -> impl Strategy<Value = Start> {
-    (team(), 0u8..=1).prop_map(|(team, index)| Start {
+    (team(), 0u8..=1, 0u8..=1).prop_map(|(team, index, other_first_server)| Start {
         first_server: Player { team, index },
+        other_first_server,
     })
 }
 
