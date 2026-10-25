@@ -375,6 +375,10 @@ export const strings = {
 			{ key: 'draws', short: 'D', long: 'Drawn' }
 		],
 		placings: 'Placings',
+		/** "Sunday cup · Match 1", on an event match. */
+		eventMatch: (event: string, label: string) => `${event} · ${label}`,
+		/** "Sunday cup: 3rd–4th of 12, tournament". */
+		placingIn: (event: string, placing: string) => `${event}: ${placing}`,
 		/** "3rd–4th of 12, tournament". */
 		placing: (place: number, to: number, size: number, kind: 'tournament' | 'non_stop') =>
 			`${to > place ? `${ordinal(place)}–${ordinal(to)}` : ordinal(place)} of ${size}, ${kind === 'tournament' ? 'tournament' : 'non-stop'}`,
@@ -563,6 +567,45 @@ export const strings = {
 			places: 'Every team needs a place, and the places must add up.',
 			settings: 'Check the event’s settings.'
 		}
+	},
+
+	// The court phone (/c/{token}), the court viewer (/cv/{token}) and the event page (/e/{token}).
+	court: {
+		loading: 'Loading the court…',
+		join: (court: string) => `Join ${court}`,
+		joinHint: 'This phone scores the matches on this court. Keep it at the fence.',
+		waiting: 'Waiting for a match',
+		upNext: (match: string) => `Up next: ${match}`,
+		next: (match: string) => `Next: ${match}`,
+		nextMatch: (match: string) => `Next match: ${match}`,
+		waitingForCoordinator: 'Waiting for the coordinator',
+		typeFinal: 'Type the final score',
+		locked: 'Result entered by the coordinator',
+		replaced: 'This court link has been replaced. Scan the new code.',
+		finished: 'This event has finished.',
+		loadFailed: 'Couldn’t load this court. Check the connection and reload.',
+		reload: 'Reload',
+		serveTitle: 'Who serves first?',
+		serveHint: 'Not sure? Spin the racket and tap the winner.',
+		otherServer: 'First to serve for the other pair',
+		startScoring: 'Start scoring',
+		starting: 'Starting…',
+		changeServer: 'Change who serves',
+		startFailed: 'Couldn’t save who serves. Try again.',
+		advanceFailed: 'Couldn’t move to the next match. Try again.',
+		matchLabel: (label: string, match: string) => `${label}: ${match}`,
+		// The court viewer.
+		viewerLoading: 'Loading the court…',
+		// The event page.
+		eventLoading: 'Loading the event…',
+		courts: 'Courts',
+		courtIdle: 'No match on court',
+		watch: 'Watch',
+		watchLabel: (court: string) => `Watch ${court}`,
+		matches: 'Matches',
+		noMatches: 'No matches yet.',
+		finalPositions: 'Final positions',
+		eventGone: 'This event link doesn’t work any more.'
 	},
 
 	// Home, signed in.

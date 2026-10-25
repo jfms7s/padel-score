@@ -3,7 +3,8 @@
 	// whole team half (sideways) or the point buttons (upright) as the scoring remote.
 	//
 	// Used by a match's scoring link (/s/{token}) and by the court phone, which passes a `banner`
-	// (court, match, what's next) and `extraActions` (typing the final score). A new `token`
+	// (court, match, what's next), `extraActions` (typing the final score) and `finishedAction`
+	// (the next match). A new `token`
 	// starts over: a fresh load, stream and queue, keyed by token, so an old match's taps never
 	// go to the new one.
 	import type { Snippet } from 'svelte';
@@ -41,13 +42,16 @@
 	let {
 		token,
 		banner,
-		extraActions
+		extraActions,
+		finishedAction
 	}: {
 		token: string;
 		/** Shown above the score. */
 		banner?: Snippet;
 		/** More buttons beside share and layout, styled for the layout's tone. */
 		extraActions?: Snippet<[Tone]>;
+		/** In place of the finished card's "New match" link (the court phone's next match). */
+		finishedAction?: Snippet;
 	} = $props();
 
 	const f = strings.fence;
@@ -342,7 +346,7 @@
 		<div class="finished">
 			<p class="winner">{w ? f.wins(model[w].name) : f.draw}</p>
 			{#if setsSummary(model)}<p class="summary">{setsSummary(model)}</p>{/if}
-			<a class="new" href="/new">{f.newMatch}</a>
+			{#if finishedAction}{@render finishedAction()}{:else}<a class="new" href="/new">{f.newMatch}</a>{/if}
 		</div>
 	{/if}
 {/snippet}

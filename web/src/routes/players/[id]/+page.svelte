@@ -91,7 +91,7 @@
 			<ul class="list" aria-label={t.placings}>
 				{#each placings as p (p.event_id)}
 					<li class="row">
-						<span>{t.placing(p.place, p.place_to, p.field_size, p.event_kind)}</span>
+						<span>{t.placingIn(p.event_name, t.placing(p.place, p.place_to, p.field_size, p.event_kind))}</span>
 						<time class="hint" datetime={new Date(p.finished_at * 1000).toISOString()}
 							>{new Date(p.finished_at * 1000).toLocaleDateString()}</time
 						>
