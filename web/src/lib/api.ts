@@ -1,6 +1,7 @@
 // The match API (crates/server/src/api.rs). Paths are relative: in production the same binary
 // serves the app and the API, and in dev vite proxies /api to it.
 
+import { loginPath } from './next';
 import { strings } from './strings';
 import type {
 	ApiErrorBody,
@@ -12,6 +13,12 @@ import type {
 	ReplaceRequest
 } from './types';
 
+/** What some refusals add: the field a 422 names, the wait a 429 asks for. */
+export interface ErrorDetail {
+	field?: string;
+	retryAfterSecs?: number;
+}
+
 /**
  * A request that failed. `retryable` means the server may never have seen or answered it (no
  * connection, a gateway error while it restarts, a dropped body), so a command should be queued
@@ -19,15 +26,47 @@ import type {
  * `code: 'network'` (`status` 0 when there was no response at all).
  */
 export class ApiError extends Error {
+	readonly field?: string;
+	readonly retryAfterSecs?: number;
+
 	constructor(
 		readonly status: number,
 		readonly code: ApiErrorBody['error'] | 'network',
 		message: string,
-		readonly retryable = false
+		readonly retryable = false,
+		detail: ErrorDetail = {}
 	) {
 		super(message);
 		this.name = 'ApiError';
+		if (detail.field !== undefined) this.field = detail.field;
+		if (detail.retryAfterSecs !== undefined) this.retryAfterSecs = detail.retryAfterSecs;
 	}
+}
+
+// ---- the signed-out redirect -------------------------------------------------------------
+
+/** Send the browser to sign-in, coming back here after. Not from sign-in itself. */
+function goToSignIn(): void {
+	const loc = globalThis.location;
+	if (!loc || loc.pathname === '/login') return;
+	// The fragment stays out: on /invite and /reset it is a secret code.
+	loc.assign(loginPath(loc.pathname + loc.search));
+}
+
+let onUnauthorized: () => void = goToSignIn;
+
+/** Send the browser to sign-in now, as a signed-in call's 401 does (a page that needs a user). */
+export function redirectToSignIn(): void {
+	onUnauthorized();
+}
+
+/** Replace what a signed-in call does on a 401 (tests); returns the undo. */
+export function setUnauthorizedHandler(handler: () => void): () => void {
+	const previous = onUnauthorized;
+	onUnauthorized = handler;
+	return () => {
+		onUnauthorized = previous;
+	};
 }
 
 /** What became of a command or replace request. A 409 or 422 is an answer, not a failure. */
@@ -57,11 +96,14 @@ function deadline(ms: number): { signal: AbortSignal; done: () => void } {
 	return { signal: ctrl.signal, done: () => clearTimeout(timer) };
 }
 
-async function call(
-	path: string,
-	init?: RequestInit,
-	timeoutMs?: number
-): Promise<{ status: number; body: unknown }> {
+interface Answer {
+	status: number;
+	body: unknown;
+	/** The `Retry-After` header in seconds, when a 429 sends one. */
+	retryAfter?: number;
+}
+
+async function call(path: string, init?: RequestInit, timeoutMs?: number): Promise<Answer> {
 	const limit = timeoutMs === undefined ? null : deadline(timeoutMs);
 	try {
 		return await exchange(path, { ...init, signal: limit?.signal });
@@ -70,8 +112,13 @@ async function call(
 	}
 }
 
+function retryAfterHeader(res: Response): number | undefined {
+	const secs = Number(res.headers.get('retry-after') ?? '');
+	return Number.isInteger(secs) && secs >= 0 && res.headers.has('retry-after') ? secs : undefined;
+}
+
 /** One request; a timeout aborts it like a dropped connection, so it is retryable. */
-async function exchange(path: string, init: RequestInit): Promise<{ status: number; body: unknown }> {
+async function exchange(path: string, init: RequestInit): Promise<Answer> {
 	let res: Response;
 	try {
 		res = await fetch(path, {
@@ -89,8 +136,13 @@ async function exchange(path: string, init: RequestInit): Promise<{ status: numb
 		// The connection dropped mid-body: whatever the status, the answer never arrived.
 		throw unreachable(res.status);
 	}
+	// The account routes answer some requests with no content.
+	if (res.status === 204) return { status: 204, body: null };
 	try {
-		return { status: res.status, body: JSON.parse(text) };
+		const answer: Answer = { status: res.status, body: JSON.parse(text) };
+		const retryAfter = retryAfterHeader(res);
+		if (retryAfter !== undefined) answer.retryAfter = retryAfter;
+		return answer;
 	} catch {
 		// The server only sends JSON, so an unreadable success was cut short or rewritten on the
 		// way; an unreadable error page came from something in between.
@@ -99,21 +151,63 @@ async function exchange(path: string, init: RequestInit): Promise<{ status: numb
 	}
 }
 
-function failure(status: number, body: unknown): ApiError {
-	const b = body as Partial<{ error: ApiErrorBody['error']; message: string }> | null;
+function failure(status: number, body: unknown, retryAfter?: number): ApiError {
+	const b = body as Partial<{
+		error: ApiErrorBody['error'];
+		message: string;
+		field: string;
+		retry_after_secs: number;
+	}> | null;
 	const code = typeof b?.error === 'string' ? b.error : 'internal';
 	const message = typeof b?.message === 'string' ? b.message : strings.serverError(status);
-	return new ApiError(status, code, message);
+	const detail: ErrorDetail = {};
+	if (typeof b?.field === 'string') detail.field = b.field;
+	const wait = Number.isInteger(b?.retry_after_secs) ? b?.retry_after_secs : retryAfter;
+	if (wait !== undefined) detail.retryAfterSecs = wait;
+	return new ApiError(status, code, message, false, detail);
 }
 
 async function request<T>(path: string, ok: number, init?: RequestInit, timeoutMs?: number): Promise<T> {
-	const { status, body } = await call(path, init, timeoutMs);
-	if (status !== ok) throw failure(status, body);
+	const { status, body, retryAfter } = await call(path, init, timeoutMs);
+	if (status !== ok) throw failure(status, body, retryAfter);
 	return body as T;
 }
 
 function post(body: unknown): RequestInit {
 	return { method: 'POST', body: JSON.stringify(body) };
+}
+
+/** Account calls run argon2 on the server, so they get longer than a score read. */
+export const ACCOUNT_TIMEOUT_MS = 20_000;
+
+export interface AccountCall {
+	method?: 'GET' | 'POST' | 'DELETE';
+	body?: unknown;
+	/** The success status: 200 unless given. */
+	ok?: number;
+	/**
+	 * The call needs the user signed in, so a 401 means the session ended (expired, revoked,
+	 * disabled) and the browser goes to sign-in. A 401 `invalid_credentials` is a wrong password,
+	 * an answer, and never redirects. Leave it off for the quiet boot check, the sign-in routes and
+	 * the public code routes.
+	 */
+	signedIn?: boolean;
+	/** The answer's shape; one that fails it is a server error. */
+	guard?: (v: unknown) => boolean;
+}
+
+/** A request to an account, device or owned-match route (see ./auth). */
+export async function accountRequest<T>(path: string, opts: AccountCall = {}): Promise<T> {
+	const init: RequestInit = { method: opts.method ?? 'GET' };
+	if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
+	const { status, body, retryAfter } = await call(path, init, ACCOUNT_TIMEOUT_MS);
+	if (status !== (opts.ok ?? 200)) {
+		const err = failure(status, body, retryAfter);
+		if (status === 401 && opts.signedIn && err.code !== 'invalid_credentials') onUnauthorized();
+		throw err;
+	}
+	if (opts.guard && !opts.guard(body)) throw new ApiError(status, 'internal', strings.serverError(status));
+	return body as T;
 }
 
 async function outcome(path: string, req: unknown): Promise<CommandOutcome> {

@@ -143,3 +143,147 @@ button {
 		transition-duration: 0.01ms !important;
 	}
 }
+
+/* The account pages (sign-in, setup, invite, reset, account, admin, link): one column at phone
+   width, in the new-match form's style. */
+.acct {
+	max-width: 28rem;
+	margin: 0 auto;
+	padding: 8px 16px 48px;
+}
+.acct h1 {
+	margin: 8px 0 16px;
+	font-size: 28px;
+	font-weight: 800;
+	font-variation-settings: 'wdth' 75;
+	line-height: 1.1;
+}
+.acct h2 {
+	margin: 32px 0 8px;
+	font-size: 18px;
+	font-weight: 750;
+	font-variation-settings: 'wdth' 85;
+}
+.acct p {
+	margin: 0 0 12px;
+}
+.acct form {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+.acct label {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	font-size: 13px;
+	color: var(--muted);
+}
+.acct input {
+	min-height: var(--tap);
+	width: 100%;
+	padding: 0 12px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--panel);
+	font-size: 16px;
+	color: var(--ink);
+}
+.acct .hint {
+	font-size: 13px;
+	color: var(--muted);
+}
+.acct .primary,
+.acct .secondary,
+.acct .danger {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: var(--tap);
+	padding: 0 18px;
+	border-radius: 14px;
+	font-size: 16px;
+	font-weight: 650;
+	text-decoration: none;
+}
+.acct .primary {
+	border: 0;
+	background: var(--ink);
+	color: var(--glass);
+}
+.acct .secondary {
+	border: 1px solid var(--line);
+	background: var(--panel);
+	color: var(--ink);
+}
+.acct .danger {
+	border: 1px solid var(--warn);
+	background: transparent;
+	color: var(--warn);
+}
+.acct button:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+.acct .error {
+	border: 1px solid var(--warn);
+	border-radius: 12px;
+	padding: 12px;
+	color: var(--warn);
+	margin: 0;
+}
+.acct .ok {
+	border: 1px solid var(--b);
+	border-radius: 12px;
+	padding: 12px;
+	background: var(--b-soft);
+	margin: 0;
+}
+.acct .list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: 8px;
+}
+.acct .row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px 12px;
+	min-height: var(--tap);
+	padding: 10px 14px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--panel);
+}
+.acct .what {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.acct .what strong {
+	font-weight: 650;
+}
+.acct .actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.acct .badge {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 0 8px;
+	border-radius: 999px;
+	background: var(--a-soft);
+	color: var(--ink);
+	font-size: 12px;
+	font-weight: 650;
+}
+.acct .badge.off {
+	background: transparent;
+	border: 1px solid var(--warn);
+	color: var(--warn);
+}

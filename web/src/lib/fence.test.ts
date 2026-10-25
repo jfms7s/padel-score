@@ -38,7 +38,7 @@ const withRevision = (view: MatchView, revision: number): MatchView => ({ ...vie
 
 function fakeStorage(init: Record<string, string> = {}): StorageLike & { data: Record<string, string> } {
 	const data = { ...init };
-	return { data, getItem: (k) => data[k] ?? null, setItem: (k, val) => void (data[k] = val) };
+	return { data, getItem: (k) => data[k] ?? null, setItem: (k, val) => void (data[k] = val), removeItem: (k) => void delete data[k] };
 }
 
 describe('latestView', () => {
@@ -145,6 +145,9 @@ describe('layout', () => {
 			},
 			setItem: () => {
 				throw new Error('full');
+			},
+			removeItem: () => {
+				throw new Error('blocked');
 			}
 		};
 		expect(loadLayout(bad)).toBe('auto');

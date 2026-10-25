@@ -1,0 +1,78 @@
+[
+	{
+		"id": "d806aa0c-a7da-43c0-a9ca-c62a5ae8f7f5",
+		"label": "Ana / Rui v João / Marta",
+		"created_at": 1792951721,
+		"last_activity_at": 1792951721,
+		"view": {
+			"id": "d806aa0c-a7da-43c0-a9ca-c62a5ae8f7f5",
+			"format": {
+				"sets": {
+					"deuce": "golden_point",
+					"sets": "one",
+					"deciding": "full_set"
+				}
+			},
+			"start": {
+				"first_server": {
+					"team": "a",
+					"index": 0
+				},
+				"other_first_server": 0
+			},
+			"teams": {
+				"a": [
+					"Ana",
+					"Rui"
+				],
+				"b": [
+					"João",
+					"Marta"
+				]
+			},
+			"revision": 0,
+			"head_seq": 0,
+			"events": [],
+			"score": {
+				"sets": [
+					{
+						"a": 0,
+						"b": 0,
+						"tiebreak": null
+					}
+				],
+				"sets_won": [
+					0,
+					0
+				],
+				"games": [
+					0,
+					0
+				],
+				"regulation_games": [
+					0,
+					0
+				],
+				"current": {
+					"game": {
+						"a": "love",
+						"b": "love",
+						"deuces": 0,
+						"deciding_point": false
+					}
+				},
+				"server": {
+					"team": "a",
+					"index": 0
+				},
+				"side": "right",
+				"change_ends": false,
+				"overtime": false,
+				"time_up": false,
+				"status": "in_progress"
+			}
+		},
+		"scorer_token": "S4GFxfoMzDWZS1ac_6uQhkF1zHVY0_7OqYVhZQBOtdo",
+		"spectator_token": "KexrmnFsYAsTRTpMkZ8QVLmLmWPYG8NqqcbYYYrS6SQ"
+	}
+]

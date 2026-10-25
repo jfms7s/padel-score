@@ -1,0 +1,19 @@
+[
+	{
+		"id": "566b7b55-4d4c-40d1-add0-e103836eb466",
+		"email": "ana@example.test",
+		"display_name": "Ana",
+		"is_admin": true,
+		"disabled": false,
+		"created_at": 1792951720
+	},
+	{
+		"id": "9295e532-76b4-438e-b552-882db8669681",
+		"email": "rui@example.test",
+		"display_name": "Rui",
+		"is_admin": false,
+		"disabled": false,
+		"invited_by_name": "Ana",
+		"created_at": 1792951721
+	}
+]
