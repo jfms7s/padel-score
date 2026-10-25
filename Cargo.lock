@@ -1028,6 +1028,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "futures-util",
  "getrandom 0.3.4",
  "http-body-util",
  "mime_guess",
@@ -1037,6 +1038,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tokio-util",
  "tower",
  "tower-http",
  "tracing",

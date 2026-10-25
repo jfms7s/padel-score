@@ -1,6 +1,8 @@
+pub mod api;
 pub mod commands;
 pub mod config;
 pub mod db;
+pub mod hub;
 pub mod store;
 pub mod tokens;
 pub mod web;
@@ -8,34 +10,46 @@ pub mod web;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 use serde_json::json;
+use tokio_util::sync::CancellationToken;
 
 pub use config::Config;
+pub use hub::Hub;
 pub use store::Store;
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
     pub store: Store,
+    pub hub: Arc<Hub>,
+    /// Cancelled when the server shuts down; every SSE stream ends on it.
+    pub shutdown: CancellationToken,
 }
 
 impl AppState {
     pub fn new(config: Arc<Config>, store: Store) -> AppState {
-        AppState { config, store }
+        AppState {
+            config,
+            store,
+            hub: Arc::new(Hub::new()),
+            shutdown: CancellationToken::new(),
+        }
     }
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .merge(api::routes())
         .route("/api", axum::routing::any(api_not_found))
         .route("/api/", axum::routing::any(api_not_found))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .fallback(web::static_handler)
+        .layer(DefaultBodyLimit::max(api::MAX_BODY_BYTES))
         .with_state(state)
 }
 

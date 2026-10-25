@@ -415,6 +415,21 @@ impl Store {
         Ok(row.as_ref().map(match_from_row).transpose()?)
     }
 
+    /// The match and its whole log, read in one transaction so the two agree (the revision
+    /// matches the events). `None` when the match does not exist.
+    pub async fn snapshot(
+        &self,
+        match_id: &str,
+    ) -> Result<Option<(StoredMatch, Vec<StoredEvent>)>, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let Some(m) = match_by_id_in(&mut tx, match_id).await? else {
+            return Ok(None);
+        };
+        let events = events_in(&mut tx, match_id).await?;
+        tx.commit().await?;
+        Ok(Some((m, events)))
+    }
+
     pub async fn events(&self, match_id: &str) -> Result<Vec<StoredEvent>, StoreError> {
         let mut conn = self.pool.acquire().await?;
         events_in(&mut conn, match_id).await
