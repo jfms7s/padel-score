@@ -38,13 +38,14 @@ fun rowOf(m: MyMatch, quickMatchTitle: String): MatchRow {
 }
 
 /**
- * [stream] is collected once, from construction: the server keeps at most 5 list streams per user.
+ * [stream] is cold and collected only between [startStream] and [stopStream], so the list's SSE
+ * connection is closed while the score screen covers the list or the screen is off.
  * The stream is the source of truth, so a frame always wins over the one-off GET, even if the GET
- * answers later.
+ * answers later. Unauthorized is final: nothing reconnects or reloads after it.
  */
 class MatchListModel(
     private val api: PadelApi,
-    stream: Flow<StreamItem<List<MyMatch>>>,
+    private val stream: Flow<StreamItem<List<MyMatch>>>,
     private val quickMatchTitle: String,
 ) : ViewModel() {
     private val _state = MutableStateFlow<ListState>(ListState.Loading)
@@ -53,10 +54,21 @@ class MatchListModel(
     private var streamFilled = false
     private var live = true
     private var load: Job? = null
+    private var collection: Job? = null
 
     init {
-        viewModelScope.launch { stream.collect(::onStream) }
         refresh()
+    }
+
+    /** Connects afresh; a no-op while already collecting or after Unauthorized. */
+    fun startStream() {
+        if (collection?.isActive == true || _state.value == ListState.Unauthorized) return
+        collection = viewModelScope.launch { stream.collect(::onStream) }
+    }
+
+    fun stopStream() {
+        collection?.cancel()
+        collection = null
     }
 
     fun refresh() {
