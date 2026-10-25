@@ -115,6 +115,11 @@ async fn current_of(pool: &SqlitePool, court_id: &str) -> Option<String> {
 
 /// 24 points for team A: a 6-0 one-set match, which writes its `match_results` row.
 async fn finish(s: &Store, match_id: &str) {
+    finish_as(s, match_id, Authority::Scorer).await;
+}
+
+/// As [`finish`], through the given authority (`Owner` is the coordinator's route).
+async fn finish_as(s: &Store, match_id: &str, authority: Authority) {
     let (m, _) = s.snapshot(match_id).await.unwrap().unwrap();
     let req = CommandRequest {
         client_id: "finish".into(),
@@ -122,10 +127,7 @@ async fn finish(s: &Store, match_id: &str) {
         base_revision: 0,
         commands: vec![Command::Point { team: Team::A }; 24],
     };
-    match apply_command(s, &m, req, NOW, Authority::Scorer)
-        .await
-        .unwrap()
-    {
+    match apply_command(s, &m, req, NOW, authority).await.unwrap() {
         CommandOutcome::Applied(_) => {}
         other => panic!("expected Applied, got {other:?}"),
     }
@@ -512,6 +514,63 @@ async fn moving_current_match_rotates_and_promotes_next() {
     assert_eq!(rotated.as_deref(), Some(second.match_id.as_str()));
     assert_ne!(scorer_token(&pool, &second.match_id).await, old);
     assert_eq!(current_of(&pool, &one.id).await, None);
+}
+
+#[tokio::test]
+async fn moving_current_match_to_idle_court_makes_it_current_there() {
+    let (s, pool) = setup().await;
+    let (ev, teams) = running(&s, &pool).await;
+    let one = s.add_court(A, &ev.id, None).await.unwrap();
+    let two = s.add_court(A, &ev.id, None).await.unwrap();
+    let first = new_match(&s, &ev, &teams, 0, 1, Some(&one.id)).await;
+    let second = new_match(&s, &ev, &teams, 2, 3, Some(&one.id)).await;
+    let old = scorer_token(&pool, &first.match_id).await;
+    assert_eq!(current_of(&pool, &two.id).await, None);
+    let rotated = s
+        .assign_match(A, &ev.id, &first.match_id, Some(&two.id))
+        .await
+        .unwrap();
+    assert_eq!(rotated.as_deref(), Some(first.match_id.as_str()));
+    let new = scorer_token(&pool, &first.match_id).await;
+    assert_ne!(new, old);
+    assert!(s.by_scorer_token(&old).await.unwrap().is_none());
+    assert!(s.by_scorer_token(&new).await.unwrap().is_some());
+    assert_eq!(
+        current_of(&pool, &two.id).await,
+        Some(first.match_id.clone())
+    );
+    assert_eq!(
+        current_of(&pool, &one.id).await,
+        Some(second.match_id.clone())
+    );
+}
+
+#[tokio::test]
+async fn promotion_skips_finished_queued_match() {
+    let (s, pool) = setup().await;
+    let (ev, teams) = running(&s, &pool).await;
+    let court = s.add_court(A, &ev.id, None).await.unwrap();
+    let first = new_match(&s, &ev, &teams, 0, 1, Some(&court.id)).await;
+    let queued = new_match(&s, &ev, &teams, 2, 3, Some(&court.id)).await;
+    let third = new_match(&s, &ev, &teams, 0, 2, Some(&court.id)).await;
+    // The coordinator finishes the queued match through the owner route.
+    finish_as(&s, &queued.match_id, Authority::Owner).await;
+    assert_eq!(
+        current_of(&pool, &court.id).await,
+        Some(first.match_id.clone())
+    );
+    finish(&s, &first.match_id).await;
+    let done = s.advance_court(A, &ev.id, &court.id).await.unwrap();
+    assert_eq!(done.current.as_deref(), Some(third.match_id.as_str()));
+    assert_eq!(
+        current_of(&pool, &court.id).await,
+        Some(third.match_id.clone())
+    );
+    // Moving the current match away promotes past the finished one too: the court empties.
+    s.assign_match(A, &ev.id, &third.match_id, None)
+        .await
+        .unwrap();
+    assert_eq!(current_of(&pool, &court.id).await, None);
 }
 
 #[tokio::test]
