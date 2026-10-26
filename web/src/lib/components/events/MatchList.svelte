@@ -13,6 +13,7 @@
 -->
 <script lang="ts" generics="M extends EventViewMatch">
 	import { tick } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import TypedScoreSheet from '#lib/components/TypedScoreSheet.svelte';
 	import { groupMatches, moveRow, nextUnfinished } from '#lib/desk.ts';
 	import {
@@ -67,15 +68,9 @@
 	const unfinished = $derived(new Set(matches.filter((m) => m.state !== 'finished').map((m) => m.id)));
 	const editable = $derived(mode !== 'view' && onsave !== undefined);
 
-	/** Wide screens type in the row; phones (and the first render) use the sheet. */
-	let wide = $state(false);
-	$effect(() => {
-		const mq = matchMedia('(min-width: 700px)');
-		const update = () => (wide = mq.matches);
-		update();
-		mq.addEventListener('change', update);
-		return () => mq.removeEventListener('change', update);
-	});
+	/** Wide screens type in the row; phones use the sheet. */
+	const wideQuery = new MediaQuery('(min-width: 700px)');
+	const wide = $derived(wideQuery.current);
 
 	/** The row whose field (wide) or sheet (narrow) is open. */
 	let openId = $state<string | null>(null);
@@ -88,12 +83,27 @@
 	const rowButtons: Record<string, HTMLButtonElement | null> = {};
 	const ids = stickyClientId();
 
-	$effect(() => {
-		// A field that appears, on a click or after a save, takes the cursor.
+	/**
+	 * A field opened by the user (a click, `/`, or moving on after a save) takes the cursor once
+	 * it is rendered. A row re-created by a stream update keeps the field but not the cursor.
+	 */
+	async function focusField() {
+		await tick();
 		field?.focus();
-	});
+	}
 
 	const courtName = (cid: string | null) => courts.find((c) => c.id === cid)?.name ?? null;
+
+	/** A finished match's winner or draw, and in the coordinator's modes whether they typed it. */
+	function outcome(m: M): string | null {
+		const parts: string[] = [];
+		if (m.state === 'finished' && m.result) {
+			if (m.winner === null) parts.push(te.draw);
+			else parts.push(te.sheet.winner(teamName(m.winner === 'a' ? m.team_a : m.team_b)));
+		}
+		if (mode !== 'view' && m.locked) parts.push(te.enteredByYou);
+		return parts.length > 0 ? parts.join(' · ') : null;
+	}
 
 	function chip(m: M): { kind: 'live' | 'done' | 'wait'; text: string } {
 		if (m.state === 'live') return { kind: 'live', text: m.live ? liveScoreText(m.live) : te.matchState.live };
@@ -123,8 +133,8 @@
 			overtime = null;
 		}
 		openId = mid;
-		// Clicking the open row again puts the cursor back.
-		field?.focus();
+		// Also puts the cursor back when the open row is clicked again.
+		void focusField();
 	}
 
 	async function close(focusRow: boolean) {
@@ -218,6 +228,8 @@
 		const target = e.target as HTMLElement;
 		if (target.closest('input, textarea, select')) return;
 		e.preventDefault();
+		// On the overtime buttons `/` is typing too: it must not drop the pending pick.
+		if (target.closest('.overtime')) return;
 		// On a focused row `/` opens that row; elsewhere in the list, the first unfinished.
 		const focused = rowIds.find((mid) => rowButtons[mid] === target);
 		if (focused !== undefined) open(focused);
@@ -241,6 +253,7 @@
 				{#each s.list as m (m.id)}
 					{@const vs = matchText(m, teams)}
 					{@const c = chip(m)}
+					{@const out = outcome(m)}
 					{@const court = s.key === 'on-court' ? courtName(m.court_id) : null}
 					{@const isOpen = openId === m.id}
 					<li class:sel={isOpen && wide}>
@@ -256,12 +269,14 @@
 								>
 									<span class="l">{m.label}{#if court}{' · '}{court}{/if}</span>
 									<span class="v">{vs}</span>
+									{#if out}<span class="o">{out}</span>{/if}
 									<span class="chip {c.kind}">{c.text}</span>
 								</button>
 							{:else}
 								<div class="row-main">
 									<span class="l">{m.label}{#if court}{' · '}{court}{/if}</span>
 									<span class="v">{vs}</span>
+									{#if out}<span class="o">{out}</span>{/if}
 									<span class="chip {c.kind}">{c.text}</span>
 								</div>
 							{/if}
@@ -293,7 +308,7 @@
 									aria-label={t.typeResult(m.label)}
 									aria-describedby={failure ? `${uid}-failure` : undefined}
 									placeholder={t.resultPlaceholder}
-									readonly={saving}
+									readonly={saving || busy}
 									inputmode="text"
 									autocomplete="off"
 									autocapitalize="off"
@@ -397,13 +412,17 @@
 		font-weight: 700;
 		overflow-wrap: anywhere;
 	}
-	.v {
+	.v,
+	.o {
 		grid-column: 1;
 		color: var(--muted);
 		overflow-wrap: anywhere;
 	}
+	.o {
+		font-size: 13px;
+	}
 	.chip {
-		grid-row: 1 / span 2;
+		grid-row: 1 / span 3;
 		grid-column: 2;
 		display: inline-flex;
 		align-items: center;

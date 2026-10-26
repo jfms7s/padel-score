@@ -53,7 +53,7 @@
 		<p class="hint">{rulesText(ev.format)}</p>
 	</div>
 	<div class="acts">
-		<button class="secondary" type="button" onclick={oncopy}>{copied === 'spectator' ? d.copied : d.spectatorLink}</button>
+		<button class="secondary" type="button" onclick={oncopy}>{copied === 'spectator' ? t.copied : d.spectatorLink}</button>
 		{#if status === 'setup'}
 			<button class="primary" type="button" disabled={busy} onclick={onstart}>{t.start}</button>
 		{:else if status === 'running'}

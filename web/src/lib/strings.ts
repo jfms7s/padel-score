@@ -605,8 +605,6 @@ export const strings = {
 		moveLabel: (match: string) => `Court for ${match}`,
 		matchState: { waiting: 'Waiting', live: 'Live', finished: 'Finished' },
 		enteredByYou: 'Entered by you',
-		enterResult: 'Enter result',
-		enterResultLabel: (match: string) => `Enter the result of ${match}`,
 		view: 'View',
 		viewLabel: (match: string) => `View ${match}`,
 		liveScore: (games: string, point: string) => `${games}, ${point}`,
@@ -912,7 +910,7 @@ export const strings = {
 		live: 'Live',
 		finished: 'Finished',
 		won: 'Won',
-		ready: 'Up next',
+		ready: 'Ready',
 		idle: 'No match on this court',
 		next: (label: string) => `Next: ${label}`,
 		nextMatch: 'Next match',
@@ -941,7 +939,6 @@ export const strings = {
 			finish: 'Finish'
 		},
 		spectatorLink: 'Spectator link',
-		copied: 'Copied',
 		freeCourt: (name: string) => `${name} is free`,
 		upNext: 'Up next'
 	}
