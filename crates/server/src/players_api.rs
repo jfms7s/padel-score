@@ -29,6 +29,7 @@ use crate::AppState;
 use crate::accounts;
 use crate::api::{ApiError, ApiJson, ApiPath, now};
 use crate::auth::SessionUser;
+use crate::linking::Link;
 use crate::players::{Player, PlayerChange};
 use crate::results::{
     Cursor, DEFAULT_PAGE, HistoryEntry, MAX_PAGE, Placing, PlayerHistoryEntry, Record,
@@ -48,6 +49,27 @@ struct PlayerWithRecord {
     #[serde(flatten)]
     player: Player,
     record: Record,
+    /// The account the entry is linked to, if any.
+    link: Option<LinkBody>,
+    /// Pending claims on the entry from active accounts.
+    pending_claims: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct LinkBody {
+    display_name: String,
+    linked_at: i64,
+    is_me: bool,
+}
+
+impl LinkBody {
+    fn of(link: &Link, caller: &str) -> LinkBody {
+        LinkBody {
+            display_name: link.display_name.clone(),
+            linked_at: link.linked_at,
+            is_me: link.user_id == caller,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -62,14 +84,14 @@ struct CreatePlayer {
 
 /// `?before=&limit=` as sent; an empty value is the same as none.
 #[derive(Debug, Default, Deserialize)]
-struct PageQuery {
+pub(crate) struct PageQuery {
     before: Option<String>,
     limit: Option<String>,
 }
 
-struct Page {
-    before: Option<Cursor>,
-    limit: u32,
+pub(crate) struct Page {
+    pub(crate) before: Option<Cursor>,
+    pub(crate) limit: u32,
 }
 
 impl PageQuery {
@@ -94,7 +116,7 @@ impl PageQuery {
 }
 
 /// The page query, with any rejection (e.g. a repeated key) as a JSON 400.
-fn page_of(query: Result<Query<PageQuery>, QueryRejection>) -> Result<Page, ApiError> {
+pub(crate) fn page_of(query: Result<Query<PageQuery>, QueryRejection>) -> Result<Page, ApiError> {
     let Ok(Query(query)) = query else {
         return Err(ApiError::BadRequest);
     };
@@ -121,7 +143,25 @@ async fn with_record(
     player: Player,
 ) -> Result<PlayerWithRecord, ApiError> {
     let record = state.store.record(owner, &player.id).await?;
-    Ok(PlayerWithRecord { player, record })
+    let link = state
+        .store
+        .links(owner)
+        .await?
+        .get(&player.id)
+        .map(|l| LinkBody::of(l, owner));
+    let pending_claims = state
+        .store
+        .pending_claim_counts(owner)
+        .await?
+        .get(&player.id)
+        .copied()
+        .unwrap_or(0);
+    Ok(PlayerWithRecord {
+        player,
+        record,
+        link,
+        pending_claims,
+    })
 }
 
 async fn list(
@@ -131,11 +171,20 @@ async fn list(
     let owner = &user.user.id;
     let players = state.store.list_players(owner).await?;
     let records = state.store.records(owner).await?;
+    let links = state.store.links(owner).await?;
+    let counts = state.store.pending_claim_counts(owner).await?;
     let items = players
         .into_iter()
         .map(|player| {
             let record = records.get(&player.id).copied().unwrap_or_default();
-            PlayerWithRecord { player, record }
+            let link = links.get(&player.id).map(|l| LinkBody::of(l, owner));
+            let pending_claims = counts.get(&player.id).copied().unwrap_or(0);
+            PlayerWithRecord {
+                player,
+                record,
+                link,
+                pending_claims,
+            }
         })
         .collect();
     Ok(Json(PlayerList { items }))
@@ -160,6 +209,8 @@ async fn create(
         PlayerWithRecord {
             player,
             record: Record::default(),
+            link: None,
+            pending_claims: 0,
         }
     } else {
         with_record(&state, owner, player).await?

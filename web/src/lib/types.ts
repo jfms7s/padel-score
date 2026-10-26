@@ -196,7 +196,8 @@ export type AccountErrorCode =
 	| 'last_admin'
 	| 'device_code_used'
 	| 'invalid_player'
-	| 'player_exists';
+	| 'player_exists'
+	| LinkingErrorCode;
 
 /** `GET /api/auth/me`, and the answer to setup, login and accepting an invite. */
 export interface Me {
@@ -296,6 +297,19 @@ export interface MyMatch {
 
 // ---- players and history (crates/server/src/players_api.rs, results.rs) -----------------
 
+/** The linking routes' error codes (403, 409, 410, 429). */
+export type LinkingErrorCode =
+	| 'link_code_invalid'
+	| 'link_overlaps'
+	| 'player_linked'
+	| 'player_not_linked'
+	| 'already_yours'
+	| 'claim_decided'
+	| 'claim_declined'
+	| 'not_public'
+	| 'too_many_claims'
+	| 'history_private';
+
 /** A player's wins, losses and draws (timed draws) over finished matches. */
 export interface PlayerRecord {
 	wins: number;
@@ -310,6 +324,10 @@ export interface Player {
 	archived: boolean;
 	created_at: number;
 	record: PlayerRecord;
+	/** The account this entry is linked to, if any. */
+	link: PlayerLink | null;
+	/** Pending claims on the entry. */
+	pending_claims: number;
 }
 
 /** `PATCH /api/players/{id}`: either field, or both. */
@@ -614,6 +632,109 @@ export interface NewEventMatch {
 export interface MatchChange {
 	court_id: string | null;
 	label?: string;
+}
+
+// ---- linking, claims and privacy (crates/server/src/linking_api.rs) ----------------------
+
+/** `Player.link`: who an entry is linked to. */
+export interface PlayerLink {
+	display_name: string;
+	linked_at: number;
+	is_me: boolean;
+}
+
+/** All a claimant or link-code holder sees of an entry before it is linked. */
+export interface ClaimPreview {
+	name: string;
+	coordinator_name: string;
+	matches: number;
+	events: number;
+	first_at: number | null;
+	last_at: number | null;
+}
+
+export type SlotStateName = 'claimable' | 'yours' | 'pending' | 'linked' | 'declined';
+
+/** One picked slot of a match: `GET /api/view/{token}/slots`. */
+export interface SlotState {
+	team: Team;
+	position: number;
+	name: string;
+	state: SlotStateName;
+}
+
+/** What a claim points at. */
+export type ClaimTarget = { kind: 'match_slot'; spectator_token: string; team: Team; position: number };
+
+/** A claim as the coordinator sees it: `GET /api/claims`. */
+export interface Claim {
+	id: string;
+	player: { id: string; name: string };
+	claimant: { display_name: string; email: string };
+	preview: ClaimPreview;
+	created_at: number;
+}
+
+/** A claim as its claimant sees it: `GET /api/me/claims`. */
+export interface MyClaim {
+	id: string;
+	status: 'pending' | 'approved' | 'declined' | 'withdrawn';
+	preview: ClaimPreview;
+	created_at: number;
+	decided_at: number | null;
+}
+
+/** An entry linked to the signed-in account: `GET /api/me/links`. */
+export interface MyLink {
+	player_id: string;
+	name: string;
+	coordinator_name: string;
+	linked_at: number;
+}
+
+/** A coordinator's link code: the link to show as a QR code, and when it stops working. */
+export interface CreatedLinkCode {
+	url: string;
+	expires_at: number;
+	/** Seconds left by the server's clock; count down from this, not from `expires_at`. */
+	expires_in: number;
+}
+
+/** One match of a combined history; the redacted form has no names, coordinator or link. */
+export type LinkedEntry =
+	| {
+			match_id: string;
+			finished_at: number;
+			outcome: Outcome;
+			side: Team;
+			score: FinalScore;
+			redacted: false;
+			teams: Record<Team, string[]>;
+			coordinator_name: string;
+			spectator_token: string;
+	  }
+	| {
+			match_id: string;
+			finished_at: number;
+			outcome: Outcome;
+			side: Team;
+			score: FinalScore;
+			redacted: true;
+	  };
+
+/** `GET /api/me/results`, `/api/players/{id}/linked-history` and `/api/profiles/{token}`. */
+export interface LinkedHistory extends Page<LinkedEntry> {
+	display_name: string;
+	record: PlayerRecord;
+	placings: Placing[];
+}
+
+export type Visibility = 'private' | 'coordinators' | 'public';
+
+/** `GET` and `PUT /api/me/privacy`. */
+export interface Privacy {
+	visibility: Visibility;
+	profile_url: string | null;
 }
 
 // ---- WASM bridge -------------------------------------------------------------------------

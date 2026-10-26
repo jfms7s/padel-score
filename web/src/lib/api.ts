@@ -212,7 +212,7 @@ function post(body: unknown): RequestInit {
 export const ACCOUNT_TIMEOUT_MS = 20_000;
 
 export interface AccountCall {
-	method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+	method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 	body?: unknown;
 	/** The success status, or the statuses that all mean success: 200 unless given. */
 	ok?: number | readonly number[];

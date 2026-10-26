@@ -1,4 +1,4 @@
--- 0004_events.sql. Times are unix seconds. "Event" in the UI is a competition here: the match
+-- 0005_events.sql. Times are unix seconds. "Event" in the UI is a competition here: the match
 -- log table is already called `events`. placings.event_id (0003) holds competitions.id.
 CREATE TABLE competitions (
   id TEXT PRIMARY KEY,

@@ -1,9 +1,9 @@
 <script lang="ts">
-	// A match's viewing link: the read-only scoreboard.
+	// A match's viewing link: the read-only scoreboard, with "That's me" on its picked players.
 	import { page } from '$app/state';
 	import Viewer from '#lib/components/Viewer.svelte';
 
 	const token = $derived(page.params.token ?? '');
 </script>
 
-<Viewer {token} />
+<Viewer {token} claims />

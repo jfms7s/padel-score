@@ -55,6 +55,8 @@ Signed in, you also get:
 - **Picking players for a match**: on New match, each name field suggests players from your list, or adds the typed name to it. A typed name that isn't picked stays free text and is never added on its own.
 - **History** (`/history`): your finished matches, newest first, with the winner, the score and a link to the final view.
 - **Player pages** (`/players/{id}`): a player's wins, losses and draws, any placings, and their matches, each marked won, lost or drawn.
+- **Linking** (`/players`, `/link-player`): link a player to an account, either by a QR code the coordinator shows (the player confirms "That's me"), or by a claim the player sends from a match they played in ("That's me" on the match view) and the coordinator approves. Unlink any time; the coordinator's own records never change.
+- **My results** (`/profile`): one record, placings and match list across every coordinator you've played for, your linked entries and claims, and who can see your history: only you, coordinators you've played for (the default), or anyone with your profile link (`/p/{token}`), which shows no other people's names and can be replaced at any time.
 
 Records come from the match's own score, so an undo that un-finishes a match takes it out of history and the records again. Anonymous matches are in no one's history.
 
@@ -77,6 +79,54 @@ Signed in, you can also run an event (`/events`): a tournament or a non-stop, wi
 - **Watching** (`/cv/{token}` for one court, `/e/{token}` for the whole event): live scores, results and final positions, with no account and no way to change a score.
 
 Event matches show in history and on player pages as "Sunday cup · Match 1".
+
+## Watch app
+
+`watch/` is a Wear OS 3+ app (built for a Galaxy Watch) that scores a match from the wrist. Pick a live match, tap a half of the screen to give that side the point, and hold Undo to take one back. It signs in with a code, so no password is typed on the watch.
+
+**Build.** Needs JDK 21 and the Android SDK:
+
+```sh
+cd watch && ./gradlew :app:assembleDebug
+```
+
+The APK is `watch/app/build/outputs/apk/debug/app-debug.apk`. The server URL it talks to defaults to the one in `watch/gradle.properties`. To point an emulator at a server on the same machine:
+
+```sh
+./gradlew :app:assembleDebug -PpadelServerUrl=http://10.0.2.2:8080
+```
+
+**CI.** The `Watch` workflow (`.github/workflows/watch.yml`) runs the tests and lint, and uploads the APK as the `padel-score-watch-debug-<sha>` artifact. It runs on pushes to `main` and on pull requests only when `watch/`, the web fixtures it tests against or the workflow itself change; every `v*` tag builds. Once the signing secrets below are set, builds on pushes to `main` and on tags are signed with the owner's key; until then, and on pull requests, they use a throwaway debug key, so a PR build cannot update an install made from `main`.
+
+**Signing setup, once.** Make a keystore and add four repository secrets:
+
+```sh
+keytool -genkeypair -v -keystore padel-watch.jks -alias padel-watch -keyalg RSA -keysize 4096 -validity 10000
+```
+
+```sh
+base64 -w0 padel-watch.jks
+```
+
+Secrets: `WATCH_KEYSTORE_B64` (the output above), `WATCH_KEYSTORE_PASSWORD`, `WATCH_KEY_ALIAS` (`padel-watch`) and `WATCH_KEY_PASSWORD`. `keytool` makes a PKCS12 keystore, which has no separate key password, so `WATCH_KEY_PASSWORD` must be the same as `WATCH_KEYSTORE_PASSWORD`, or the signed build fails. Keep `padel-watch.jks` somewhere safe and never commit it. Losing it means one reinstall of the app and a new sign-in, nothing worse.
+
+**Sideload.** On the watch, turn on Developer options, then Wi-Fi debugging. Then from a computer on the same network:
+
+```sh
+adb pair <ip>:<port>
+```
+
+```sh
+adb connect <ip>:<port>
+```
+
+```sh
+adb install -r app-debug.apk
+```
+
+**Sign in.** The watch shows a code. On the phone, while signed in, open `<server>/link` and enter it. The watch needs the server reachable from its own network: the paired phone's connection (including its VPN) or the watch's own Wi-Fi.
+
+**Signed out.** The watch returns to the sign-in screen when its device is revoked on the web Account page, when the user's password is changed, an admin resets it or the account is disabled (all device tokens are revoked), or when you pick "Sign out" in the watch's list. That last item only forgets the sign-in on the watch; it does not revoke the device on the server.
 
 ## Releases
 
