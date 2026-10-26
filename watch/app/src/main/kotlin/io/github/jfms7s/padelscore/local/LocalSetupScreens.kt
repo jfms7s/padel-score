@@ -1,10 +1,17 @@
 package io.github.jfms7s.padelscore.local
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -14,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -32,6 +41,8 @@ import io.github.jfms7s.padelscore.local.engine.DeuceRule
 import io.github.jfms7s.padelscore.local.engine.SetsFormat
 import io.github.jfms7s.padelscore.net.Team
 import io.github.jfms7s.padelscore.score.Feedback
+import io.github.jfms7s.padelscore.score.TeamAColor
+import io.github.jfms7s.padelscore.score.TeamBColor
 
 internal const val CHOICE_SELECTED_TAG = "choice-selected"
 
@@ -124,8 +135,8 @@ fun LocalDecidingScreen(model: LocalMatchModel, onNext: () -> Unit) {
 }
 
 /**
- * The serving team; a pick finishes the setup, which [onNext] receives. A start that failed to save says so here,
- * where the pick can be tapped again.
+ * The serving team, picked on the score screen's two halves: tapping a half finishes the setup, which [onNext]
+ * receives. A start that failed to save says so here, where a half can be tapped again.
  */
 @Composable
 fun LocalServeScreen(model: LocalMatchModel, onNext: (LocalSetup) -> Unit) {
@@ -133,14 +144,51 @@ fun LocalServeScreen(model: LocalMatchModel, onNext: (LocalSetup) -> Unit) {
     val ui by model.ui.collectAsState()
     val opened = remember { model.ui.value.feedbackId }
     val notSaved = ui.feedbackSince(opened) == Feedback.NotSaved
-    val teams = Team.entries
-    ChoiceScreen(
-        title = stringResource(R.string.local_serve_title),
-        hint = stringResource(R.string.local_serve_hint),
-        options = teams.map { teamName(it) },
-        highlighted = draft.firstTeam?.let(teams::indexOf),
-        onPick = { model.pickFirstTeam(teams[it])?.let(onNext) },
-        notice = if (notSaved) stringResource(R.string.local_not_saved) else null,
+    val pick = { team: Team -> model.pickFirstTeam(team)?.let(onNext); Unit }
+    MaterialTheme {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            Row(Modifier.fillMaxSize()) {
+                ServeHalf(Team.A, TeamAColor, draft.firstTeam == Team.A, pick, Modifier.weight(1f))
+                ServeHalf(Team.B, TeamBColor, draft.firstTeam == Team.B, pick, Modifier.weight(1f))
+            }
+            Column(
+                Modifier.align(Alignment.TopCenter).padding(top = 12.dp, start = 24.dp, end = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                ServeCaption(stringResource(R.string.local_serve_title))
+                if (notSaved) ServeCaption(stringResource(R.string.local_not_saved))
+            }
+            Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp, start = 24.dp, end = 24.dp)) {
+                ServeCaption(stringResource(R.string.local_serve_hint))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ServeHalf(team: Team, color: Color, selected: Boolean, onPick: (Team) -> Unit, modifier: Modifier) {
+    val name = teamName(team)
+    Box(
+        modifier
+            .fillMaxHeight()
+            .background(color)
+            .then(if (selected) Modifier.border(3.dp, Color.White).testTag(CHOICE_SELECTED_TAG) else Modifier)
+            .clickable(role = Role.Button) { onPick(team) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun ServeCaption(text: String) {
+    Text(
+        text,
+        color = Color.White,
+        fontSize = 12.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(vertical = 2.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }
 

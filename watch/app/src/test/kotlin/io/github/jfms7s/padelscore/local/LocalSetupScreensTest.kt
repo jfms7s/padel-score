@@ -1,13 +1,11 @@
 package io.github.jfms7s.padelscore.local
 
 import androidx.compose.ui.test.assert
-import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.jfms7s.padelscore.local.engine.DecidingSet
 import io.github.jfms7s.padelscore.local.engine.DeuceRule
@@ -77,13 +75,10 @@ class LocalSetupScreensTest {
     }
 
     @Test
-    fun serve_screen_lists_the_two_teams_and_hint() {
+    fun serve_screen_shows_the_two_halves_title_and_hint() {
         val model = model()
         compose.setContent { LocalServeScreen(model) {} }
-        // The list scrolls on a small screen, so each is scrolled to before it is looked for.
-        val list = compose.onNode(hasScrollAction())
-        listOf("Blue", "Green", "Not sure? Spin the racket and tap the winner.").forEach {
-            list.performScrollToNode(hasText(it))
+        listOf("Blue", "Green", "Which team serves first?", "Not sure? Spin the racket and tap the winner.").forEach {
             compose.onNodeWithText(it).assertExists()
         }
         compose.onNodeWithText("Blue 1").assertDoesNotExist()
