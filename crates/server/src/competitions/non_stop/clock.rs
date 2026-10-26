@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
-use crate::competitions::courts::{advance_court_in, courts_in};
+use crate::competitions::courts::{advance_court_in, courts_in, next_queued_in};
 use crate::competitions::{Competition, Kind, Status, competition_in};
 use crate::store::{Store, StoreError, Tx};
 
@@ -192,11 +192,16 @@ async fn set_running_in(
     Ok(())
 }
 
-/// Advance every court whose current match is finished (or that has none), so the new slot's
-/// matches become current.
-async fn advance_finished_courts_in(tx: &mut Tx<'_>, ev: &Competition) -> Result<(), StoreError> {
+/// Advance every court whose current match is finished (or that has none) and whose next
+/// queued match is one of `slot`'s, so that wave's matches become current. A court idle in this
+/// wave keeps its finished match (and its token) until a slot of its own starts.
+async fn advance_finished_courts_in(
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+    slot: u32,
+) -> Result<(), StoreError> {
     for court in courts_in(tx, &ev.id).await? {
-        let ready = match &court.current_match_id {
+        let free = match &court.current_match_id {
             None => true,
             Some(current) => {
                 let found: Option<i64> =
@@ -207,7 +212,21 @@ async fn advance_finished_courts_in(tx: &mut Tx<'_>, ev: &Competition) -> Result
                 found.is_some()
             }
         };
-        if ready {
+        if !free {
+            continue;
+        }
+        let Some(next) = next_queued_in(tx, &court.id).await? else {
+            continue;
+        };
+        let in_slot: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM non_stop_matches WHERE match_id = ? AND event_id = ? AND slot = ?",
+        )
+        .bind(&next)
+        .bind(&ev.id)
+        .bind(slot)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if in_slot.is_some() {
             advance_court_in(tx, ev, &court.id).await?;
         }
     }
@@ -263,7 +282,7 @@ impl Store {
                     return Err(StoreError::Conflict("previous_unfinished"));
                 }
                 set_running_in(&mut tx, event_id, target, now_ms).await?;
-                advance_finished_courts_in(&mut tx, &ev).await?;
+                advance_finished_courts_in(&mut tx, &ev, slot).await?;
             }
             ClockAction::Pause => {
                 let Some(target) = target.filter(|s| s.state == SlotState::Running) else {
@@ -272,6 +291,10 @@ impl Store {
                 let (Some(starts), Some(ends)) = (target.starts_at_ms, target.ends_at_ms) else {
                     return Err(StoreError::Corrupt("a running slot has no times".into()));
                 };
+                // Time is over and the runner has not called it yet: nothing left to pause.
+                if ends <= now_ms {
+                    return Err(StoreError::Conflict("clock_not_running"));
+                }
                 let left = ends
                     .saturating_sub(now_ms.max(starts))
                     .clamp(0, target.remaining_ms.max(0));
@@ -394,11 +417,15 @@ pub async fn mark_done_in(
     Ok(())
 }
 
-/// Flagged matches of running events, for the runner to check their time-up.
+/// Flagged matches of running events whose slot has gone, for the runner to check their
+/// time-up. A slot ended before its go is left out until [`went_in`], so time is never called
+/// on a log that still holds practice points.
 pub async fn pending_time_up_in(conn: &mut SqliteConnection) -> Result<Vec<String>, StoreError> {
     Ok(sqlx::query_scalar(
         "SELECT n.match_id FROM non_stop_matches n JOIN competitions c ON c.id = n.event_id \
-         WHERE n.needs_time_up = 1 AND c.status = 'running' ORDER BY n.match_id",
+         JOIN non_stop_slots s ON s.event_id = n.event_id AND s.slot = n.slot \
+         WHERE n.needs_time_up = 1 AND c.status = 'running' AND s.started_at_ms IS NOT NULL \
+         ORDER BY n.match_id",
     )
     .fetch_all(conn)
     .await?)

@@ -690,14 +690,91 @@ async fn pause_in_count_in_keeps_full_time() {
         .await
         .unwrap();
     assert_eq!(slot_row(&pool, &ev, 1).await.remaining_ms, 900_000);
-    // Paused after the end: nothing left, never negative.
+    // Resumed at T + 10 000, so it ends at T + 915 000.
     clock(&s, &ev, ClockAction::Resume, 1, T + 10_000)
         .await
         .unwrap();
-    clock(&s, &ev, ClockAction::Pause, 1, T + 2_000_000)
+}
+
+#[tokio::test]
+async fn pause_after_time_is_over_is_refused() {
+    let (s, pool) = setup().await;
+    let (ev, _, _) = started(&s, timed(), 8, 2).await;
+    clock(&s, &ev, ClockAction::Start, 1, T).await.unwrap();
+    // Time ran out at T + 905 000 and the runner has not called it yet.
+    conflict(
+        clock(&s, &ev, ClockAction::Pause, 1, T + 905_000).await,
+        "clock_not_running",
+    );
+    let row = slot_row(&pool, &ev, 1).await;
+    assert_eq!(row.state, "running");
+    assert_eq!(row.ends_at_ms, Some(T + 905_000));
+}
+
+#[tokio::test]
+async fn idle_court_waits_for_its_own_slot() {
+    // 6 teams on 2 courts: 3 matches a round, so wave 1 uses courts 1-2 and wave 2 court 1.
+    let (s, pool) = setup().await;
+    let (ev, _, courts) = started(&s, timed(), 6, 2).await;
+    let one = slot_matches(&pool, &ev, 1).await;
+    let two = slot_matches(&pool, &ev, 2).await;
+    let three = slot_matches(&pool, &ev, 3).await;
+    assert_eq!((one.len(), two.len(), three.len()), (2, 1, 2));
+    let court_2_first = current_of(&pool, &courts[1]).await.unwrap();
+    let token = |id: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT scorer_token FROM matches WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    clock(&s, &ev, ClockAction::Start, 1, T).await.unwrap();
+    for m in &one {
+        type_result(&s, m, 5, 3, None).await;
+    }
+    clock(&s, &ev, ClockAction::End, 1, T + 1_000)
         .await
         .unwrap();
-    assert_eq!(slot_row(&pool, &ev, 1).await.remaining_ms, 0);
+    let court_2_token = token(court_2_first.clone()).await;
+
+    clock(&s, &ev, ClockAction::Start, 2, T + 2_000)
+        .await
+        .unwrap();
+    assert_eq!(current_of(&pool, &courts[0]).await, Some(two[0].clone()));
+    // Court 2 has no match in slot 2: it keeps its finished one, and its token.
+    assert_eq!(
+        current_of(&pool, &courts[1]).await,
+        Some(court_2_first.clone())
+    );
+    assert_eq!(token(court_2_first.clone()).await, court_2_token);
+    let kd = kind_data(
+        &pool,
+        &ev,
+        Audience::Court {
+            court_id: courts[1].clone(),
+        },
+    )
+    .await;
+    assert_eq!(kd["clock"]["slot"], 1);
+
+    type_result(&s, &two[0], 4, 2, None).await;
+    clock(&s, &ev, ClockAction::End, 2, T + 3_000)
+        .await
+        .unwrap();
+    clock(&s, &ev, ClockAction::Start, 3, T + 4_000)
+        .await
+        .unwrap();
+    let mut current = vec![
+        current_of(&pool, &courts[0]).await.unwrap(),
+        current_of(&pool, &courts[1]).await.unwrap(),
+    ];
+    current.sort();
+    let mut expected = three.clone();
+    expected.sort();
+    assert_eq!(current, expected);
 }
 
 #[tokio::test]
@@ -1064,7 +1141,8 @@ async fn runner_helpers_find_due_work() {
     );
     drop(conn);
 
-    // A slot ended before its go is due for the go (its practice points are cleared first).
+    // A slot ended before its go is due for the go (its practice points are cleared first),
+    // and its matches are not pending a time-up until it has gone.
     let mut conn = pool.acquire().await.unwrap();
     sqlx::query("UPDATE non_stop_slots SET started_at_ms = NULL WHERE event_id = ? AND slot = 1")
         .bind(&ev.id)
@@ -1074,6 +1152,16 @@ async fn runner_helpers_find_due_work() {
     assert_eq!(
         due_go_in(&mut conn, T).await.unwrap(),
         vec![(ev.id.clone(), 1)]
+    );
+    assert!(pending_time_up_in(&mut conn).await.unwrap().is_empty());
+    drop(conn);
+    let mut tx = pool.begin().await.unwrap();
+    went_in(&mut tx, &ev.id, 1, T + 1).await.unwrap();
+    tx.commit().await.unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    assert_eq!(
+        pending_time_up_in(&mut conn).await.unwrap(),
+        vec![one[1].clone()]
     );
     drop(conn);
 
