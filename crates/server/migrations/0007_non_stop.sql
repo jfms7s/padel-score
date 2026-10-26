@@ -1,4 +1,4 @@
--- 0006_non_stop.sql. A slot is one clock run: one wave of one round. Clock times are unix ms.
+-- 0007_non_stop.sql. A slot is one clock run: one wave of one round. Clock times are unix ms.
 CREATE TABLE non_stop_slots (
   event_id TEXT NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
   slot INTEGER NOT NULL,                     -- 1-based, in play order
