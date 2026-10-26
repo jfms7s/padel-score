@@ -1068,6 +1068,7 @@ dependencies = [
  "ipnet",
  "mime_guess",
  "padel-scoring",
+ "proptest",
  "rust-embed",
  "serde",
  "serde_json",
