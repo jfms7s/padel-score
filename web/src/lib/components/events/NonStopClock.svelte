@@ -108,7 +108,7 @@
 			</div>
 			{#if ending}
 				<div class="confirm" role="group" aria-label={t.endNow}>
-					<p>{t.endNowConfirm}</p>
+					<p>{t.endNowConfirm(t.slotText(clock.round, clock.wave, waves))}</p>
 					<div class="actions">
 						<button class="danger" type="button" disabled={busy} onclick={() => run('end')}>{t.endNow}</button>
 						<button class="secondary" type="button" onclick={() => (ending = false)}>{strings.events.cancel}</button>

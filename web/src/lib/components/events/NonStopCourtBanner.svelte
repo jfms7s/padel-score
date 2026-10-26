@@ -51,10 +51,8 @@
 
 	const left = $derived(clock === null ? 0 : remainingMs(clock, now));
 	const countIn = $derived(clock === null ? 0 : countInMs(clock, now));
-	/** Paused with the full time on it: the first go hasn't happened, practice points still show. */
-	const beforeGo = $derived(
-		clock !== null && (clock.state === 'ready' || (clock.state === 'paused' && clock.remaining_ms >= clock.duration_ms))
-	);
+	/** The first go hasn't happened (ready, or paused in the count-in): practice points still show. */
+	const beforeGo = $derived(clock !== null && (clock.state === 'ready' || (clock.state === 'paused' && !clock.went)));
 
 	// The last local time-to-zero of the slot being counted, for a slot that turns done early.
 	let lastSlot = -1;

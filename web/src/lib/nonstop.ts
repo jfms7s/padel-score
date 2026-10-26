@@ -37,6 +37,8 @@ export interface Clock {
 	/** Running only; in the future during the count-in. */
 	starts_at_ms: number | null;
 	ends_at_ms: number | null;
+	/** The first go has happened (practice points cleared). */
+	went: boolean;
 }
 
 export interface SlotView {
@@ -78,6 +80,7 @@ export interface NonStopCourtData {
 
 // ---- guards ------------------------------------------------------------------------------
 
+const bool: Check = (v) => typeof v === 'boolean';
 const slotState = oneOf('ready', 'running', 'paused', 'done');
 const settingsCheck = atLeast({ match_minutes: int, legs: int, order: oneOf('listed', 'random') });
 const clockCheck = atLeast({
@@ -88,7 +91,8 @@ const clockCheck = atLeast({
 	duration_ms: int,
 	remaining_ms: int,
 	starts_at_ms: nullable(int),
-	ends_at_ms: nullable(int)
+	ends_at_ms: nullable(int),
+	went: bool
 });
 const slotCheck = atLeast({ slot: int, round: int, wave: int, state: slotState, matches: array(str) });
 const standingCheck = atLeast({
@@ -248,7 +252,8 @@ export function serverClock(): ServerClock {
 /** Milliseconds of count-in left; 0 outside one. The screen shows `Math.ceil(ms / 1000)`. */
 export function countInMs(clock: Clock, serverNow: number): number {
 	if (clock.state !== 'running' || clock.starts_at_ms === null) return 0;
-	return Math.max(0, clock.starts_at_ms - serverNow);
+	// Clamped: a `now` a tick stale (or offset error) mustn't show a 6.
+	return Math.min(COUNT_IN_MS, Math.max(0, clock.starts_at_ms - serverNow));
 }
 
 /** Time left on the clock; during the count-in the full time. */

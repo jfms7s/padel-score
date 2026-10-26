@@ -834,7 +834,7 @@ export const strings = {
 		pause: 'Pause',
 		resume: 'Resume',
 		endNow: 'End now',
-		endNowConfirm: 'End this round now? Time is up for every match in it.',
+		endNowConfirm: (slotText: string) => `End ${slotText} now? Time is up for every match in it.`,
 		matchMinutes: 'Minutes per match',
 		legs: 'Legs',
 		legsOptions: { 1: 'Play each team once', 2: 'Play each team twice', 3: 'Play each team three times' },

@@ -34,6 +34,7 @@ const clock = (over: Partial<Clock> = {}): Clock => ({
 	remaining_ms: 900_000,
 	starts_at_ms: 100_000,
 	ends_at_ms: 1_000_000,
+	went: false,
 	...over
 });
 
@@ -144,6 +145,10 @@ describe('countdown', () => {
 		expect(Math.ceil(countInMs(c, 95_800) / 1000)).toBe(5);
 		expect(remainingMs(c, 95_800)).toBe(900_000);
 		expect(countInMs(c, 100_000)).toBe(0);
+		// A stale `now` (a 250 ms tick plus offset error) never shows a 6.
+		expect(countInMs(c, 99_700)).toBe(300);
+		expect(countInMs(clock({ starts_at_ms: 100_000 }), 94_700)).toBe(5000);
+		expect(countInMs(clock({ starts_at_ms: 100_000 }), 0)).toBe(5000);
 		expect(remainingMs(c, 100_000)).toBe(900_000);
 		expect(countInMs(clock({ state: 'paused', starts_at_ms: null, ends_at_ms: null }), 0)).toBe(0);
 	});
@@ -222,12 +227,21 @@ describe('guards', () => {
 		expect(nonStopData({ ...full, standings: [{ ...row, points: 'x' }] })).toBeNull();
 		expect(nonStopData({ ...full, settings: { ...settings, order: 'sorted' } })).toBeNull();
 		expect(nonStopData({ ...full, clock: { ...clock(), state: 'weird' } })).toBeNull();
+		expect(nonStopData({ ...full, clock: { ...clock(), went: 'yes' } })).toBeNull();
 		expect(nonStopCourtData({ clock: clock(), rounds: 7, waves: 2 })).toEqual({
 			clock: clock(),
 			rounds: 7,
 			waves: 2
 		});
 		expect(nonStopCourtData({ clock: null, rounds: 0, waves: 0 })?.clock).toBeNull();
+	});
+});
+
+describe('end-now copy', () => {
+	it('names_what_ends', () => {
+		const t = strings.nonStop;
+		expect(t.endNowConfirm(t.slotText(2, 1, 2))).toContain('End round 2, wave 1 now?');
+		expect(t.endNowConfirm(t.slotText(2, 1, 1))).toContain('End round 2 now?');
 	});
 });
 
