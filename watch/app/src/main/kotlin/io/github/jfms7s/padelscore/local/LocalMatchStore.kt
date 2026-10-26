@@ -44,7 +44,9 @@ interface LocalMatchStore {
 class DataStoreLocalMatchStore(private val dataStore: DataStore<Preferences>) : LocalMatchStore {
     override val state: Flow<LocalStoreState> = dataStore.data
         .catch { emit(emptyPreferences()) }
-        .map { LocalStoreState(it.decode(MATCH, LocalMatch.serializer()), it.decode(LAST_SETUP, LocalSetup.serializer())) }
+        .map {
+            LocalStoreState(it.decode(MATCH, LocalMatch.serializer()), it.decode(LAST_SETUP, LocalSetup.serializer()))
+        }
 
     override suspend fun save(match: LocalMatch) {
         dataStore.edit {
