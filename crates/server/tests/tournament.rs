@@ -15,7 +15,7 @@ use padel_score_server::commands::{
 use padel_score_server::competitions::courts::{Court, courts_in, event_matches_in};
 use padel_score_server::competitions::tournament::bracket::{Plan, Pos, Side};
 use padel_score_server::competitions::tournament::store::{
-    apply_plan_in, fill_courts_in, load_in, withdraw_in,
+    Choice, apply_plan_in, fill_courts_in, load_in, withdraw_in,
 };
 use padel_score_server::competitions::view::court_state_by_token;
 use padel_score_server::competitions::{Competition, Kind, NewCompetition, Status};
@@ -1166,4 +1166,130 @@ async fn bracket_rows_match_their_matches() {
     play_all(&s, &pool, &ev, true).await;
     finish_event(&s, &ev).await.unwrap();
     check_rows(&pool, &ev).await;
+}
+
+const SF2: Pos = pos(1, 4, 1);
+const THIRD: Pos = pos(3, 2, 0);
+
+async fn decide(s: &Store, ev: &Competition, match_id: &str, choice: Choice) -> Vec<String> {
+    s.decide_bracket(A, &ev.id, match_id, choice, NOW)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn replay_resolves_holds_it_unblocked() {
+    // SF2 is held because the final started; QF1 is held because SF1 finished. Replaying QF1
+    // withdraws SF1 and the final, so SF2's hold resolves: its corrected winner and loser go
+    // to the final and the 3rd-place match, and no match is made with its stale team.
+    let (s, pool) = setup().await;
+    let (ev, _) = event(&s, full(), 8, 2).await;
+    let ev = start(&s, &ev).await.unwrap();
+    for n in 1..=4 {
+        finish(&s, &qf(&pool, &ev, n).await, Team::A).await;
+    }
+    let sf1 = node(&pool, &ev, SF1).await.5.unwrap();
+    let sf2 = node(&pool, &ev, SF2).await.5.unwrap();
+    finish(&s, &sf1, Team::A).await;
+    finish(&s, &sf2, Team::A).await;
+    let fin = node(&pool, &ev, FINAL).await.5.unwrap();
+    applied(score_point(&s, &token(&pool, &fin).await).await);
+    applied(typed(&s, &sf2, 1, 6).await);
+    assert!(is_held(&pool, &ev, SF2).await);
+    let q1 = qf(&pool, &ev, 1).await;
+    applied(typed(&s, &q1, 1, 6).await);
+    assert!(is_held(&pool, &ev, QF1).await);
+
+    let withdrawn = decide(&s, &ev, &q1, Choice::Replay).await;
+    assert!(withdrawn.contains(&sf1) && withdrawn.contains(&fin));
+    assert!(!exists(&pool, &fin).await);
+    assert!(!is_held(&pool, &ev, QF1).await);
+    assert!(!is_held(&pool, &ev, SF2).await, "SF2's hold resolved");
+    let sf2_row = node(&pool, &ev, SF2).await;
+    let (sf2_winner, sf2_loser) = (side(&sf2_row, Team::B), side(&sf2_row, Team::A));
+    let final_row = node(&pool, &ev, FINAL).await;
+    assert_eq!(
+        (final_row.3.clone(), final_row.4.clone()),
+        (None, Some(sf2_winner.clone()))
+    );
+    assert!(final_row.5.is_none());
+    let third = node(&pool, &ev, THIRD).await;
+    assert_eq!((third.3.clone(), third.4.clone()), (None, Some(sf2_loser)));
+    check_rows(&pool, &ev).await;
+
+    // The new SF1 finishes: the final is made with SF2's corrected winner.
+    let new_sf1 = node(&pool, &ev, SF1).await.5.unwrap();
+    finish(&s, &new_sf1, Team::A).await;
+    let final_row = node(&pool, &ev, FINAL).await;
+    assert!(final_row.5.is_some());
+    assert_eq!(side(&final_row, Team::B), sf2_winner);
+    check_rows(&pool, &ev).await;
+    play_all(&s, &pool, &ev, true).await;
+    finish_event(&s, &ev).await.unwrap();
+}
+
+#[tokio::test]
+async fn keep_as_played_places_follow_the_bracket() {
+    // Off mode: QF1 is corrected after SF1 started, then kept as played. QF1's side A team
+    // played on, so its side B team shares 5th, and Finish gets places that tile.
+    let (s, pool) = setup().await;
+    let (ev, _) = event(&s, None, 8, 2).await;
+    let ev = start(&s, &ev).await.unwrap();
+    let (q1, q2) = (qf(&pool, &ev, 1).await, qf(&pool, &ev, 2).await);
+    finish(&s, &q1, Team::A).await;
+    finish(&s, &q2, Team::A).await;
+    let sf1 = node(&pool, &ev, SF1).await.5.unwrap();
+    applied(score_point(&s, &token(&pool, &sf1).await).await);
+    applied(typed(&s, &q1, 2, 6).await);
+    assert!(is_held(&pool, &ev, QF1).await);
+    let withdrawn = decide(&s, &ev, &q1, Choice::Keep).await;
+    assert!(withdrawn.is_empty());
+    assert!(!is_held(&pool, &ev, QF1).await);
+    assert!(exists(&pool, &sf1).await);
+    play_all(&s, &pool, &ev, true).await;
+    finish_event(&s, &ev).await.unwrap();
+    let qf1 = node(&pool, &ev, QF1).await;
+    let tp = team_places(&pool, &ev).await;
+    assert_eq!(tp.len(), 8);
+    assert_eq!(tp[&side(&qf1, Team::B)], (5, 8));
+    assert_ne!(tp[&side(&qf1, Team::A)], (5, 8));
+
+    // A final correction after Finish rewrites the places.
+    let fin = node(&pool, &ev, FINAL).await;
+    let (a, b) = (side(&fin, Team::A), side(&fin, Team::B));
+    applied(typed(&s, &fin.5.clone().unwrap(), 3, 6).await);
+    let after = team_places(&pool, &ev).await;
+    assert_eq!((after[&a], after[&b]), ((2, 2), (1, 1)));
+    assert_eq!(after[&side(&qf1, Team::B)], (5, 8));
+}
+
+#[tokio::test]
+async fn keep_after_finish_rewrites_placings() {
+    let (s, pool) = setup().await;
+    let (ev, _) = event(&s, None, 8, 2).await;
+    let ev = start(&s, &ev).await.unwrap();
+    play_all(&s, &pool, &ev, false).await;
+    finish_event(&s, &ev).await.unwrap();
+    let before = team_places(&pool, &ev).await;
+    let q1 = qf(&pool, &ev, 1).await;
+    applied(typed(&s, &q1, 0, 6).await);
+    assert!(is_held(&pool, &ev, QF1).await);
+    sqlx::query("DELETE FROM placings WHERE event_id = ?")
+        .bind(&ev.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let ev = s.competition(A, &ev.id).await.unwrap().unwrap();
+    let replay = s.decide_bracket(A, &ev.id, &q1, Choice::Replay, NOW).await;
+    assert!(
+        matches!(replay, Err(StoreError::Conflict("event_finished"))),
+        "{replay:?}"
+    );
+    decide(&s, &ev, &q1, Choice::Keep).await;
+    assert!(!is_held(&pool, &ev, QF1).await);
+    // Kept as played: QF1's side A team went on, so the places are as before.
+    assert_eq!(team_places(&pool, &ev).await, before);
+    let written = placing_rows(&pool, &ev).await;
+    assert_eq!(written.len(), 16);
+    assert!(written.iter().all(|r| r.4 == FINISHED_AT));
 }

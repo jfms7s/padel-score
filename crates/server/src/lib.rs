@@ -24,6 +24,7 @@ pub mod results;
 pub mod retention;
 pub mod store;
 pub mod tokens;
+pub mod tournament_api;
 pub mod web;
 
 use std::sync::{Arc, Mutex};
