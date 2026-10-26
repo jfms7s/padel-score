@@ -7,26 +7,22 @@
 <script module lang="ts">
 	// Module-level, so a sound already made isn't made again when the court page swaps between
 	// the fence and the other screens and this banner mounts afresh.
-	const playedBeeps = new Set<string>();
-	const playedHorns = new Set<string>();
+	const played = { beeps: new Set<string>(), horns: new Set<string>() };
 </script>
 
 <script lang="ts">
 	import { unlockAudio } from '#lib/audio.ts';
 	import {
-		beepsDue,
 		clockText,
 		countInMs,
 		isLow,
-		markBeeps,
-		markHorn,
 		msToEnd,
 		nonStopCourtData,
 		playBeep,
 		playHorn,
 		remainingMs,
 		serverClock,
-		shouldHorn
+		soundsDue
 	} from '#lib/nonstop.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { CourtState } from '#lib/types.ts';
@@ -61,21 +57,17 @@
 	$effect(() => {
 		if (viewer || clock === null) return;
 		const ctx = unlockAudio();
-		for (const kind of beepsDue(clock, now, playedBeeps, court.event.id)) {
-			playBeep(ctx, kind === 'go');
-		}
-		markBeeps(clock, now, playedBeeps, court.event.id);
-
+		const synced = serverClock().synced();
 		if (clock.slot !== lastSlot) {
 			lastSlot = clock.slot;
 			lastToEnd = 0;
 		}
 		const toEnd = clock.state === 'done' ? lastToEnd : msToEnd(clock, now);
-		if (shouldHorn(clock, toEnd, playedHorns, court.event.id)) {
-			playHorn(ctx);
-			markHorn(clock, playedHorns, court.event.id);
-		}
-		if (clock.state === 'running') lastToEnd = toEnd;
+		const due = soundsDue(clock, now, toEnd, synced, played, court.event.id);
+		for (const kind of due.beeps) playBeep(ctx, kind === 'go');
+		if (due.horn) playHorn(ctx);
+		// Only a synced time to zero counts for a slot that turns done early.
+		if (clock.state === 'running' && synced) lastToEnd = toEnd;
 	});
 </script>
 

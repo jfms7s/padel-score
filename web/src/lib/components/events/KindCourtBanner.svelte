@@ -14,6 +14,6 @@
 
 {#if court.event.kind === 'tournament'}
 	<TournamentCourtBanner />
-{:else}
+{:else if court.event.kind === 'non_stop'}
 	<NonStopCourtBanner {court} {viewer} />
 {/if}

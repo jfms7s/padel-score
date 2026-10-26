@@ -6,6 +6,7 @@
 
 import { accountRequest, plainRequest } from './api';
 import { array, atLeast, int, nullable, oneOf, str, type Check } from './guards';
+import { onStreamReconnect } from './stream';
 import type { EventDetail } from './types';
 
 /** The count-in before a clock moves (server: `COUNT_IN_MS`). */
@@ -170,6 +171,11 @@ const SAMPLE_TIMEOUT_MS = 3000;
 export interface ServerClock {
 	/** Server time in unix ms; the local time until the first sync lands. */
 	now(): number;
+	/**
+	 * Whether a sync has finished (with or without a sample). Until then `now()` is the phone's
+	 * own time, which may be off, so no beep or horn is played.
+	 */
+	synced(): boolean;
 	/** Take samples and update the offset; starts the 10-minute re-sync. Never throws. */
 	sync(): Promise<void>;
 	stop(): void;
@@ -183,6 +189,7 @@ export function createServerClock(
 	let timer: ReturnType<typeof setInterval> | null = null;
 	let syncing: Promise<void> | null = null;
 	let again = false;
+	let done = false;
 
 	/** One sample, given up on after SAMPLE_TIMEOUT_MS so a hung fetch can't block later syncs. */
 	function sample(): Promise<number> {
@@ -223,6 +230,7 @@ export function createServerClock(
 					again = false;
 					await measure();
 				} while (again);
+				done = true;
 			} finally {
 				syncing = null;
 			}
@@ -232,6 +240,7 @@ export function createServerClock(
 
 	return {
 		now: () => now() + offset,
+		synced: () => done,
 		sync,
 		stop() {
 			if (timer !== null) clearInterval(timer);
@@ -242,9 +251,17 @@ export function createServerClock(
 
 let shared: ServerClock | null = null;
 
-/** The one clock every non-stop component on the page shares (created on first use). */
+/**
+ * The one clock every non-stop component on the page shares (created on first use). It also
+ * re-syncs whenever a stream on the page reconnects: a phone that slept may have drifted.
+ */
 export function serverClock(): ServerClock {
-	return (shared ??= createServerClock());
+	if (shared === null) {
+		const clock = createServerClock();
+		onStreamReconnect(() => void clock.sync());
+		shared = clock;
+	}
+	return shared;
 }
 
 // ---- countdown ---------------------------------------------------------------------------
@@ -343,6 +360,28 @@ export function shouldHorn(
 
 export function markHorn(clock: Clock, played: Set<string>, eventId: string): void {
 	played.add(hornKey(clock, eventId));
+}
+
+/**
+ * The beeps and horn the court phone plays now, each marked played. Nothing, and nothing
+ * marked, until the server clock has `synced`: before that `serverNow` is the phone's own time,
+ * and a skewed phone would sound (and so use up) a beep or the horn early. `toEnd` is as for
+ * `shouldHorn`.
+ */
+export function soundsDue(
+	clock: Clock,
+	serverNow: number,
+	toEnd: number,
+	synced: boolean,
+	played: { beeps: Set<string>; horns: Set<string> },
+	eventId: string
+): { beeps: Beep[]; horn: boolean } {
+	if (!synced) return { beeps: [], horn: false };
+	const beeps = beepsDue(clock, serverNow, played.beeps, eventId);
+	markBeeps(clock, serverNow, played.beeps, eventId);
+	const horn = shouldHorn(clock, toEnd, played.horns, eventId);
+	if (horn) markHorn(clock, played.horns, eventId);
+	return { beeps, horn };
 }
 
 function tone(ctx: AudioContext, type: OscillatorType, hz: number, start: number, secs: number, peak: number) {

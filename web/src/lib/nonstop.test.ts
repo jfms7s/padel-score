@@ -21,6 +21,7 @@ import {
 	msToEnd,
 	remainingMs,
 	shouldHorn,
+	soundsDue,
 	type Clock,
 	type StandingRow
 } from './nonstop';
@@ -90,6 +91,25 @@ describe('server time', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('server_clock_is_synced_once_a_sync_resolves', async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((r) => (release = r));
+		const c = createServerClock(async () => (await gate, 2000), () => 0);
+		expect(c.synced()).toBe(false);
+		const pending = c.sync();
+		expect(c.synced()).toBe(false);
+		release();
+		await pending;
+		expect(c.synced()).toBe(true);
+		expect(c.now()).toBe(2000);
+		c.stop();
+		// A sync that got no sample still resolves: the phone's own time is all there is.
+		const down = createServerClock(async () => Promise.reject(new Error('down')), () => 5);
+		await down.sync();
+		expect(down.synced()).toBe(true);
+		down.stop();
 	});
 
 	it('server_clock_survives_a_failed_sync', async () => {
@@ -181,6 +201,21 @@ describe('beeps and horn', () => {
 		// Done early with time left.
 		const done = clock({ state: 'done' });
 		expect(shouldHorn(done, 200_000, new Set(), 'e1')).toBe(true);
+	});
+
+	it('no_sound_and_nothing_marked_until_synced', () => {
+		const c = clock();
+		const played = { beeps: new Set<string>(), horns: new Set<string>() };
+		// 2.5 s of count-in left, and a horn due on a slot that ended just now.
+		expect(soundsDue(c, 97_500, 900_000, false, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 1_000_000, 0, false, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(played.beeps.size).toBe(0);
+		expect(played.horns.size).toBe(0);
+		// Synced: each plays, once.
+		expect(soundsDue(c, 97_500, 900_000, true, played, 'e1')).toEqual({ beeps: ['beep'], horn: false });
+		expect(soundsDue(c, 97_500, 900_000, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 1_000_000, 0, true, played, 'e1')).toEqual({ beeps: [], horn: true });
+		expect(soundsDue(c, 1_000_000, 0, true, played, 'e1')).toEqual({ beeps: [], horn: false });
 	});
 
 	it('playHorn_null_is_noop', () => {
