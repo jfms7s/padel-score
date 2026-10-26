@@ -88,7 +88,8 @@ class KeystoreCipher(private val alias: String = "padel-device-token") : TokenCi
  * and a store for another origin reads it as signed out (and drops it). Whatever path led to a
  * mismatch (settings changed, a save cut short, a new build default, an unreadable settings file),
  * the token is never sent to a server it wasn't issued by. Tokens saved before origins were stored
- * belong to [legacyOrigin], the build's default server, so existing installs stay signed in.
+ * belong to [legacyOrigin], the build's default server, so existing installs stay signed in; the
+ * first read stamps them with it, so a later build default doesn't inherit them.
  */
 class DataStoreTokenStore(
     private val dataStore: DataStore<Preferences>,
@@ -115,6 +116,7 @@ class DataStoreTokenStore(
                 return null
             }
             encoded?.let { String(cipher.decrypt(Base64.getDecoder().decode(it)), Charsets.UTF_8) }
+                ?.also { if (prefs[ORIGIN] == null) stamp() }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -122,6 +124,19 @@ class DataStoreTokenStore(
             discard()
             null
         }
+
+    /**
+     * Best effort: records that a token saved before origins were stored belongs to this server, so
+     * a later build with another default server reads it as someone else's instead of adopting it.
+     */
+    private suspend fun stamp() {
+        try {
+            dataStore.edit { if (it[KEY] != null && it[ORIGIN] == null) it[ORIGIN] = origin }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+    }
 
     /** Best effort: read() must stay total even when the file itself is unusable. */
     private suspend fun discard() {
