@@ -1,6 +1,9 @@
 package io.github.jfms7s.padelscore
 
 import android.app.Application
+import io.github.jfms7s.padelscore.haptics.VibratorHaptics
+import io.github.jfms7s.padelscore.local.DataStoreLocalMatchStore
+import io.github.jfms7s.padelscore.local.LocalDeps
 import io.github.jfms7s.padelscore.settings.SettingsStore
 import kotlinx.coroutines.runBlocking
 
@@ -11,9 +14,13 @@ class PadelApp : Application(), ContainerHost {
     override lateinit var settingsStore: SettingsStore
         private set
 
+    override lateinit var local: LocalDeps
+        private set
+
     override fun onCreate() {
         super.onCreate()
         settingsStore = settingsStoreOf(this)
+        local = LocalDeps(DataStoreLocalMatchStore(localMatchDataStore), VibratorHaptics(this))
         // One small local file, read once before the first screen needs the server.
         container = runBlocking { build() }
     }

@@ -29,19 +29,29 @@ import androidx.wear.compose.material3.Text
 import io.github.jfms7s.padelscore.R
 
 @Composable
-fun SignInScreen(model: SignInModel, onSignedIn: () -> Unit, onSettings: () -> Unit) {
+fun SignInScreen(
+    model: SignInModel,
+    onSignedIn: () -> Unit,
+    onSettings: () -> Unit,
+    localEntry: @Composable () -> Unit = {},
+) {
     val state by model.state.collectAsState()
     LaunchedEffect(state) {
         if (state == SignInState.SignedIn) onSignedIn()
     }
-    SignInContent(state, onNewCode = model::restart, onSettings = onSettings)
+    SignInContent(state, onNewCode = model::restart, onSettings = onSettings, localEntry = localEntry)
 }
 
 private val MinTarget = 48.dp
 
 /** Scrolls, so the code, the link and the settings button all fit on a small round screen. */
 @Composable
-internal fun SignInContent(state: SignInState, onNewCode: () -> Unit, onSettings: () -> Unit) {
+internal fun SignInContent(
+    state: SignInState,
+    onNewCode: () -> Unit,
+    onSettings: () -> Unit,
+    localEntry: @Composable () -> Unit = {},
+) {
     MaterialTheme {
         val listState = rememberTransformingLazyColumnState()
         ScreenScaffold(scrollState = listState) { padding ->
@@ -51,6 +61,7 @@ internal fun SignInContent(state: SignInState, onNewCode: () -> Unit, onSettings
                 verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
                 modifier = Modifier.fillMaxSize(),
             ) {
+                item { localEntry() }
                 item {
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                         when (state) {

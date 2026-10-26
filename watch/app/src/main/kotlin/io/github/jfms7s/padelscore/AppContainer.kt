@@ -11,6 +11,7 @@ import io.github.jfms7s.padelscore.auth.TokenStore
 import io.github.jfms7s.padelscore.auth.deviceNameOf
 import io.github.jfms7s.padelscore.haptics.Haptics
 import io.github.jfms7s.padelscore.haptics.VibratorHaptics
+import io.github.jfms7s.padelscore.local.LocalDeps
 import io.github.jfms7s.padelscore.net.HttpPadelApi
 import io.github.jfms7s.padelscore.net.LanFallbackDns
 import io.github.jfms7s.padelscore.net.MatchView
@@ -53,6 +54,9 @@ interface ContainerHost {
     val container: AppContainer?
     val settingsStore: SettingsStore
 
+    /** The local match works without a server, so it lives outside [container]. */
+    val local: LocalDeps
+
     /** Replaces [container] with one built on the stored settings. */
     suspend fun reload(): AppContainer?
 }
@@ -66,6 +70,12 @@ private val Context.authDataStore by preferencesDataStore(
 
 private val Context.settingsDataStore by preferencesDataStore(
     name = "server_settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
+
+/** The local match: kept apart from the server's files, so changing the server never touches it. */
+internal val Context.localMatchDataStore by preferencesDataStore(
+    name = "local_match",
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
 )
 

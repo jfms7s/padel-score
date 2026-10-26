@@ -6,24 +6,41 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation.NavHostController
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.jfms7s.padelscore.auth.TokenStore
 import io.github.jfms7s.padelscore.haptics.Haptics
+import io.github.jfms7s.padelscore.local.FakeLocalMatchStore
+import io.github.jfms7s.padelscore.local.LocalDeps
+import io.github.jfms7s.padelscore.local.LocalMatch
+import io.github.jfms7s.padelscore.local.LocalMatchModel
+import io.github.jfms7s.padelscore.local.LocalSetup
+import io.github.jfms7s.padelscore.local.LocalStoreState
+import io.github.jfms7s.padelscore.local.engine.DecidingSet
+import io.github.jfms7s.padelscore.local.engine.DeuceRule
+import io.github.jfms7s.padelscore.local.engine.SetRules
+import io.github.jfms7s.padelscore.local.engine.SetsFormat
+import io.github.jfms7s.padelscore.local.engine.Start
 import io.github.jfms7s.padelscore.net.ApiResult
 import io.github.jfms7s.padelscore.net.CommandRequest
 import io.github.jfms7s.padelscore.net.DeviceStart
 import io.github.jfms7s.padelscore.net.MatchView
 import io.github.jfms7s.padelscore.net.MyMatch
 import io.github.jfms7s.padelscore.net.PadelApi
+import io.github.jfms7s.padelscore.net.Player
 import io.github.jfms7s.padelscore.net.SendResult
 import io.github.jfms7s.padelscore.net.StreamItem
+import io.github.jfms7s.padelscore.net.Team
 import io.github.jfms7s.padelscore.net.TokenPoll
 import io.github.jfms7s.padelscore.score.FakeHaptics
 import io.github.jfms7s.padelscore.score.fixtureView
@@ -31,16 +48,19 @@ import io.github.jfms7s.padelscore.settings.FakeSettingsStore
 import io.github.jfms7s.padelscore.settings.ServerSettings
 import io.github.jfms7s.padelscore.settings.SettingsModel
 import io.github.jfms7s.padelscore.settings.testSettings
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import okhttp3.Request
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -113,25 +133,49 @@ class WatchAppTest {
     private val view = fixtureView("view-one-point.json")
     private val oneMatch = ApiResult.Ok(listOf(MyMatch(view.id, "Ana / Rui v João / Marta", view)))
 
+    private val setup = LocalSetup(
+        SetRules(DeuceRule.GOLDEN_POINT, SetsFormat.ONE, DecidingSet.FULL_SET),
+        Start(Player(Team.A, 0), 1),
+    )
+
     private lateinit var nav: NavHostController
     private lateinit var back: OnBackPressedDispatcher
+    private lateinit var owner: ViewModelStoreOwner
     private var applied = 0
 
-    private fun launch(container: AppContainer) {
+    private fun launch(container: AppContainer?, store: FakeLocalMatchStore = FakeLocalMatchStore()) {
         compose.setContent {
             nav = rememberSwipeDismissableNavController()
             back = checkNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
-            WatchApp(container, nav, onSettingsApplied = { applied++ })
+            owner = checkNotNull(LocalViewModelStoreOwner.current)
+            WatchApp(container, FakeSettingsStore(), LocalDeps(store, FakeHaptics()), nav, onSettingsApplied = { applied++ })
         }
         compose.waitForIdle()
     }
+
+    private fun stored(points: List<Team>) = FakeLocalMatchStore(LocalStoreState(LocalMatch(setup, points), setup))
+
+    private fun storedMatch(store: FakeLocalMatchStore): LocalMatch? = runBlocking { store.state.first().match }
+
+    private fun pressBack() {
+        compose.runOnUiThread { back.onBackPressed() }
+        compose.waitForIdle()
+    }
+
+    private fun tap(text: String) {
+        compose.onNodeWithText(text).performClick()
+        compose.waitForIdle()
+    }
+
+    private fun signedOut() = FakeContainer(FakeApi(oneMatch), FakeTokens(null))
 
     @Test
     fun starts_on_matches_when_signed_in_else_sign_in() {
         val signedIn = FakeContainer(FakeApi(oneMatch), FakeTokens("tok"))
         val signedOut = FakeContainer(FakeApi(oneMatch), FakeTokens(null))
         var current by mutableStateOf<AppContainer>(signedIn)
-        compose.setContent { key(current) { WatchApp(current, onSettingsApplied = {}) } }
+        val local = LocalDeps(FakeLocalMatchStore(), FakeHaptics())
+        compose.setContent { key(current) { WatchApp(current, FakeSettingsStore(), local, onSettingsApplied = {}) } }
 
         compose.onNodeWithText("Ana / Rui v João / Marta").assertExists()
         compose.onNodeWithText("New code").assertDoesNotExist()
@@ -210,7 +254,7 @@ class WatchAppTest {
     fun sign_out_from_list_clears_token_and_returns_to_sign_in() {
         val tokens = FakeTokens("tok")
         launch(FakeContainer(FakeApi(oneMatch), tokens))
-        compose.onNodeWithText("Sign out").performClick()
+        compose.onNodeWithText("Sign out").performScrollTo().performClick() // below the local match entry
         compose.onNodeWithText("Yes, sign out").performClick()
         compose.waitForIdle()
 
@@ -290,6 +334,157 @@ class WatchAppTest {
         compose.runOnUiThread { back.onBackPressed() }
         compose.waitForIdle()
         assertEquals("signin", nav.currentDestination?.route)
+    }
+
+    @Test
+    fun no_server_shows_first_run_with_local_match_entry() {
+        launch(null)
+        assertEquals("first-run", nav.currentDestination?.route)
+        compose.onNodeWithText("Not set").assertExists()
+        tap("Local match")
+        assertEquals("local/deuce", nav.currentDestination?.route)
+    }
+
+    @Test
+    fun signed_out_shows_local_match_on_sign_in() {
+        launch(signedOut())
+        compose.onNodeWithText("New code").assertExists()
+        tap("Local match")
+        assertEquals("local/deuce", nav.currentDestination?.route)
+    }
+
+    @Test
+    fun match_list_has_local_match_on_top() {
+        launch(FakeContainer(FakeApi(oneMatch), FakeTokens("tok")))
+        val entry = compose.onNodeWithText("Local match").getBoundsInRoot()
+        val row = compose.onNodeWithText("Ana / Rui v João / Marta").getBoundsInRoot()
+        assertTrue(entry.bottom <= row.top)
+    }
+
+    @Test
+    fun local_setup_one_set_skips_deciding_and_opens_score() {
+        val store = FakeLocalMatchStore()
+        launch(signedOut(), store)
+        tap("Local match")
+        tap("Golden point")
+        tap("One set")
+        assertEquals("local/serve", nav.currentDestination?.route)
+        tap("Blue 1")
+        tap("Green 2")
+
+        assertEquals("local/score", nav.currentDestination?.route)
+        assertEquals("signin", nav.previousBackStackEntry?.destination?.route) // the setup screens are gone
+        compose.onNodeWithContentDescription("Point Blue").assertExists()
+        assertEquals(LocalMatch(setup, emptyList()), store.saved.single())
+    }
+
+    @Test
+    fun local_setup_best_of_three_asks_deciding() {
+        val store = FakeLocalMatchStore()
+        launch(signedOut(), store)
+        tap("Local match")
+        tap("Advantage")
+        tap("Best of three")
+        assertEquals("local/deciding", nav.currentDestination?.route)
+        tap("Super tie-break")
+        tap("Green 1")
+        tap("Blue 2")
+
+        assertEquals("local/score", nav.currentDestination?.route)
+        val expected = LocalSetup(
+            SetRules(DeuceRule.ADVANTAGE, SetsFormat.BEST_OF_3, DecidingSet.SUPER_TIE_BREAK),
+            Start(Player(Team.B, 0), 1),
+        )
+        assertEquals(expected, store.saved.single().setup)
+    }
+
+    @Test
+    fun local_setup_opens_score_once_the_match_is_saved() {
+        val store = FakeLocalMatchStore()
+        launch(signedOut(), store)
+        tap("Local match")
+        tap("Golden point")
+        tap("One set")
+        tap("Blue 1")
+        val gate = CompletableDeferred<Unit>()
+        store.gate = gate
+        tap("Green 2")
+        assertEquals("local/other", nav.currentDestination?.route) // still writing
+
+        compose.runOnUiThread { gate.complete(Unit) }
+        compose.waitForIdle()
+        assertEquals("local/score", nav.currentDestination?.route)
+        assertEquals("signin", nav.previousBackStackEntry?.destination?.route)
+    }
+
+    @Test
+    fun cold_start_with_stored_match_opens_its_score_then_back_shows_home() {
+        launch(FakeContainer(FakeApi(oneMatch), FakeTokens("tok")), stored(listOf(Team.A)))
+        assertEquals("local/score", nav.currentDestination?.route)
+        compose.onNodeWithText("15").assertExists()
+
+        pressBack()
+        assertEquals("matches", nav.currentDestination?.route)
+        compose.onNodeWithText("Resume local match").assertExists()
+        compose.onNodeWithText("Ana / Rui v João / Marta").assertExists()
+    }
+
+    @Test
+    fun swipe_back_keeps_the_match_and_entry_resumes_it() {
+        val store = FakeLocalMatchStore()
+        launch(signedOut(), store)
+        tap("Local match")
+        tap("Golden point")
+        tap("One set")
+        tap("Blue 1")
+        tap("Green 2")
+        compose.onNodeWithContentDescription("Point Blue").performClick()
+        compose.waitForIdle()
+
+        pressBack()
+        assertEquals("signin", nav.currentDestination?.route)
+        assertEquals(listOf(Team.A), storedMatch(store)?.points)
+        tap("Resume local match")
+        assertEquals("local/score", nav.currentDestination?.route)
+        compose.onNodeWithText("15").assertExists()
+    }
+
+    @Test
+    fun discard_from_entry_after_confirm_removes_it() {
+        val store = stored(listOf(Team.A))
+        launch(null, store)
+        pressBack()
+        assertEquals("first-run", nav.currentDestination?.route)
+
+        tap("Discard local match")
+        tap("Yes, discard")
+        assertNull(storedMatch(store))
+        compose.onNodeWithText("Resume local match").assertDoesNotExist()
+        compose.onNodeWithText("Local match").assertExists()
+    }
+
+    @Test
+    fun score_route_pops_when_the_match_is_gone() {
+        launch(signedOut(), stored(listOf(Team.A)))
+        assertEquals("local/score", nav.currentDestination?.route)
+
+        val model = ViewModelProvider.create(owner)[LocalMatchModel::class]
+        compose.runOnUiThread { model.discard() }
+        compose.waitForIdle()
+        assertEquals("signin", nav.currentDestination?.route)
+        assertNull(nav.previousBackStackEntry)
+    }
+
+    @Test
+    fun finished_back_returns_home_with_local_match_entry() {
+        val store = stored(List(24) { Team.A })
+        launch(FakeContainer(FakeApi(oneMatch), FakeTokens("tok")), store)
+        tap("Back")
+
+        assertEquals("matches", nav.currentDestination?.route)
+        assertNull(nav.previousBackStackEntry)
+        assertNull(storedMatch(store))
+        compose.onNodeWithText("Local match").assertExists()
     }
 
     /** What the keyboard would hand back, given straight to the settings screen's model. */

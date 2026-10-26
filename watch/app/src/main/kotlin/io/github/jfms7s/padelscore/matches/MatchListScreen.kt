@@ -38,6 +38,7 @@ fun MatchListScreen(
     onPick: (String) -> Unit,
     onSignOut: () -> Unit,
     onSettings: () -> Unit,
+    localEntry: @Composable () -> Unit = {},
 ) {
     // Started only while visible: the score screen on top, or the screen going off, closes the list stream.
     LifecycleStartEffect(model) {
@@ -45,7 +46,7 @@ fun MatchListScreen(
         onStopOrDispose { model.stopStream() }
     }
     val state by model.state.collectAsState()
-    MatchListContent(state, onPick, onRetry = model::refresh, onSettings = onSettings, onSignOut = onSignOut)
+    MatchListContent(state, onPick, onRetry = model::refresh, onSettings = onSettings, onSignOut = onSignOut, localEntry = localEntry)
 }
 
 private val MinTarget = 48.dp
@@ -57,12 +58,14 @@ internal fun MatchListContent(
     onRetry: () -> Unit,
     onSettings: () -> Unit,
     onSignOut: () -> Unit,
+    localEntry: @Composable () -> Unit = {},
 ) {
     var confirming by rememberSaveable { mutableStateOf(false) }
     MaterialTheme {
         val listState = rememberTransformingLazyColumnState()
         ScreenScaffold(scrollState = listState) { padding ->
             TransformingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
+                item { localEntry() }
                 when (state) {
                     ListState.Loading, ListState.Unauthorized -> item { Hint(stringResource(R.string.matches_loading)) }
                     is ListState.Failed -> {

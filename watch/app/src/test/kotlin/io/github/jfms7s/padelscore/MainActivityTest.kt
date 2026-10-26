@@ -15,6 +15,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.wear.input.RemoteInputIntentHelper
 import io.github.jfms7s.padelscore.auth.TokenStore
 import io.github.jfms7s.padelscore.haptics.Haptics
+import io.github.jfms7s.padelscore.local.FakeLocalMatchStore
+import io.github.jfms7s.padelscore.local.LocalDeps
 import io.github.jfms7s.padelscore.net.ApiResult
 import io.github.jfms7s.padelscore.net.CommandRequest
 import io.github.jfms7s.padelscore.net.DeviceStart
@@ -46,6 +48,7 @@ import org.robolectric.annotation.Config
 /** Stands in for [PadelApp] so the real [MainActivity] runs on fake containers. */
 class TestApp : Application(), ContainerHost {
     override val settingsStore = FakeSettingsStore()
+    override val local = LocalDeps(FakeLocalMatchStore(), FakeHaptics())
     val tokens = MemoryTokens()
     override var container: AppContainer? = null
     val built = mutableListOf<SignInContainer>()
