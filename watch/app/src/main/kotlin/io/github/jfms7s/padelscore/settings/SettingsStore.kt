@@ -9,6 +9,16 @@ import kotlinx.coroutines.flow.first
 import okhttp3.HttpUrl
 import java.net.InetAddress
 
+/** What a server change does to the LAN addresses override. */
+sealed interface AddressChange {
+    data object Keep : AddressChange
+
+    /** Drop the override, so the build's addresses apply. */
+    data object Defaults : AddressChange
+
+    data class Exactly(val list: List<InetAddress>) : AddressChange
+}
+
 /** The owner's overrides of the build's server settings. Writes throw on I/O failure. */
 interface SettingsStore {
     /** The build's values, used for every setting the owner has not overridden. */
@@ -17,7 +27,8 @@ interface SettingsStore {
     /** The overrides on top of [defaults]. Never throws: an unreadable store reads as the defaults. */
     suspend fun read(): ServerSettings
 
-    suspend fun setServer(url: HttpUrl)
+    /** Sets the server and, in the same write, what happens to the LAN addresses. */
+    suspend fun setServer(url: HttpUrl, addresses: AddressChange)
 
     suspend fun setFallback(addresses: List<InetAddress>)
 
@@ -49,8 +60,15 @@ class DataStoreSettingsStore(
         )
     }
 
-    override suspend fun setServer(url: HttpUrl) {
-        dataStore.edit { it[SERVER] = originOf(url).toString() }
+    override suspend fun setServer(url: HttpUrl, addresses: AddressChange) {
+        dataStore.edit {
+            it[SERVER] = originKey(url)
+            when (addresses) {
+                AddressChange.Keep -> Unit
+                AddressChange.Defaults -> it.remove(FALLBACK)
+                is AddressChange.Exactly -> it[FALLBACK] = addressText(addresses.list)
+            }
+        }
     }
 
     override suspend fun setFallback(addresses: List<InetAddress>) {

@@ -118,4 +118,37 @@ class SettingsModelTest {
         assertEquals("tok", tokens.token)
         assertTrue(model.state.value.applied)
     }
+
+    @Test
+    fun new_host_drops_the_lan_addresses() {
+        val model = model()
+        model.submitServer("padel.other.test")
+        scheduler.runCurrent()
+        assertEquals(emptyList<InetAddress>(), store.fallback)
+        // Shown as such on the screen until the app restarts.
+        assertEquals(emptyList<InetAddress>(), model.state.value.settings.fallback)
+    }
+
+    @Test
+    fun back_to_the_default_host_brings_back_the_default_addresses() {
+        store.server = "https://padel.other.test/".toHttpUrl()
+        store.fallback = listOf(InetAddress.getByName("10.9.9.9"))
+        val model = model(ServerSettings("https://padel.other.test/".toHttpUrl(), store.fallback!!))
+        model.submitServer("example.test")
+        scheduler.runCurrent()
+        assertNull(store.fallback)
+        assertEquals(testDefaults, model.state.value.settings)
+        assertNull(tokens.token)
+    }
+
+    @Test
+    fun same_host_other_port_keeps_the_addresses_but_not_the_token() {
+        store.fallback = listOf(InetAddress.getByName("10.9.9.9"))
+        val model = model(testDefaults.copy(fallback = store.fallback!!))
+        model.submitServer("https://example.test:8443")
+        scheduler.runCurrent()
+        assertEquals(listOf(InetAddress.getByName("10.9.9.9")), store.fallback)
+        assertEquals(listOf(InetAddress.getByName("10.9.9.9")), model.state.value.settings.fallback)
+        assertNull(tokens.token)
+    }
 }

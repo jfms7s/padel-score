@@ -2,6 +2,7 @@ package io.github.jfms7s.padelscore.net
 
 import okhttp3.Dns
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.InetAddress
@@ -104,5 +105,27 @@ class LanFallbackDnsTest {
         val results = (1..8).map { pool.submit<List<InetAddress>> { d.lookup(host) } }.map { it.get() }
         pool.shutdown()
         results.forEach { assertEquals(lan + publicIp, it) }
+    }
+
+    @Test
+    fun ip_literals_are_parsed_strictly() {
+        // Shapes Android's getByName would send to DNS (or read as octal): never accepted.
+        listOf(
+            "1:2", "1.2.3.4:5", "010.0.0.1", "192.168.00.1", "1.2.3", "1.2.3.4.5", "256.1.1.1", "1..2.3",
+            ":::", "1:::2", "1::2::3", ":1:2:3:4:5:6:7", "1:2:3:4:5:6:7:", "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7",
+            "12345::1", "fe80::1%wlan0", "g::1", "::1.2.3", "1.2.3.4::", "", " 1.2.3.4", "localhost", "0x7f.0.0.1",
+        ).forEach { assertNull(it, parseIpLiteral(it)) }
+        mapOf(
+            "0.0.0.0" to "0.0.0.0",
+            "192.168.50.231" to "192.168.50.231",
+            "255.255.255.255" to "255.255.255.255",
+            "fd00::1" to "fd00:0:0:0:0:0:0:1",
+            "::" to "0:0:0:0:0:0:0:0",
+            "::1" to "0:0:0:0:0:0:0:1",
+            "1::" to "1:0:0:0:0:0:0:0",
+            "FE80:0:0:0:0:0:0:1" to "fe80:0:0:0:0:0:0:1",
+            "2001:db8::1.2.3.4" to "2001:db8:0:0:0:0:102:304",
+            "1:2:3:4:5:6:7:8" to "1:2:3:4:5:6:7:8",
+        ).forEach { (text, expected) -> assertEquals(text, expected, parseIpLiteral(text)?.hostAddress) }
     }
 }

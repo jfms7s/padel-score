@@ -7,14 +7,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -42,34 +39,15 @@ private const val SCORE = "score/{id}"
 
 private const val SETTINGS = "settings"
 
+/** [onSettingsApplied] runs once new server settings are saved; the activity then restarts on them. */
 @Composable
-fun WatchApp(container: AppContainer) = WatchApp(container) {}
+fun WatchApp(container: AppContainer, onSettingsApplied: () -> Unit) =
+    WatchApp(container, rememberSwipeDismissableNavController(), onSettingsApplied)
 
-/**
- * [onNav] is a seam for tests, which check the back stack. It is called again with a new controller
- * whenever the server settings change: the whole graph restarts on the rebuilt container.
- */
+/** [nav] is a seam for tests, which check the back stack after a sign-out. */
 @Composable
-internal fun WatchApp(container: AppContainer, onNav: (NavHostController) -> Unit) {
-    var current by remember(container) { mutableStateOf(container) }
-    val scope = rememberCoroutineScope()
-    key(current) {
-        val nav = rememberSwipeDismissableNavController()
-        SideEffect { onNav(nav) }
-        WatchRoot(current, nav, onSettingsApplied = {
-            scope.launch {
-                val next = current.reload()
-                // Pop everything first so the old screens' models (and their streams) are cleared now.
-                nav.popBackStack(nav.graph.id, inclusive = true)
-                current = next
-            }
-        })
-    }
-}
-
-@Composable
-private fun WatchRoot(container: AppContainer, nav: NavHostController, onSettingsApplied: () -> Unit) {
-    // signedIn only knows a token blob exists; a blob that no longer decrypts is cleared on the
+internal fun WatchApp(container: AppContainer, nav: NavHostController, onSettingsApplied: () -> Unit) {
+    // signedIn only knows a token blob for this server exists; a blob that no longer decrypts is cleared on the
     // first read, the first call then answers Unauthorized, and the sign-out below takes over.
     val start by produceState<String?>(null, container) {
         value = try {

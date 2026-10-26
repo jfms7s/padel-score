@@ -50,7 +50,7 @@ class SettingsStoreTest {
     @Test
     fun overrides_round_trip() = runTest {
         val store = store()
-        store.setServer("https://padel.other.test/link".toHttpUrl())
+        store.setServer("https://padel.other.test/link".toHttpUrl(), AddressChange.Keep)
         store.setFallback(listOf(InetAddress.getByName("10.0.0.7")))
         val read = store.read()
         assertEquals("https://padel.other.test/", read.serverUrl.toString())
@@ -86,7 +86,7 @@ class SettingsStoreTest {
     @Test
     fun reset_drops_the_overrides() = runTest {
         val store = store()
-        store.setServer("https://padel.other.test/".toHttpUrl())
+        store.setServer("https://padel.other.test/".toHttpUrl(), AddressChange.Keep)
         store.setFallback(emptyList())
         store.reset()
         assertEquals(testDefaults, store.read())
@@ -97,7 +97,21 @@ class SettingsStoreTest {
         file.writeBytes(byteArrayOf(0x0F, 0x7A, 0x01, 0x55, 0x33))
         val store = store()
         assertEquals(testDefaults, store.read())
-        store.setServer("https://padel.other.test/".toHttpUrl())
+        store.setServer("https://padel.other.test/".toHttpUrl(), AddressChange.Keep)
         assertEquals("https://padel.other.test/", store.read().serverUrl.toString())
+    }
+
+    @Test
+    fun server_change_sets_the_addresses_in_the_same_write() = runTest {
+        val store = store()
+        store.setFallback(listOf(InetAddress.getByName("10.0.0.7")))
+        store.setServer("https://padel.other.test/".toHttpUrl(), AddressChange.Exactly(emptyList()))
+        assertEquals(emptyList<InetAddress>(), store.read().fallback)
+        store.setFallback(listOf(InetAddress.getByName("10.0.0.7")))
+        store.setServer(testDefaults.serverUrl, AddressChange.Defaults)
+        assertEquals(testDefaults, store.read())
+        store.setFallback(emptyList())
+        store.setServer("https://padel.other.test/".toHttpUrl(), AddressChange.Keep)
+        assertEquals(emptyList<InetAddress>(), store.read().fallback)
     }
 }

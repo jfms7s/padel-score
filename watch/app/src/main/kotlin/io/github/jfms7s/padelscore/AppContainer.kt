@@ -22,6 +22,7 @@ import io.github.jfms7s.padelscore.net.sseFlow
 import io.github.jfms7s.padelscore.settings.DataStoreSettingsStore
 import io.github.jfms7s.padelscore.settings.ServerSettings
 import io.github.jfms7s.padelscore.settings.SettingsStore
+import io.github.jfms7s.padelscore.settings.originKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl
@@ -44,8 +45,13 @@ interface AppContainer {
 
     /** Cold: each collection opens its own connection. */
     fun matchStream(matchId: String): Flow<StreamItem<MatchView>>
+}
 
-    /** A new container on the stored settings, which the app switches to after they change. */
+/** Holds the process's [AppContainer]; the [MainActivity] asks it for a new one after the settings change. */
+interface ContainerHost {
+    val container: AppContainer
+
+    /** Replaces [container] with one built on the stored settings. */
     suspend fun reload(): AppContainer
 }
 
@@ -67,13 +73,12 @@ fun settingsStoreOf(context: Context, defaults: ServerSettings): SettingsStore =
 
 /**
  * Manual dependency injection, built by [PadelApp]: one instance per process until the server
- * settings change, then [reload] (via [PadelApp.reload]) replaces it.
+ * settings change, then [PadelApp.reload] replaces it.
  */
 class DefaultAppContainer(
     context: Context,
     override val settings: ServerSettings,
     override val settingsStore: SettingsStore,
-    private val reloader: suspend () -> AppContainer,
 ) : AppContainer {
     private val appContext: Context = context.applicationContext
 
@@ -91,7 +96,12 @@ class DefaultAppContainer(
         .readTimeout(Duration.ofSeconds(20))
         .build()
 
-    override val tokens: TokenStore = DataStoreTokenStore(appContext.authDataStore, KeystoreCipher())
+    override val tokens: TokenStore = DataStoreTokenStore(
+        appContext.authDataStore,
+        KeystoreCipher(),
+        origin = originKey(settings.serverUrl),
+        legacyOrigin = originKey(settingsStore.defaults.serverUrl),
+    )
 
     override val api: PadelApi = HttpPadelApi(serverUrl, http, WireJson, token = { tokens.read() })
 
@@ -106,6 +116,4 @@ class DefaultAppContainer(
 
     override fun matchStream(matchId: String): Flow<StreamItem<MatchView>> =
         sseFlow(streamHttp, { api.matchStreamRequest(matchId) }, "state", { WireJson.decodeFromString(MatchView.serializer(), it) })
-
-    override suspend fun reload(): AppContainer = reloader()
 }

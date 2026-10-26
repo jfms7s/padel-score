@@ -83,6 +83,11 @@ class ServerSettingsTest {
         assertNull(addresses("192.168.50.231, padel.example.com"))
         assertNull(addresses("192.168.50.231, 192.168.0"))
         assertNull(addresses("192.168.50.231; 192.168.50.201"))
+        // Would reach Android's getByName as a host name (a DNS lookup) or as octal.
+        assertNull(addresses("1:2"))
+        assertNull(addresses("1.2.3.4:5"))
+        assertNull(addresses("010.0.0.1"))
+        assertNull(addresses("192.168.50.231, 1:2"))
     }
 
     @Test

@@ -19,7 +19,14 @@ class FakeSettingsStore(override val defaults: ServerSettings = testDefaults) : 
 
     override suspend fun read() = ServerSettings(server ?: defaults.serverUrl, fallback ?: defaults.fallback)
 
-    override suspend fun setServer(url: HttpUrl) = write { server = url }
+    override suspend fun setServer(url: HttpUrl, addresses: AddressChange) = write {
+        server = url
+        when (addresses) {
+            AddressChange.Keep -> Unit
+            AddressChange.Defaults -> fallback = null
+            is AddressChange.Exactly -> fallback = addresses.list
+        }
+    }
 
     override suspend fun setFallback(addresses: List<InetAddress>) = write { fallback = addresses }
 

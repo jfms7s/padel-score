@@ -36,7 +36,14 @@ class SettingsModel(
     fun submitServer(text: String) {
         val url = parseServerUrl(text) ?: return fail(SettingsError.BadServer)
         val current = _state.value.settings
-        save(current.copy(serverUrl = url)) { store.setServer(url) }
+        // LAN addresses belong to a host: a new host gets the build's addresses if it is the build's
+        // server, else none (the owner can add them next).
+        val (addresses, fallback) = when {
+            url.host == current.serverUrl.host -> AddressChange.Keep to current.fallback
+            url.host == store.defaults.serverUrl.host -> AddressChange.Defaults to store.defaults.fallback
+            else -> AddressChange.Exactly(emptyList()) to emptyList()
+        }
+        save(ServerSettings(url, fallback)) { store.setServer(url, addresses) }
     }
 
     /** Text from the keyboard or voice; bad input keeps the current addresses and shows an error. */
@@ -65,7 +72,7 @@ class SettingsModel(
                 if (!sameOrigin(next.serverUrl, state.settings.serverUrl)) tokens.clear()
                 write()
                 // Saving what the app already runs on (say, a default as an override) needs no restart.
-                _state.update { it.copy(saving = false, applied = next != state.settings) }
+                _state.update { it.copy(settings = next, saving = false, applied = next != state.settings) }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {

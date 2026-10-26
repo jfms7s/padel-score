@@ -1,7 +1,12 @@
 package io.github.jfms7s.padelscore.settings
 
+import android.app.Activity
+import android.app.RemoteInput
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertHeightIsAtLeast
-import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
@@ -9,6 +14,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.wear.input.RemoteInputIntentHelper
 import io.github.jfms7s.padelscore.auth.MemoryTokenStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -21,17 +27,19 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
 @Config(qualifiers = "w227dp-h227dp-round-watch")
 class SettingsScreenTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     private val scheduler = TestCoroutineScheduler()
     private val store = FakeSettingsStore()
@@ -61,12 +69,53 @@ class SettingsScreenTest {
         compose.onNodeWithText("None").assertExists()
     }
 
+    /** Taps [row], checks the system input was asked for, and answers it with [text]. */
+    private fun answerInput(row: String, text: String) {
+        compose.onNodeWithText(row).performClick()
+        val shadow = shadowOf(compose.activity)
+        val started = checkNotNull(shadow.nextStartedActivityForResult) { "no input opened" }
+        assertTrue(RemoteInputIntentHelper.isActionRemoteInput(started.intent))
+        val inputs = checkNotNull(RemoteInputIntentHelper.getRemoteInputsExtra(started.intent))
+        val data = Intent()
+        RemoteInput.addResultsToIntent(
+            inputs.toTypedArray(),
+            data,
+            Bundle().apply { putCharSequence(inputs.single().resultKey, text) },
+        )
+        shadow.receiveResult(started.intent, Activity.RESULT_OK, data)
+        compose.waitForIdle()
+        scheduler.runCurrent()
+        compose.waitForIdle()
+    }
+
     @Test
-    fun tapping_a_row_opens_input_without_crashing() {
+    fun server_row_takes_system_input_and_validates_it() {
+        show()
+        answerInput("Server", "http://padel.other.test")
+        compose.onNodeWithText("Not a valid server. Use an https address.").assertExists()
+        compose.onNodeWithText("example.test").assertExists()
+        assertNull(store.server)
+    }
+
+    @Test
+    fun addresses_row_takes_system_input_and_saves_it() {
+        show()
+        answerInput("LAN addresses", "10.0.0.1, 10.0.0.2")
+        assertEquals(listOf("10.0.0.1", "10.0.0.2"), store.fallback?.map { it.hostAddress })
+        compose.onNodeWithText("10.0.0.1, 10.0.0.2").assertExists()
+    }
+
+    @Test
+    fun cancelled_input_changes_nothing() {
         show()
         compose.onNodeWithText("Server").performClick()
-        compose.onNodeWithText("LAN addresses").performClick()
+        val shadow = shadowOf(compose.activity)
+        val started = checkNotNull(shadow.nextStartedActivityForResult)
+        shadow.receiveResult(started.intent, Activity.RESULT_CANCELED, null)
         compose.waitForIdle()
+        scheduler.runCurrent()
+        assertEquals(0, store.writes)
+        compose.onNodeWithText("example.test").assertExists()
     }
 
     @Test

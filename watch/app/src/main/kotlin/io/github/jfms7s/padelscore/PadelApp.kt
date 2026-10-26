@@ -7,8 +7,8 @@ import io.github.jfms7s.padelscore.settings.SettingsStore
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
-class PadelApp : Application() {
-    lateinit var container: AppContainer
+class PadelApp : Application(), ContainerHost {
+    override lateinit var container: AppContainer
         private set
 
     private lateinit var settingsStore: SettingsStore
@@ -25,8 +25,7 @@ class PadelApp : Application() {
     }
 
     /** Rebuilds [container] on the stored settings, after the owner changed them on the watch. */
-    suspend fun reload(): AppContainer = build().also { container = it }
+    override suspend fun reload(): AppContainer = build().also { container = it }
 
-    private suspend fun build(): AppContainer =
-        DefaultAppContainer(this, settingsStore.read(), settingsStore, reloader = ::reload)
+    private suspend fun build(): AppContainer = DefaultAppContainer(this, settingsStore.read(), settingsStore)
 }

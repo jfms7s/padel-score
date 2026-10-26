@@ -3,7 +3,6 @@ package io.github.jfms7s.padelscore.net
 import okhttp3.Dns
 import java.net.Inet6Address
 import java.net.InetAddress
-import java.net.UnknownHostException
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -52,23 +51,58 @@ class LanFallbackDns(
 
         /**
          * Parses a comma-separated list of IP literals (from the `padelServerFallbackIps` Gradle
-         * property). Anything that isn't an IP literal is skipped, so this never does a DNS lookup.
+         * property). Anything that isn't a strict IP literal is skipped. Never does a DNS lookup.
          */
-        fun parseAddresses(csv: String): List<InetAddress> =
-            csv.split(',').map(String::trim).filter(::isIpLiteral).mapNotNull {
-                try {
-                    InetAddress.getByName(it)
-                } catch (_: UnknownHostException) {
-                    null
-                }
-            }
-
-        private val ipv4 = Regex("""\d{1,3}(\.\d{1,3}){3}""")
-
-        private fun isIpLiteral(s: String): Boolean =
-            ipv4.matches(s) && s.split('.').all { it.toInt() <= 255 } ||
-                s.contains(':') && s.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.' }
+        fun parseAddresses(csv: String): List<InetAddress> = csv.split(',').mapNotNull { parseIpLiteral(it.trim()) }
     }
+}
+
+/**
+ * Parses one IPv4 dotted quad (0-255, no leading zeros) or IPv6 literal (no zone id), or returns
+ * null. The bytes are built here and handed to [InetAddress.getByAddress], because `getByName` on
+ * Android does a network lookup for anything it doesn't take for a literal (and reads `010` as octal).
+ */
+fun parseIpLiteral(text: String): InetAddress? {
+    val bytes = parseIpv4(text) ?: parseIpv6(text) ?: return null
+    return InetAddress.getByAddress(bytes)
+}
+
+private val ipv4Part = Regex("""0|[1-9]\d{0,2}""")
+
+private fun parseIpv4(text: String): ByteArray? {
+    val parts = text.split('.')
+    if (parts.size != 4 || !parts.all { ipv4Part.matches(it) && it.toInt() <= 255 }) return null
+    return ByteArray(4) { parts[it].toInt().toByte() }
+}
+
+private fun parseIpv6(text: String): ByteArray? {
+    if (text.count { it == ':' } < 2) return null
+    val gap = text.indexOf("::")
+    if (gap >= 0 && text.indexOf("::", gap + 1) >= 0) return null
+    val head = ipv6Words(if (gap >= 0) text.substring(0, gap) else text, mayEndInIpv4 = gap < 0) ?: return null
+    val tail = if (gap >= 0) ipv6Words(text.substring(gap + 2), mayEndInIpv4 = true) ?: return null else emptyList()
+    val given = head.size + tail.size
+    if (if (gap >= 0) given > 7 else given != 8) return null
+    val words = head + List(8 - given) { 0 } + tail
+    return ByteArray(16) { i -> (words[i / 2] shr (if (i % 2 == 0) 8 else 0)).toByte() }
+}
+
+/** The 16-bit groups of one side of an IPv6 literal; a trailing dotted quad counts as two. */
+private fun ipv6Words(part: String, mayEndInIpv4: Boolean): List<Int>? {
+    if (part.isEmpty()) return emptyList()
+    val groups = part.split(':')
+    val words = ArrayList<Int>(8)
+    for ((i, group) in groups.withIndex()) {
+        if (mayEndInIpv4 && i == groups.lastIndex && '.' in group) {
+            val quad = parseIpv4(group) ?: return null
+            words += (quad[0].toInt() and 0xFF shl 8) or (quad[1].toInt() and 0xFF)
+            words += (quad[2].toInt() and 0xFF shl 8) or (quad[3].toInt() and 0xFF)
+        } else {
+            if (group.length !in 1..4 || !group.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) return null
+            words += group.toInt(16)
+        }
+    }
+    return words
 }
 
 /** RFC 1918 / link-local / loopback, plus IPv6 unique-local (fc00::/7). */

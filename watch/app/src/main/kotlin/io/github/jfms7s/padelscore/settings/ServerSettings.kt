@@ -1,6 +1,6 @@
 package io.github.jfms7s.padelscore.settings
 
-import io.github.jfms7s.padelscore.net.LanFallbackDns
+import io.github.jfms7s.padelscore.net.parseIpLiteral
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.InetAddress
@@ -31,6 +31,9 @@ fun parseServerUrl(text: String): HttpUrl? {
 fun originOf(url: HttpUrl): HttpUrl =
     url.newBuilder().username("").password("").encodedPath("/").query(null).fragment(null).build()
 
+/** The origin as a string, which is what a stored token is bound to. */
+fun originKey(url: HttpUrl): String = originOf(url).toString()
+
 fun sameOrigin(a: HttpUrl, b: HttpUrl): Boolean = a.scheme == b.scheme && a.host == b.host && a.port == b.port
 
 /**
@@ -39,7 +42,7 @@ fun sameOrigin(a: HttpUrl, b: HttpUrl): Boolean = a.scheme == b.scheme && a.host
  */
 fun parseAddressList(text: String): List<InetAddress>? {
     val tokens = text.split(',', ' ', '\n', '\t').map(String::trim).filter(String::isNotEmpty)
-    val parsed = tokens.map { LanFallbackDns.parseAddresses(it).singleOrNull() ?: return null }
+    val parsed = tokens.map { parseIpLiteral(it) ?: return null }
     return parsed.distinct()
 }
 

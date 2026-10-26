@@ -83,10 +83,18 @@ class KeystoreCipher(private val alias: String = "padel-device-token") : TokenCi
  * The DataStore must be a single instance per process (DataStore enforces one active
  * instance per file), so build it with `preferencesDataStore` or a process-wide singleton,
  * with `ReplaceFileCorruptionHandler { emptyPreferences() }` so a corrupt file reads as signed out.
+ *
+ * A token is only good for the server that issued it, so it is stored with that server's [origin]
+ * and a store for another origin reads it as signed out (and drops it). Whatever path led to a
+ * mismatch (settings changed, a save cut short, a new build default, an unreadable settings file),
+ * the token is never sent to a server it wasn't issued by. Tokens saved before origins were stored
+ * belong to [legacyOrigin], the build's default server, so existing installs stay signed in.
  */
 class DataStoreTokenStore(
     private val dataStore: DataStore<Preferences>,
     private val cipher: TokenCipher,
+    private val origin: String,
+    private val legacyOrigin: String,
 ) : TokenStore {
     // Every API call and stream reconnect reads the token, so after the first read it comes from memory
     // instead of a KeyStore load and a GCM decrypt. Only the ciphertext ever reaches disk.
@@ -100,7 +108,12 @@ class DataStoreTokenStore(
 
     private suspend fun load(): String? =
         try {
-            val encoded = dataStore.data.map { it[KEY] }.first()
+            val prefs = dataStore.data.first()
+            val encoded = prefs[KEY]
+            if (encoded != null && !ownedHere(prefs)) {
+                discard()
+                return null
+            }
             encoded?.let { String(cipher.decrypt(Base64.getDecoder().decode(it)), Charsets.UTF_8) }
         } catch (e: CancellationException) {
             throw e
@@ -124,7 +137,10 @@ class DataStoreTokenStore(
         lock.withLock {
             cached = null
             val blob = Base64.getEncoder().encodeToString(cipher.encrypt(token.toByteArray(Charsets.UTF_8)))
-            dataStore.edit { it[KEY] = blob }
+            dataStore.edit {
+                it[KEY] = blob
+                it[ORIGIN] = origin
+            }
             cached = token
         }
     }
@@ -137,12 +153,18 @@ class DataStoreTokenStore(
     }
 
     private suspend fun remove() {
-        dataStore.edit { it.remove(KEY) }
+        dataStore.edit {
+            it.remove(KEY)
+            it.remove(ORIGIN)
+        }
     }
 
-    override val signedIn: Flow<Boolean> = dataStore.data.map { it[KEY] != null }
+    private fun ownedHere(prefs: Preferences): Boolean = (prefs[ORIGIN] ?: legacyOrigin) == origin
+
+    override val signedIn: Flow<Boolean> = dataStore.data.map { it[KEY] != null && ownedHere(it) }
 
     private companion object {
         val KEY = stringPreferencesKey("device_token")
+        val ORIGIN = stringPreferencesKey("device_token_origin")
     }
 }

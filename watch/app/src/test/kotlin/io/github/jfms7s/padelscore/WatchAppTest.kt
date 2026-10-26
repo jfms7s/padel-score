@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.NavHostController
+import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.jfms7s.padelscore.auth.TokenStore
 import io.github.jfms7s.padelscore.haptics.Haptics
@@ -102,12 +103,6 @@ private class FakeContainer(
         matchStreams++
         return match
     }
-
-    /** The containers built after a settings change; they share the token store, as on the watch. */
-    val reloads = mutableListOf<FakeContainer>()
-
-    override suspend fun reload(): AppContainer =
-        FakeContainer(api, tokens, list, match, settingsStore, settingsStore.read()).also { reloads += it }
 }
 
 @RunWith(AndroidJUnit4::class)
@@ -120,11 +115,13 @@ class WatchAppTest {
 
     private lateinit var nav: NavHostController
     private lateinit var back: OnBackPressedDispatcher
+    private var applied = 0
 
     private fun launch(container: AppContainer) {
         compose.setContent {
+            nav = rememberSwipeDismissableNavController()
             back = checkNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
-            WatchApp(container) { nav = it }
+            WatchApp(container, nav, onSettingsApplied = { applied++ })
         }
         compose.waitForIdle()
     }
@@ -134,7 +131,7 @@ class WatchAppTest {
         val signedIn = FakeContainer(FakeApi(oneMatch), FakeTokens("tok"))
         val signedOut = FakeContainer(FakeApi(oneMatch), FakeTokens(null))
         var current by mutableStateOf<AppContainer>(signedIn)
-        compose.setContent { key(current) { WatchApp(current) } }
+        compose.setContent { key(current) { WatchApp(current, onSettingsApplied = {}) } }
 
         compose.onNodeWithText("Ana / Rui v João / Marta").assertExists()
         compose.onNodeWithText("New code").assertDoesNotExist()
@@ -252,8 +249,9 @@ class WatchAppTest {
         assertEquals("matches", nav.currentDestination?.route)
     }
 
+    // The restart itself (a fresh activity, old models cleared) is covered by MainActivityTest.
     @Test
-    fun new_server_clears_token_and_restarts_on_sign_in() {
+    fun new_server_clears_token_and_asks_for_a_restart() {
         val tokens = FakeTokens("tok")
         val container = FakeContainer(FakeApi(oneMatch), tokens)
         launch(container)
@@ -262,13 +260,10 @@ class WatchAppTest {
 
         submit { it.submitServer("padel.other.test") }
 
-        compose.onNodeWithText("New code").assertExists()
+        assertEquals(1, applied)
         assertEquals(1, tokens.clears)
         assertNull(runBlocking { tokens.read() })
-        val rebuilt = container.reloads.single()
-        assertEquals("https://padel.other.test/", rebuilt.serverUrl.toString())
-        assertEquals("signin", nav.currentDestination?.route)
-        assertNull(nav.previousBackStackEntry) // a fresh graph, nothing to go back to
+        assertEquals("https://padel.other.test/", container.settingsStore.server.toString())
     }
 
     @Test
@@ -280,13 +275,10 @@ class WatchAppTest {
 
         submit { it.submitAddresses("10.1.2.3, 10.1.2.4") }
 
-        compose.onNodeWithText("Ana / Rui v João / Marta").assertExists()
+        assertEquals(1, applied)
         assertEquals(0, tokens.clears)
         assertEquals("tok", runBlocking { tokens.read() })
-        val rebuilt = container.reloads.single()
-        assertEquals(listOf("10.1.2.3", "10.1.2.4"), rebuilt.settings.fallback.map { it.hostAddress })
-        assertEquals("matches", nav.currentDestination?.route)
-        assertNull(nav.previousBackStackEntry)
+        assertEquals(listOf("10.1.2.3", "10.1.2.4"), container.settingsStore.fallback?.map { it.hostAddress })
     }
 
     @Test
