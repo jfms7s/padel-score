@@ -17,7 +17,7 @@ export const strings = {
 	setNumber: (n: number) => `Set ${n}`,
 	tieBreak: 'tie-break',
 	superTieBreak: 'Super tie-break',
-	nonStop: 'Non-stop',
+	nonStopName: 'Non-stop',
 	overtime: 'Overtime',
 	matchOver: 'Match over',
 
@@ -813,6 +813,49 @@ export const strings = {
 			unfinished: 'Some matches aren’t finished yet.',
 			decision: 'A result needs your decision first.'
 		},
+	},
+
+	// Non-stop events (phase 8).
+	nonStop: {
+		countIn: 'Starting in',
+		practiceNote: 'Practice points are cleared when the clock starts',
+		order: 'Order of matches',
+		orderOptions: { listed: 'As listed', random: 'Random draw' },
+		roundOf: (r: number, rounds: number) => `Round ${r} of ${rounds}`,
+		waveOf: (w: number, waves: number) => `Wave ${w} of ${waves}`,
+		courtLine: (court: number | string, r: number, rounds: number) => `Round ${r} of ${rounds}, court ${court}`,
+		waitingForClock: 'Waiting for the clock',
+		paused: 'Paused',
+		timeUp: 'Time’s up',
+		overtime: 'Overtime: the next game wins',
+		start: (slotText: string) => `Start ${slotText}`,
+		pause: 'Pause',
+		resume: 'Resume',
+		endNow: 'End now',
+		endNowConfirm: 'End this round now? Time is up for every match in it.',
+		matchMinutes: 'Minutes per match',
+		legs: 'Legs',
+		legsOptions: { 1: 'Play each team once', 2: 'Play each team twice', 3: 'Play each team three times' },
+		team: 'Team',
+		played: 'P',
+		won: 'W',
+		drawn: 'D',
+		lost: 'L',
+		games: 'Games',
+		points: 'Pts',
+		standingsHint: 'Win 3 points, draw 1, loss 0. Level teams are split by games won, then by their own match.',
+		afterRound: (r: number) => `After round ${r}`,
+		computedPlacesHint: 'The final places come from the standings. Level teams share a place.',
+		clockErrors: {
+			not_next_slot: 'That round is not the next one. Reload and try again.',
+			clock_busy: 'Another round is already on the clock.',
+			previous_unfinished: 'Finish the matches of the earlier rounds first: type the missing results.',
+			clock_not_running: 'The clock is not running.',
+			clock_not_paused: 'The clock is not paused.',
+			event_not_running: 'This event is not running.',
+			not_non_stop: 'This is not a non-stop event.'
+		},
+		clockFailed: 'Couldn’t change the clock. Try again.'
 	},
 
 	// Home, signed in.
