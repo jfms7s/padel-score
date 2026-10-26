@@ -11,6 +11,7 @@ val ciSigningEnv = listOf("WATCH_KEYSTORE_PATH", "WATCH_KEYSTORE_PASSWORD", "WAT
 val hasCiSigning = ciSigningEnv.values.all { it != null }
 
 val serverUrl = providers.gradleProperty("padelServerUrl").get()
+val serverFallbackIps = providers.gradleProperty("padelServerFallbackIps").orElse("").get()
 
 android {
     namespace = "io.github.jfms7s.padelscore"
@@ -24,6 +25,7 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
+        buildConfigField("String", "SERVER_FALLBACK_IPS", "\"$serverFallbackIps\"")
     }
 
     signingConfigs {

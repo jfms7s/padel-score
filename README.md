@@ -124,7 +124,7 @@ adb connect <ip>:<port>
 adb install -r app-debug.apk
 ```
 
-**Sign in.** The watch shows a code. On the phone, while signed in, open `<server>/link` and enter it. The watch needs the server reachable from its own network: the paired phone's connection (including its VPN) or the watch's own Wi-Fi.
+**Sign in.** The watch shows a code. On the phone, while signed in, open `<server>/link` and enter it. The watch needs the server reachable from its own network: the paired phone's connection (including its VPN) or the watch's own Wi-Fi. Over the phone's Bluetooth link the watch gets DNS servers that only know the server's public address, so the app falls back to the LAN addresses in `padelServerFallbackIps` (`watch/gradle.properties`) when DNS gives no LAN answer; the certificate is still checked against the host name.
 
 **Signed out.** The watch returns to the sign-in screen when its device is revoked on the web Account page, when the user's password is changed, an admin resets it or the account is disabled (all device tokens are revoked), or when you pick "Sign out" in the watch's list. That last item only forgets the sign-in on the watch; it does not revoke the device on the server.
 

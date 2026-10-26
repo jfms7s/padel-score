@@ -12,6 +12,7 @@ import io.github.jfms7s.padelscore.auth.deviceNameOf
 import io.github.jfms7s.padelscore.haptics.Haptics
 import io.github.jfms7s.padelscore.haptics.VibratorHaptics
 import io.github.jfms7s.padelscore.net.HttpPadelApi
+import io.github.jfms7s.padelscore.net.LanFallbackDns
 import io.github.jfms7s.padelscore.net.MatchView
 import io.github.jfms7s.padelscore.net.MyMatch
 import io.github.jfms7s.padelscore.net.PadelApi
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
+import java.net.InetAddress
 import java.time.Duration
 
 /** What the screens need; [WatchApp] takes it so tests can hand in fakes. */
@@ -47,10 +49,16 @@ private val Context.authDataStore by preferencesDataStore(
 )
 
 /** Manual dependency injection: one instance per process, built by [PadelApp]. */
-class DefaultAppContainer(context: Context, override val serverUrl: HttpUrl) : AppContainer {
+class DefaultAppContainer(
+    context: Context,
+    override val serverUrl: HttpUrl,
+    serverFallback: List<InetAddress> = emptyList(),
+) : AppContainer {
     private val appContext: Context = context.applicationContext
 
+    // The stream client below is derived from this one, so it shares the LAN fallback.
     private val http: OkHttpClient = OkHttpClient.Builder()
+        .dns(LanFallbackDns(serverUrl.host, serverFallback))
         .connectTimeout(Duration.ofSeconds(5))
         .callTimeout(Duration.ofSeconds(8))
         .retryOnConnectionFailure(false)
