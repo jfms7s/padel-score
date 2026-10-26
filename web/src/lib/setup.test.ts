@@ -6,6 +6,8 @@ import {
 	defaultSetup,
 	listRecent,
 	loadLastSetup,
+	nameOrSlot,
+	slotName,
 	afterCreate,
 	matchLabel,
 	recentSpectator,
@@ -137,6 +139,20 @@ describe('setup', () => {
 			a: ['Ana', 'Player 2'],
 			b: ['Player 3', 'Player 4']
 		});
+	});
+
+	it('names each slot Player 1..4, team A then team B', () => {
+		expect([slotName('a', 0), slotName('a', 1), slotName('b', 0), slotName('b', 1)]).toEqual([
+			'Player 1',
+			'Player 2',
+			'Player 3',
+			'Player 4'
+		]);
+		const teams = { a: [' Ana ', ''] as [string, string], b: ['  ', 'Marta'] as [string, string] };
+		expect(nameOrSlot(teams, 'a', 0)).toBe('Ana');
+		expect(nameOrSlot(teams, 'a', 1)).toBe('Player 2');
+		expect(nameOrSlot(teams, 'b', 0)).toBe('Player 3');
+		expect(nameOrSlot(teams, 'b', 1)).toBe('Marta');
 	});
 
 	it('remembers the serve order in the new shape', () => {

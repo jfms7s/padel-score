@@ -1,8 +1,4 @@
 <!--
-	Who serves first in a match made elsewhere (an event match on the court phone): the four
-	players, then the other pair's first server, as on New match. `onstart` saves the choice.
--->
-<!--
 	Who serves first in a match made elsewhere (an event match on the court phone): the same
 	three choices as New match, picked from the match's current start. `onstart` saves them.
 -->
@@ -42,7 +38,7 @@
 
 <form class="serve" onsubmit={submit}>
 	<h2>{t.serveTitle}</h2>
-	<ServeOrderFields bind:order {teams} />
+	<ServeOrderFields bind:order {teams} large />
 
 	{#if failure}<p class="error" role="alert">{failure}</p>{/if}
 	<button class="go" type="submit" disabled={busy}>{busy ? t.starting : t.startScoring}</button>

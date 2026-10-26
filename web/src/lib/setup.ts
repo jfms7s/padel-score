@@ -62,10 +62,18 @@ export function setSets(setup: Setup, sets: SetsFormat): Setup {
 	return { ...setup, sets, deciding: sets === 'one' ? 'full_set' : setup.deciding };
 }
 
+/** A slot's stand-in name, "Player N" (N = 1..4 across team A then team B). */
+export function slotName(team: Team, index: number): string {
+	return strings.setup.player((team === 'a' ? 0 : 2) + index + 1);
+}
+
+/** A player's name as entered, or their slot's stand-in while it is blank. */
+export function nameOrSlot(teams: Teams, team: Team, index: 0 | 1): string {
+	return teams[team][index].trim() || slotName(team, index);
+}
+
 export function toCreateRequest(setup: Setup): CreateMatchRequest {
-	// A blank name becomes "Player N" (N = 1..4 across team A then team B).
-	const name = (team: 'a' | 'b', i: 0 | 1) =>
-		setup.teams[team][i].trim() || strings.setup.player((team === 'a' ? 0 : 2) + i + 1);
+	const name = (team: Team, i: 0 | 1) => nameOrSlot(setup.teams, team, i);
 	const req: CreateMatchRequest = {
 		format: {
 			sets: {

@@ -5,16 +5,20 @@
 -->
 <script lang="ts">
 	import type { ServeOrder } from '#lib/serve.ts';
+	import { nameOrSlot } from '#lib/setup.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { Team, Teams } from '#lib/types.ts';
 
 	let {
 		order = $bindable(),
-		teams
+		teams,
+		large = false
 	}: {
 		order: ServeOrder;
 		/** The names to label the buttons with; a blank one shows as "Player N". */
 		teams: Teams;
+		/** Bigger buttons, for the court phone used at the fence. */
+		large?: boolean;
 	} = $props();
 
 	const t = strings.serve;
@@ -22,15 +26,13 @@
 	const TEAMS: Team[] = ['a', 'b'];
 	const INDEXES = [0, 1] as const;
 
-	/** A player's name, or "Player N" (N = 1..4 across team A then team B) while it is blank. */
-	const nameOf = (team: Team, index: 0 | 1) =>
-		teams[team][index].trim() || strings.setup.player((team === 'a' ? 0 : 2) + index + 1);
+	const nameOf = (team: Team, index: 0 | 1) => nameOrSlot(teams, team, index);
 	const teamLabel = (team: Team) => strings.teamName(nameOf(team, 0), nameOf(team, 1));
 </script>
 
 <div class="field" role="group" aria-labelledby="{uid}-first">
 	<span class="label" id="{uid}-first">{t.first}</span>
-	<div class="seg">
+	<div class="seg" class:large>
 		{#each TEAMS as team (team)}
 			<button type="button" class={team} aria-pressed={order.team === team} onclick={() => (order.team = team)}>
 				{teamLabel(team)}
@@ -44,7 +46,7 @@
 	{#each TEAMS as team (team)}
 		<div class="field" role="group" aria-labelledby="{uid}-{team}">
 			<span class="label" id="{uid}-{team}">{t.firstFor(teamLabel(team))}</span>
-			<div class="seg">
+			<div class="seg" class:large>
 				{#each INDEXES as index (index)}
 					<button type="button" class={team} aria-pressed={order.first[team] === index} onclick={() => (order.first[team] = index)}>
 						{nameOf(team, index)}
@@ -85,6 +87,11 @@
 		border-radius: 9px;
 		overflow-wrap: anywhere;
 		touch-action: manipulation;
+	}
+	.seg.large button {
+		min-height: 64px;
+		font-size: 18px;
+		font-weight: 700;
 	}
 	.seg button.a[aria-pressed='true'] {
 		background: var(--a);
