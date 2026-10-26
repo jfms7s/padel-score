@@ -30,7 +30,6 @@ import io.github.jfms7s.padelscore.R
 import io.github.jfms7s.padelscore.local.engine.DecidingSet
 import io.github.jfms7s.padelscore.local.engine.DeuceRule
 import io.github.jfms7s.padelscore.local.engine.SetsFormat
-import io.github.jfms7s.padelscore.net.Player
 import io.github.jfms7s.padelscore.net.Team
 import io.github.jfms7s.padelscore.score.Feedback
 

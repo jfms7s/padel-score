@@ -263,6 +263,16 @@ class LocalMatchModelTest {
     }
 
     @Test
+    fun a_stored_match_with_the_old_first_server_index_still_loads_and_replays() {
+        val old = LocalSetup(setup.rules, Start(firstServer = Player(Team.A, 0), otherFirstServer = 0))
+        val points = listOf(Team.A, Team.A, Team.B)
+        val m = model(FakeLocalMatchStore(LocalStoreState(LocalMatch(old, points), old)))
+        val ui = m.ui.value
+        assertEquals(LocalMatch(old, points), ui.match)
+        assertEquals(GameScore(PointCall.THIRTY, PointCall.FIFTEEN, 0, false), game(m))
+    }
+
+    @Test
     fun a_last_setup_with_the_old_first_server_index_still_loads() {
         val last = LocalSetup(
             SetRules(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET),

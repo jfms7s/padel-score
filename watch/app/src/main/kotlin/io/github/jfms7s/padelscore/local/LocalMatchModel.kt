@@ -123,7 +123,10 @@ class LocalMatchModel(
 
     fun pickDeciding(deciding: DecidingSet) = _draft.update { it.copy(deciding = deciding) }
 
-    /** The finished setup, with [team] serving first and each pair starting on its second player; null if a pick is missing. */
+    /**
+     * The finished setup, with [team] serving first and each pair starting on its second player; null if a pick is
+     * missing. The team is recorded in the draft either way.
+     */
     fun pickFirstTeam(team: Team): LocalSetup? {
         _draft.update { it.copy(firstTeam = team) }
         val d = _draft.value
