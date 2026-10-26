@@ -71,8 +71,8 @@ import kotlinx.coroutines.launch
 internal const val NOT_SENT_ICON_TAG = "not-sent-icon"
 internal const val SERVE_BALL_TAG = "serve-ball"
 
-private val TeamAColor = Color(0xFF1C5FD0)
-private val TeamBColor = Color(0xFF0C8A5E)
+internal val TeamAColor = Color(0xFF1C5FD0)
+internal val TeamBColor = Color(0xFF0C8A5E)
 private val BallColor = Color(0xFFD9EA2A)
 private val Scrim = Color.Black.copy(alpha = 0.72f)
 private val PillColor = Color.Black.copy(alpha = 0.45f)
