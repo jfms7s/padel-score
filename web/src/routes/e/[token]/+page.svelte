@@ -4,6 +4,7 @@
 	// viewing link; it never holds a scoring token. A signed-in viewer also gets "That's me" on
 	// the teams' players, to claim their entry.
 	import { page } from '$app/state';
+	import CourtTile from '#lib/components/events/CourtTile.svelte';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import { matchResultText } from '#lib/court.ts';
 	import { eventViewStreamUrl, getEventView, isEventDetail, matchText, matchViewPath, rulesText, teamText } from '#lib/events.ts';
@@ -140,6 +141,12 @@
 		{#if courts.length > 0 && ev.status !== 'finished'}
 			<section aria-labelledby="h-courts">
 				<h2 id="h-courts">{t.courts}</h2>
+				<!-- Temporary: Task 6 places the tiles for good. -->
+				<div class="tiles">
+					{#each courts as court (court.id)}
+						<CourtTile {court} {matches} {teams} />
+					{/each}
+				</div>
 				<ul class="list" aria-labelledby="h-courts">
 					{#each courts as court (court.id)}
 						{@const m = matchById(court.current)}
@@ -235,6 +242,11 @@
 {/if}
 
 <style>
+	.tiles {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+		gap: 14px;
+	}
 	.head h1 {
 		margin-bottom: 4px;
 		overflow-wrap: anywhere;

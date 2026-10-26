@@ -905,6 +905,21 @@ export const strings = {
 		history: 'History',
 		results: 'My results',
 		account: 'Account'
+	},
+
+	// The coordinator desk and the spectator page: the court tile.
+	desk: {
+		live: 'Live',
+		finished: 'Finished',
+		won: 'Won',
+		idle: 'No match on this court',
+		next: (label: string) => `Next: ${label}`,
+		nextMatch: 'Next match',
+		watch: 'Watch',
+		phones: (n: number) => (n === 1 ? '1 phone' : `${n} phones`),
+		games: 'Games',
+		sets: 'Sets',
+		serving: (names: string) => `${names} serving`
 	}
 } as const;
 
