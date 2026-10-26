@@ -18,7 +18,7 @@ fun pointsLabel(score: Score, team: Team): String = when (val current = score.cu
     Current.None -> ""
 }
 
-private fun callLabel(call: PointCall): String = when (call) {
+internal fun callLabel(call: PointCall): String = when (call) {
     PointCall.LOVE -> "0"
     PointCall.FIFTEEN -> "15"
     PointCall.THIRTY -> "30"

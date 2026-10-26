@@ -85,6 +85,8 @@ Event matches show in history and on player pages as "Sunday cup · Match 1".
 
 `watch/` is a Wear OS 3+ app (built for a Galaxy Watch) that scores a match from the wrist. Pick a live match, tap a half of the screen to give that side the point, and hold Undo to take one back. It signs in with a code, so no password is typed on the watch.
 
+**Local match.** "Local match" is on the first-run settings, sign-in and match-list screens, and needs no server, sign-in or network. Four quick picks set it up: the deuce rule, the number of sets, the deciding set (only for best of three) and who serves, which takes two steps as on the web. Then score with the usual taps and hold Undo to take a point back. Swipe away to keep the match; "Resume local match" and "Discard local match" (which asks first) are on the first screen. When it's finished, Play again starts another and Back closes it. The match is kept on the watch through app restarts and reboots until it's closed or discarded, and nothing is kept after.
+
 **Build.** Needs JDK 21 and the Android SDK:
 
 ```sh
@@ -93,7 +95,7 @@ cd watch && ./gradlew :app:assembleDebug
 
 The APK is `watch/app/build/outputs/apk/debug/app-debug.apk`. It has no server built in: on first launch it opens Server settings and asks for one. On an emulator, a server on the same machine is `http://10.0.2.2:8080`.
 
-**CI.** The `Watch` workflow (`.github/workflows/watch.yml`) runs the tests and lint, and uploads the APK as an artifact: `padel-score-watch-release-<sha>` (signed, non-debuggable) on pushes to `main` and tags once the signing secrets below are set, otherwise `padel-score-watch-debug-<sha>`. It runs on pushes to `main` and on pull requests only when `watch/`, the web fixtures it tests against or the workflow itself change; every `v*` tag builds. Once the signing secrets below are set, builds on pushes to `main` and on tags are the release build, signed with the owner's key; until then, and on pull requests, they are the debug build with a throwaway debug key, so a PR build cannot update an install made from `main`.
+**CI.** The `Watch` workflow (`.github/workflows/watch.yml`) runs the tests and lint, and uploads the APK as an artifact: `padel-score-watch-release-<sha>` (signed, non-debuggable) on pushes to `main` and tags once the signing secrets below are set, otherwise `padel-score-watch-debug-<sha>`. It runs on pushes to `main` and on pull requests only when `watch/`, the web fixtures it tests against, the engine vectors (`crates/scoring/tests/fixtures/`) or the workflow itself change; every `v*` tag builds. Once the signing secrets below are set, builds on pushes to `main` and on tags are the release build, signed with the owner's key; until then, and on pull requests, they are the debug build with a throwaway debug key, so a PR build cannot update an install made from `main`.
 
 **Signing setup, once.** Make a keystore and add four repository secrets:
 

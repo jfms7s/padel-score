@@ -96,7 +96,14 @@ fun ScoreScreen(model: ScoreModel, onDone: () -> Unit) {
 }
 
 @Composable
-private fun ScoreContent(ui: ScoreUi, onPoint: (Team) -> Unit, onUndo: () -> Unit, onDone: () -> Unit) {
+internal fun ScoreContent(
+    ui: ScoreUi,
+    onPoint: (Team) -> Unit,
+    onUndo: () -> Unit,
+    onDone: () -> Unit,
+    chip: String = stringResource(R.string.quick_match),
+    onPlayAgain: (() -> Unit)? = null,
+) {
     val feedback = visibleFeedback(ui)
     val screenShape = if (LocalConfiguration.current.isScreenRound) CircleShape else RectangleShape
     MaterialTheme {
@@ -114,7 +121,7 @@ private fun ScoreContent(ui: ScoreUi, onPoint: (Team) -> Unit, onUndo: () -> Uni
             if (feedback == Feedback.Accepted) {
                 Box(Modifier.fillMaxSize().border(4.dp, BallColor, screenShape))
             }
-            TopBar(ui, view, Modifier.align(Alignment.TopCenter))
+            TopBar(ui, view, chip, Modifier.align(Alignment.TopCenter))
             if (finished != null) {
                 // Anchored just above the undo bar and growing upward, so a taller notice never pushes into it.
                 FinishedBanner(
@@ -122,6 +129,7 @@ private fun ScoreContent(ui: ScoreUi, onPoint: (Team) -> Unit, onUndo: () -> Uni
                     finished,
                     feedback,
                     onDone,
+                    onPlayAgain,
                     Modifier.align(Alignment.BottomCenter).padding(bottom = UndoBarHeight + 8.dp),
                 )
             } else {
@@ -142,7 +150,8 @@ private fun visibleFeedback(ui: ScoreUi): Feedback {
     LaunchedEffect(id) {
         val shownFor = when (kind) {
             Feedback.Accepted -> ACCEPTED_FLASH_MS
-            Feedback.NotSent, Feedback.UndoConflict, Feedback.MatchOver, Feedback.NothingToUndo -> NOTICE_MS
+            Feedback.NotSent, Feedback.UndoConflict, Feedback.MatchOver, Feedback.NothingToUndo, Feedback.NotSaved ->
+                NOTICE_MS
             Feedback.None -> return@LaunchedEffect
         }
         delay(shownFor)
@@ -204,14 +213,14 @@ private fun Half(
 }
 
 @Composable
-private fun TopBar(ui: ScoreUi, view: MatchView, modifier: Modifier) {
+private fun TopBar(ui: ScoreUi, view: MatchView, chip: String, modifier: Modifier) {
     Column(
         modifier.padding(top = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Chip(stringResource(R.string.quick_match))
+            Chip(chip)
             if (ui.sending) {
                 val sending = stringResource(R.string.score_sending)
                 CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = sending })
@@ -245,6 +254,7 @@ private fun Notice(feedback: Feedback, modifier: Modifier) {
         Feedback.MatchOver -> R.string.score_match_over
         Feedback.UndoConflict -> R.string.score_undo_conflict
         Feedback.NothingToUndo -> R.string.score_nothing_to_undo
+        Feedback.NotSaved -> R.string.local_not_saved
         Feedback.None, Feedback.Accepted -> return
     }
     Column(
@@ -319,6 +329,7 @@ private fun FinishedBanner(
     finished: Status.Finished,
     feedback: Feedback,
     onDone: () -> Unit,
+    onPlayAgain: (() -> Unit)?,
     modifier: Modifier,
 ) {
     val winner = finished.winner
@@ -344,8 +355,13 @@ private fun FinishedBanner(
                 modifier = Modifier.background(Scrim, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
             )
         }
+        if (onPlayAgain != null) {
+            Button(onClick = onPlayAgain, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.local_play_again))
+            }
+        }
         Button(onClick = onDone, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(stringResource(R.string.score_back))
+            Text(stringResource(if (onPlayAgain != null) R.string.local_back else R.string.score_back))
         }
     }
 }

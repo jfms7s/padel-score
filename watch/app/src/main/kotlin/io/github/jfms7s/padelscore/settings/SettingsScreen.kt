@@ -6,7 +6,6 @@ import android.content.ActivityNotFoundException
 import android.view.inputmethod.EditorInfo
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,21 +39,21 @@ import androidx.wear.input.wearableExtender
 import io.github.jfms7s.padelscore.R
 
 @Composable
-fun SettingsScreen(model: SettingsModel, onApplied: () -> Unit) {
+fun SettingsScreen(model: SettingsModel, onApplied: () -> Unit, localEntry: @Composable () -> Unit = {}) {
     val state by model.state.collectAsState()
     LaunchedEffect(state.applied) {
         if (state.applied) onApplied()
     }
     val editServer = rememberTextInput(stringResource(R.string.settings_server_input), model::submitServer)
     val editAddresses = rememberTextInput(stringResource(R.string.settings_addresses_input), model::submitAddresses)
-    SettingsContent(state, onEditServer = editServer, onEditAddresses = editAddresses)
+    SettingsContent(state, onEditServer = editServer, onEditAddresses = editAddresses, localEntry = localEntry)
 }
 
-/** A first run, with no server set yet: the settings are the only screen. */
+/** A first run, with no server set yet: the settings, and the local match that needs no server. */
 @Composable
-fun FirstRunSettings(store: SettingsStore, onApplied: () -> Unit) {
+fun FirstRunSettings(store: SettingsStore, onApplied: () -> Unit, localEntry: @Composable () -> Unit = {}) {
     val model = viewModel { SettingsModel(store, current = null, tokens = null) }
-    Box(Modifier.fillMaxSize().background(Color.Black)) { SettingsScreen(model, onApplied) }
+    SettingsScreen(model, onApplied, localEntry)
 }
 
 private const val INPUT_KEY = "text"
@@ -100,12 +99,15 @@ internal fun SettingsContent(
     state: SettingsState,
     onEditServer: () -> Unit,
     onEditAddresses: () -> Unit,
+    localEntry: @Composable () -> Unit = {},
 ) {
     val settings = state.settings
     MaterialTheme {
         val listState = rememberTransformingLazyColumnState()
         ScreenScaffold(scrollState = listState) { padding ->
             TransformingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
+                // Only on a first run: once a server is set, the entry is on the sign-in or match list screen.
+                if (settings == null) item { localEntry() }
                 item { Title(stringResource(R.string.settings_title)) }
                 state.error?.let { error -> item { Hint(stringResource(error.message())) } }
                 if (state.saving) item { Hint(stringResource(R.string.settings_saving)) }

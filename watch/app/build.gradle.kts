@@ -61,6 +61,8 @@ android {
     sourceSets {
         // The web's serde fixtures, so the watch decodes the same bytes the web is tested against.
         getByName("test").resources.directories.add("../../web/src/lib/fixtures")
+        // The Rust engine's vectors, which the Kotlin port is checked against.
+        getByName("test").resources.directories.add("../../crates/scoring/tests/fixtures")
     }
 
     testOptions {

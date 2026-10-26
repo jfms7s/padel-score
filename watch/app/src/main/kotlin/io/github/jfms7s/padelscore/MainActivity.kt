@@ -5,7 +5,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
-import io.github.jfms7s.padelscore.settings.FirstRunSettings
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -15,14 +14,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val host = application as ContainerHost
         val container = host.container
-        setContent {
-            // No server set yet (a fresh install): the settings are all there is until one is.
-            if (container == null) {
-                FirstRunSettings(host.settingsStore, onApplied = ::restart)
-            } else {
-                WatchApp(container, onSettingsApplied = ::restart)
-            }
-        }
+        setContent { WatchApp(container, host.settingsStore, host.local, onSettingsApplied = ::restart) }
     }
 
     /**

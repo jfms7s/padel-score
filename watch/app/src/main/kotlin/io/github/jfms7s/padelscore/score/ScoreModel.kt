@@ -22,7 +22,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-enum class Feedback { None, Accepted, NotSent, MatchOver, UndoConflict, NothingToUndo }
+/** [NotSaved] is the local match's failed write; the server path never emits it. */
+enum class Feedback { None, Accepted, NotSent, MatchOver, UndoConflict, NothingToUndo, NotSaved }
 
 /** [feedbackId] changes with every new feedback, so the screen can flash the same one twice in a row. */
 data class ScoreUi(

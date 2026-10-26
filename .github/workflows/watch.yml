@@ -10,11 +10,13 @@ on:
     paths:
       - "watch/**"
       - "web/src/lib/fixtures/**"
+      - "crates/scoring/tests/fixtures/**"
       - ".github/workflows/watch.yml"
   pull_request:
     paths:
       - "watch/**"
       - "web/src/lib/fixtures/**"
+      - "crates/scoring/tests/fixtures/**"
       - ".github/workflows/watch.yml"
 
 permissions: {}
