@@ -62,15 +62,12 @@ async fn player(state: &AppState, app: &Router, raw: &str, name: &str) -> String
 }
 
 async fn create_event(state: &AppState, app: &Router, raw: &str, name: &str) -> String {
-    let res = call(
-        state,
-        app,
-        raw,
-        Method::POST,
-        "/api/events",
-        Some(new_event(name)),
-    )
-    .await;
+    create_event_of(state, app, raw, new_event(name)).await
+}
+
+/// [`create_event`] for the event `new` (the body of `POST /api/events`).
+async fn create_event_of(state: &AppState, app: &Router, raw: &str, new: Value) -> String {
+    let res = call(state, app, raw, Method::POST, "/api/events", Some(new)).await;
     assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
     assert_eq!(res.body["event"]["status"], json!("setup"));
     res.body["event"]["id"].as_str().unwrap().to_owned()
@@ -85,6 +82,15 @@ async fn clear_draw(pool: &sqlx::SqlitePool) {
         .unwrap();
 }
 
+/// A non-stop event: phase 6's places are given by the coordinator at Finish.
+fn non_stop(name: &str) -> Value {
+    json!({
+        "name": name,
+        "kind": "non_stop",
+        "format": Format::Timed { deuce: DeuceRule::Advantage, draws_allowed: false },
+    })
+}
+
 /// A "Sunday cup" of the session `raw` with four teams and two courts, started, and one match
 /// created on court 1: (event id, team ids, court ids, match id).
 async fn running_event(
@@ -93,7 +99,18 @@ async fn running_event(
     app: &Router,
     raw: &str,
 ) -> (String, Vec<String>, Vec<String>, String) {
-    let id = create_event(state, app, raw, "Sunday cup").await;
+    running_event_of(state, pool, app, raw, new_event("Sunday cup")).await
+}
+
+/// [`running_event`] for the event `new` (the body of `POST /api/events`).
+async fn running_event_of(
+    state: &AppState,
+    pool: &sqlx::SqlitePool,
+    app: &Router,
+    raw: &str,
+    new: Value,
+) -> (String, Vec<String>, Vec<String>, String) {
+    let id = create_event_of(state, app, raw, new).await;
     let mut teams = Vec::new();
     for [p1, p2] in [
         ["Ana", "Marta"],
@@ -143,9 +160,9 @@ async fn running_event(
         None,
     )
     .await;
-    clear_draw(pool).await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
     assert_eq!(res.body["event"]["status"], json!("running"));
+    clear_draw(pool).await;
     let res = call(
         state,
         app,
@@ -236,7 +253,8 @@ async fn create_event_round_trip() {
     assert_eq!(d["teams"].as_array().unwrap().len(), 4);
     assert_eq!(d["kind_data"], Value::Null);
     assert_eq!(d["places"], json!([]));
-    assert_eq!(d["places_computed"], json!(false));
+    // A tournament works out its places from its bracket.
+    assert_eq!(d["places_computed"], json!(true));
     let court = court_in(&d, &courts[0]);
     assert_eq!(court["name"], json!("Court 1"));
     assert_eq!(court["current"], json!(match_id));
@@ -881,7 +899,9 @@ async fn rotate_ends_old_fence_stream() {
 #[tokio::test]
 async fn finish_via_api_writes_placings() {
     let (state, pool, app, _admin, raw) = with_admin().await;
-    let (id, teams, courts, match_id) = running_event(&state, &pool, &app, &raw).await;
+    // A tournament's places come from its bracket; this test finishes with places it gives.
+    let (id, teams, courts, match_id) =
+        running_event_of(&state, &pool, &app, &raw, non_stop("Sunday cup")).await;
     let path = format!("/api/events/{id}/finish");
     let bad = call(
         &state,

@@ -703,6 +703,34 @@ async fn running_event(s: &Store, pool: &SqlitePool) -> (Competition, Vec<String
     (ev, teams)
 }
 
+/// A running non-stop event of the same four teams with one court, status set directly. A
+/// tournament now works out its places from its bracket, so the tests of Finish with places
+/// given by the coordinator use this kind, whose places (in phase 6) are always given.
+async fn hand_placed_event(s: &Store, pool: &SqlitePool) -> (Competition, Vec<String>) {
+    let mut ev = s
+        .create_competition(
+            A,
+            NewCompetition {
+                name: "Sunday cup".into(),
+                kind: Kind::NonStop,
+                format: timed(),
+                settings: None,
+            },
+            10,
+        )
+        .await
+        .unwrap();
+    let mut teams = Vec::new();
+    for [p1, p2] in FOUR {
+        let players = [player(s, A, p1).await, player(s, A, p2).await];
+        teams.push(s.add_team(A, &ev.id, players, None, 10).await.unwrap().id);
+    }
+    s.add_court(A, &ev.id, None).await.unwrap();
+    start(pool, &ev.id, "running").await;
+    ev.status = Status::Running;
+    (ev, teams)
+}
+
 fn one_set() -> Format {
     Format::Sets(SetRules {
         deuce: DeuceRule::Advantage,
@@ -765,7 +793,7 @@ fn four_places(spec: [(u32, u32); 4], teams: &[String]) -> Vec<Place> {
 #[tokio::test]
 async fn finish_writes_two_placings_per_team() {
     let (s, pool) = setup().await;
-    let (ev, teams) = running_event(&s, &pool).await;
+    let (ev, teams) = hand_placed_event(&s, &pool).await;
     let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
     let (done, rotated) = s
         .finish_competition(A, &ev.id, Some(given.clone()), 90)
@@ -787,7 +815,7 @@ async fn finish_writes_two_placings_per_team() {
     assert_eq!(placings[0].place, 1);
     assert_eq!(placings[0].field_size, 4);
     assert_eq!(placings[0].event_name, "Sunday cup");
-    assert_eq!(placings[0].event_kind, "tournament");
+    assert_eq!(placings[0].event_kind, "non_stop");
     assert_eq!(placings[0].finished_at, 90);
     let mut conn = pool.acquire().await.unwrap();
     assert_eq!(places(&mut conn, &ev.id).await.unwrap(), given);
@@ -796,7 +824,7 @@ async fn finish_writes_two_placings_per_team() {
 #[tokio::test]
 async fn finish_shared_place() {
     let (s, pool) = setup().await;
-    let (ev, teams) = running_event(&s, &pool).await;
+    let (ev, teams) = hand_placed_event(&s, &pool).await;
     let given = four_places([(1, 1), (2, 2), (3, 4), (3, 4)], &teams);
     s.finish_competition(A, &ev.id, Some(given), 90)
         .await
@@ -818,7 +846,7 @@ async fn finish_shared_place() {
 #[tokio::test]
 async fn finish_without_places_is_422() {
     let (s, pool) = setup().await;
-    let (ev, teams) = running_event(&s, &pool).await;
+    let (ev, teams) = hand_placed_event(&s, &pool).await;
     let err = s.finish_competition(A, &ev.id, None, 90).await.unwrap_err();
     assert!(matches!(err, StoreError::InvalidField("places")), "{err:?}");
     let bad = four_places([(1, 1), (2, 2), (3, 3), (3, 3)], &teams);
@@ -862,7 +890,7 @@ async fn win_for_a(s: &Store, match_id: &str) {
 #[tokio::test]
 async fn finish_rotates_match_tokens_and_clears_courts() {
     let (s, pool) = setup().await;
-    let (ev, teams) = one_set_event(&s, &pool).await;
+    let (ev, teams) = hand_placed_event(&s, &pool).await;
     let court = padel_score_server::competitions::courts::courts_in(
         &mut pool.acquire().await.unwrap(),
         &ev.id,
@@ -965,7 +993,7 @@ async fn event_match_in_history_has_event_context() {
 #[tokio::test]
 async fn placings_are_owner_filtered() {
     let (s, pool) = setup().await;
-    let (ev, teams) = running_event(&s, &pool).await;
+    let (ev, teams) = hand_placed_event(&s, &pool).await;
     let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
     s.finish_competition(A, &ev.id, Some(given), 90)
         .await

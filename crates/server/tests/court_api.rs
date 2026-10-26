@@ -28,6 +28,15 @@ fn one_set() -> Value {
     .unwrap()
 }
 
+/// A non-stop event: phase 6's places are given by the coordinator at Finish.
+fn non_stop() -> Value {
+    json!({
+        "name": "Sunday cup",
+        "kind": "non_stop",
+        "format": Format::Timed { deuce: DeuceRule::Advantage, draws_allowed: false },
+    })
+}
+
 async fn call(
     state: &AppState,
     app: &Router,
@@ -73,15 +82,19 @@ async fn running_event(
     app: &Router,
     raw: &str,
 ) -> Event {
-    let res = call(
-        state,
-        app,
-        raw,
-        Method::POST,
-        "/api/events",
-        Some(json!({ "name": "Sunday cup", "kind": "tournament", "format": one_set() })),
-    )
-    .await;
+    let tournament = json!({ "name": "Sunday cup", "kind": "tournament", "format": one_set() });
+    running_event_of(state, pool, app, raw, tournament).await
+}
+
+/// [`running_event`] for the event `new` (the body of `POST /api/events`).
+async fn running_event_of(
+    state: &AppState,
+    pool: &sqlx::SqlitePool,
+    app: &Router,
+    raw: &str,
+    new: Value,
+) -> Event {
+    let res = call(state, app, raw, Method::POST, "/api/events", Some(new)).await;
     assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
     let id = res.body["event"]["id"].as_str().unwrap().to_owned();
     let mut teams = Vec::new();
@@ -464,7 +477,8 @@ async fn rotated_court_token_is_404_and_stream_ends() {
 #[tokio::test]
 async fn finished_event_court_scorer_is_410_viewer_ok() {
     let (state, pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &pool, &app, &raw).await;
+    // A tournament's places come from its bracket; this test finishes with places it gives.
+    let ev = running_event_of(&state, &pool, &app, &raw, non_stop()).await;
     let d = detail(&state, &app, &raw, &ev.id).await;
     let (scorer, viewer) = court_tokens(&d, &ev.courts[0]);
     let mut phone = open(&app, &format!("/api/court/{scorer}/stream")).await;
