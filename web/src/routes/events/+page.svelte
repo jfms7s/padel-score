@@ -73,7 +73,7 @@
 	}
 </script>
 
-<main class="acct">
+<main class="acct page-wide">
 	<a class="back" href="/">{t.back}</a>
 	<h1>{t.title}</h1>
 	{#if loadFailure}
@@ -82,6 +82,8 @@
 	{#if $session.status === 'signed_in' && loaded}
 		<p class="hint">{t.intro}</p>
 
+		<div class="split">
+		<div class="listcol">
 		{#if newestFirst.length === 0}
 			<p class="hint">{t.none}</p>
 		{:else}
@@ -99,7 +101,9 @@
 				{/each}
 			</ul>
 		{/if}
+		</div>
 
+		<div class="formcol">
 		<h2>{t.newEvent}</h2>
 		<form class="new" onsubmit={create}>
 			<label>
@@ -163,12 +167,25 @@
 			{#if failure}<p class="error" role="alert">{failure}</p>{/if}
 			<button class="primary" type="submit" disabled={busy}>{busy ? t.creating : t.create}</button>
 		</form>
+		</div>
+		</div>
 	{:else if !loadFailure}
 		<p class="hint">{strings.auth.loading}</p>
 	{/if}
 </main>
 
 <style>
+	@media (min-width: 1100px) {
+		.split {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 28rem;
+			gap: 32px;
+			align-items: start;
+		}
+		.formcol h2 {
+			margin-top: 0;
+		}
+	}
 	.back {
 		display: inline-flex;
 		align-items: center;
