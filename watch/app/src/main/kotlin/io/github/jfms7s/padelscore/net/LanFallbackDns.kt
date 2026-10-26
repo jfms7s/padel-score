@@ -36,6 +36,10 @@ class LanFallbackDns(
             emptyList()
         } catch (_: ExecutionException) {
             emptyList()
+        } catch (_: InterruptedException) {
+            // Not an IOException, so it would escape the callers' error handling; keep the flag and fall back.
+            Thread.currentThread().interrupt()
+            emptyList()
         }
         if (answer.any { it.isPrivate() }) return answer
         return fallback + answer.filterNot { it in fallback }
