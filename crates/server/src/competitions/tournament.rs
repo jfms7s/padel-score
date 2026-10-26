@@ -1,6 +1,8 @@
 //! The tournament kind. Owned by phase 7: phase 8 never edits this file. The phase 6 stubs
 //! below do nothing; phase 7 fills them in.
 
+pub(crate) mod bracket;
+
 use sqlx::SqliteConnection;
 
 use super::places::Place;
