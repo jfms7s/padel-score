@@ -71,7 +71,7 @@
 			<div class="name">
 				{#if team.serving}<span class="serve" role="img" aria-label={f.serving}></span>{/if}
 				<span class="team-name">{team.name}</span>
-				{#if team.serving && model.serveSide}<small>{f.servingFrom[model.serveSide]}</small>{/if}
+				{#if team.serving && model.serveSide}<small>{(model.servingPlayerName ? f.sideFrom : f.servingFrom)[model.serveSide]}</small>{/if}
 			</div>
 			{#if team.serving && model.servingPlayerName}
 				<p class="server">{f.playerServing(model.servingPlayerName)}</p>

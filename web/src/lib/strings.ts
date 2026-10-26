@@ -98,6 +98,12 @@ export const strings = {
 			receiver_chooses: 'receiver picks the side'
 		},
 		playerServing: (player: string) => `${player} serving`,
+		sideFrom: {
+			right: 'from the right',
+			left: 'from the left',
+			receiver_chooses: 'receiver picks the side'
+		},
+		pointToServing: (team: string, player: string) => `Point to ${team}, ${player} serving`,
 		wins: (team: string) => `${team} win`,
 		draw: 'Draw',
 		newMatch: 'New match',

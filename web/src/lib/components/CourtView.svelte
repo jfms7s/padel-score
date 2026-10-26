@@ -44,7 +44,11 @@
 			type={onpoint ? 'button' : undefined}
 			class="side {t}"
 			role={onpoint ? undefined : 'group'}
-			aria-label={onpoint ? f.pointTo(team.name) : team.name}
+			aria-label={onpoint
+				? team.serving && model.servingPlayerName
+					? f.pointToServing(team.name, model.servingPlayerName)
+					: f.pointTo(team.name)
+				: team.name}
 			disabled={onpoint ? model.finished !== null : undefined}
 			onclick={onpoint ? () => onpoint(t) : undefined}
 		>

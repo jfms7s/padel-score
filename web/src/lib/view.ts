@@ -109,7 +109,9 @@ export function fenceModel(view: MatchView): FenceModel {
 function enteredName({ teams, score }: MatchView): string | null {
 	const { team, index } = score.server;
 	const name = teams[team][index];
-	return name === undefined || name === slotName(team, index) ? null : name;
+	// The server fills a blank with "Player 1" / "Player 2" by position in the team, so that is no entry either.
+	const placeholder = name === slotName(team, index) || name === strings.setup.player(index + 1);
+	return name === undefined || placeholder ? null : name;
 }
 
 /** The index of the set played as a super tie-break, if the format has one: the deciding set. */

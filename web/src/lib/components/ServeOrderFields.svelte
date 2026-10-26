@@ -103,6 +103,9 @@
 		color: var(--on-team);
 		font-weight: 650;
 	}
+	.seg.large button[aria-pressed='true'] {
+		font-weight: 750;
+	}
 	.pairs {
 		display: grid;
 		grid-template-columns: 1fr;
