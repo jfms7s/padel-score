@@ -23,6 +23,13 @@ export const strings = {
 
 	teamName: (first: string, second: string) => `${first} / ${second}`,
 
+	// Who serves first: the pick on New match and on the court phone.
+	serve: {
+		first: 'Serves first',
+		hint: 'Not sure? Spin the racket and tap the winner.',
+		firstFor: (team: string) => `First to serve for ${team}`
+	},
+
 	// The advantage call on the scoreboard.
 	advantageShort: 'AD',
 
@@ -46,9 +53,6 @@ export const strings = {
 		teams: 'Teams',
 		teamPlayer: (team: 'A' | 'B', n: number) => `Team ${team} player ${n}`,
 		player: (n: number) => `Player ${n}`,
-		firstServer: 'First to serve',
-		firstServerHint: 'Not sure? Spin the racket and tap the winner.',
-		otherFirstServer: 'First to serve for the other pair',
 		start: 'Start match',
 		starting: 'Starting…',
 		failed: "Couldn't start the match.",
@@ -721,8 +725,6 @@ export const strings = {
 		loadFailed: 'Couldn’t load this court. Check the connection and reload.',
 		reload: 'Reload',
 		serveTitle: 'Who serves first?',
-		serveHint: 'Not sure? Spin the racket and tap the winner.',
-		otherServer: 'First to serve for the other pair',
 		startScoring: 'Start scoring',
 		starting: 'Starting…',
 		changeServer: 'Change who serves',

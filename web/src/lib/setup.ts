@@ -3,8 +3,9 @@
 // functions test against a fake, and every access is wrapped because storage can be missing,
 // full or blocked.
 
+import { defaultServeOrder, fromStart, toStart, type ServeOrder } from './serve';
 import { strings } from './strings';
-import type { CreateMatchRequest, DecidingSet, DeuceRule, CourtPlayer, PlayerSlots, SetsFormat, Teams } from './types';
+import type { CreateMatchRequest, DecidingSet, DeuceRule, PlayerSlots, SetsFormat, Team, Teams } from './types';
 
 export interface StorageLike {
 	getItem(key: string): string | null;
@@ -17,9 +18,7 @@ export interface Setup {
 	sets: SetsFormat;
 	deciding: DecidingSet;
 	teams: Teams;
-	firstServer: CourtPlayer;
-	/** The index (0 or 1) of the player who serves first for the pair that receives first. */
-	otherFirstServer: 0 | 1;
+	serve: ServeOrder;
 	/**
 	 * The players picked from the signed-in user's list, by slot. Never remembered: a shared
 	 * phone must not offer one coordinator's players to the next.
@@ -53,8 +52,7 @@ export function defaultSetup(): Setup {
 		sets: 'one',
 		deciding: 'full_set',
 		teams: { a: ['', ''], b: ['', ''] },
-		firstServer: { team: 'a', index: 0 },
-		otherFirstServer: 0,
+		serve: defaultServeOrder(),
 		players: noPlayers()
 	};
 }
@@ -64,26 +62,10 @@ export function setSets(setup: Setup, sets: SetsFormat): Setup {
 	return { ...setup, sets, deciding: sets === 'one' ? 'full_set' : setup.deciding };
 }
 
-/** A player's name, or "Player N" (N = 1..4 across team A then team B) while it is blank. */
-function nameOf(setup: Setup, team: 'a' | 'b', index: number): string {
-	const typed = setup.teams[team][index]?.trim() ?? '';
-	return typed || strings.setup.player((team === 'a' ? 0 : 2) + index + 1);
-}
-
-export function serveChoices(setup: Setup): {
-	first: { player: CourtPlayer; label: string }[];
-	other: { index: 0 | 1; label: string }[];
-} {
-	const first = (['a', 'b'] as const).flatMap((team) =>
-		([0, 1] as const).map((index) => ({ player: { team, index }, label: nameOf(setup, team, index) }))
-	);
-	const otherTeam = setup.firstServer.team === 'a' ? 'b' : 'a';
-	const other = ([0, 1] as const).map((index) => ({ index, label: nameOf(setup, otherTeam, index) }));
-	return { first, other };
-}
-
 export function toCreateRequest(setup: Setup): CreateMatchRequest {
-	const name = (team: 'a' | 'b', i: 0 | 1) => nameOf(setup, team, i);
+	// A blank name becomes "Player N" (N = 1..4 across team A then team B).
+	const name = (team: 'a' | 'b', i: 0 | 1) =>
+		setup.teams[team][i].trim() || strings.setup.player((team === 'a' ? 0 : 2) + i + 1);
 	const req: CreateMatchRequest = {
 		format: {
 			sets: {
@@ -92,7 +74,7 @@ export function toCreateRequest(setup: Setup): CreateMatchRequest {
 				deciding: setup.sets === 'one' ? 'full_set' : setup.deciding
 			}
 		},
-		start: { first_server: setup.firstServer, other_first_server: setup.otherFirstServer },
+		start: toStart(setup.serve),
 		teams: { a: [name('a', 0), name('a', 1)], b: [name('b', 0), name('b', 1)] }
 	};
 	const { a, b } = setup.players;
@@ -111,20 +93,40 @@ const oneOf = <T>(list: readonly T[], v: unknown): v is T => list.includes(v as 
 const isNames = (v: unknown): v is [string, string] =>
 	Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'string');
 
-function parseSetup(raw: unknown): Setup | null {
-	if (!isObject(raw)) return null;
-	const { deuce, sets, deciding, teams, firstServer, otherFirstServer } = raw;
-	if (!oneOf(DEUCE_RULES, deuce) || !oneOf(SETS_FORMATS, sets) || !oneOf(DECIDING_SETS, deciding)) return null;
-	if (!isObject(teams) || !isNames(teams.a) || !isNames(teams.b)) return null;
+/**
+ * The remembered serve choice: `serveTeam` + `serveFirst` today, `firstServer` +
+ * `otherFirstServer` (the engine's start) before. Null if what is there is invalid; a setup
+ * with neither shape gets the default.
+ */
+function parseServe(raw: Record<string, unknown>): ServeOrder | null {
+	const { serveTeam, serveFirst, firstServer, otherFirstServer } = raw;
+	if (serveTeam !== undefined || serveFirst !== undefined) {
+		if (!oneOf(['a', 'b'], serveTeam) || !isObject(serveFirst)) return null;
+		if (!oneOf([0, 1], serveFirst.a) || !oneOf([0, 1], serveFirst.b)) return null;
+		return { team: serveTeam as Team, first: { a: serveFirst.a as 0 | 1, b: serveFirst.b as 0 | 1 } };
+	}
+	if (firstServer === undefined && otherFirstServer === undefined) return defaultServeOrder();
 	if (!isObject(firstServer) || !oneOf(['a', 'b'], firstServer.team) || !oneOf([0, 1], firstServer.index)) return null;
 	if (!oneOf([0, 1], otherFirstServer)) return null;
+	return fromStart({
+		first_server: { team: firstServer.team as Team, index: firstServer.index as number },
+		other_first_server: otherFirstServer as number
+	});
+}
+
+function parseSetup(raw: unknown): Setup | null {
+	if (!isObject(raw)) return null;
+	const { deuce, sets, deciding, teams } = raw;
+	if (!oneOf(DEUCE_RULES, deuce) || !oneOf(SETS_FORMATS, sets) || !oneOf(DECIDING_SETS, deciding)) return null;
+	if (!isObject(teams) || !isNames(teams.a) || !isNames(teams.b)) return null;
+	const serve = parseServe(raw);
+	if (!serve) return null;
 	return {
 		deuce,
 		sets,
 		deciding: sets === 'one' ? 'full_set' : deciding,
 		teams: { a: teams.a, b: teams.b },
-		firstServer: { team: firstServer.team as 'a' | 'b', index: firstServer.index as number },
-		otherFirstServer: otherFirstServer as 0 | 1,
+		serve,
 		players: noPlayers()
 	};
 }
@@ -141,8 +143,8 @@ export function loadLastSetup(storage: StorageLike): Setup {
 
 export function saveLastSetup(storage: StorageLike, setup: Setup): void {
 	try {
-		const { players: _notRemembered, ...rest } = setup;
-		storage.setItem(LAST_SETUP_KEY, JSON.stringify(rest));
+		const { players: _notRemembered, serve, ...rest } = setup;
+		storage.setItem(LAST_SETUP_KEY, JSON.stringify({ ...rest, serveTeam: serve.team, serveFirst: serve.first }));
 	} catch {
 		// Remembering is a convenience; a full or blocked store must not stop a match.
 	}
