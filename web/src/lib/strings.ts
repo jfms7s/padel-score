@@ -907,7 +907,7 @@ export const strings = {
 		account: 'Account'
 	},
 
-	// The coordinator desk and the spectator page: the court tile.
+	// The coordinator desk and the spectator page: the court tile and the match list.
 	desk: {
 		live: 'Live',
 		finished: 'Finished',
@@ -919,7 +919,15 @@ export const strings = {
 		phones: (n: number) => (n === 1 ? '1 phone' : `${n} phones`),
 		games: 'Games',
 		sets: 'Sets',
-		serving: (names: string) => `${names} serving`
+		serving: (names: string) => `${names} serving`,
+		// The match list.
+		onCourt: 'On court',
+		waiting: 'Waiting',
+		finishedGroup: 'Finished',
+		typeResult: (label: string) => `Result for ${label}`,
+		resultPlaceholder: '6-3 4-6 10-7',
+		keys: { save: 'save, next', cancel: 'cancel', move: 'move' },
+		nextFree: 'Next free court'
 	}
 } as const;
 
