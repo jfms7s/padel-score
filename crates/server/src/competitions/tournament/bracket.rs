@@ -285,8 +285,8 @@ pub struct Bracket {
     pub nodes: Vec<Node>,
 }
 
-/// What the store does after a result changes, in this order: set the slots, withdraw the
-/// matches (by match id), create the matches (in this order) and set the holds.
+/// What the store does after a result changes, in this order: withdraw the matches (by match
+/// id), set the slots, create the matches (in this order) and set the holds.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct Plan {
     pub set: Vec<(Pos, Side, Option<String>)>,
@@ -483,6 +483,7 @@ impl Bracket {
                 }
             }
         }
+        // The loop only visits played positions; a hold anywhere else still blocks the places.
         if self.nodes.iter().any(|n| n.held) {
             return None;
         }

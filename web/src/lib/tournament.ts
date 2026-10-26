@@ -5,8 +5,7 @@
 import { accountRequest } from './api';
 import { teamText } from './events';
 import { strings } from './strings';
-import type { CourtOut, EventDetail, EventMatch, EventTeam, Place } from './types';
-import type { EventViewMatch } from './types';
+import type { CourtOut, EventDetail, EventMatch, EventTeam, EventViewMatch, Place } from './types';
 
 // ---- the wire shapes ---------------------------------------------------------------------
 
@@ -165,17 +164,39 @@ export function slotText(
 type MatchWhere = Pick<EventMatch, 'id' | 'court_id' | 'state'>;
 type CourtWhere = Pick<CourtOut, 'id' | 'name' | 'current'>;
 
-/** The strip under a bracket match: where it is playing or will play, null when finished or not made. */
+const isFinal = (n: Pick<BracketNode, 'place_from' | 'size'>) => n.place_from === 1 && n.size === 2;
+
+/**
+ * The server keeps the final off the courts while any other bracket node has no match yet or an
+ * unfinished match on no court (a 5th/7th-place match can still be made after it).
+ */
+function finalHeldBack(d: TournamentData, matches: readonly MatchWhere[]): boolean {
+	return d.nodes.some((n) => {
+		if (isFinal(n)) return false;
+		if (n.match_id === null) return true;
+		const m = matches.find((x) => x.id === n.match_id);
+		return m !== undefined && m.state !== 'finished' && m.court_id === null;
+	});
+}
+
+/**
+ * The strip under a bracket match: where it is playing or will play, null when finished or not
+ * made. Pass the bracket `d` so the final reads "After the other matches" while it is held back.
+ */
 export function whereText(
-	node: Pick<BracketNode, 'match_id'>,
+	node: Pick<BracketNode, 'match_id' | 'place_from' | 'size'>,
 	matches: readonly MatchWhere[],
-	courts: readonly CourtWhere[]
+	courts: readonly CourtWhere[],
+	d?: TournamentData
 ): { text: string; live: boolean } | null {
 	if (node.match_id === null) return null;
 	const match = matches.find((m) => m.id === node.match_id);
 	if (!match || match.state === 'finished') return null;
 	const court = match.court_id === null ? undefined : courts.find((c) => c.id === match.court_id);
-	if (!court) return { text: t.nextFreeCourt, live: false };
+	if (!court) {
+		const held = d !== undefined && isFinal(node) && finalHeldBack(d, matches);
+		return { text: held ? t.afterOtherMatches : t.nextFreeCourt, live: false };
+	}
 	if (court.current === match.id && match.state === 'live') return { text: t.liveOn(court.name), live: true };
 	return { text: t.nextOn(court.name), live: false };
 }
@@ -258,7 +279,7 @@ export function canFillCourts(
 		const cur = c.current === null ? undefined : matches.find((m) => m.id === c.current);
 		return c.queue.length === 0 && (cur === undefined || cur.state === 'finished');
 	});
-	return free && d.nodes.some((n) => whereText(n, matches, courts)?.text === t.nextFreeCourt);
+	return free && d.nodes.some((n) => whereText(n, matches, courts, d)?.text === t.nextFreeCourt);
 }
 
 // ---- the coordinator's calls -------------------------------------------------------------

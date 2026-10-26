@@ -274,7 +274,7 @@ describe('heldText', () => {
 		d.nodes.find((x) => x.label === 'Semi-final 1')!.match_id = 'm-sf1';
 		const h = heldText(d, n, false, [{ id: 'm-sf1', state: 'live' }]);
 		expect(h.warning).toBe('Quarter-final 1’s result changed after Semi-final 1 started.');
-		expect(h.replay).toBe('Replay 2 matches: Semi-final 1, Final. Their scores are discarded.');
+		expect(h.replay).toBe('Replay 2 matches: Semi-final 1, Final. Started matches lose their scores.');
 		expect(h.keep).toBe('The later matches stand. The new score counts only for Quarter-final 1.');
 		expect(h.finishedNote).toBeNull();
 	});
@@ -296,7 +296,7 @@ describe('heldText', () => {
 
 	it('held_text_for_one_match_and_none', () => {
 		const d = tournament(8, true);
-		expect(heldText(d, held(['Final']), false).replay).toBe('Replay 1 match: Final. Their scores are discarded.');
+		expect(heldText(d, held(['Final']), false).replay).toBe('Replay 1 match: Final. Started matches lose their scores.');
 		const none = heldText(d, held(undefined), false);
 		expect(none.replay).toBeNull();
 		expect(none.warning).toContain('a later match');
@@ -319,6 +319,40 @@ describe('finishBlocker', () => {
 		expect(finishBlocker(d)).toBe('decision');
 		d.places = null;
 		expect(finishBlocker(d)).toBe('decision');
+	});
+});
+
+describe('final held back', () => {
+	// Four teams with full placement: two semi-finals, the final and the 3rd-place match.
+	const d = tournament(4, true);
+	const fin = d.nodes.find((n) => n.place_from === 1 && n.size === 2)!;
+	const others = d.nodes.filter((n) => n !== fin);
+	const courtsOf = [{ id: 'c1', name: 'Court 1', current: null, queue: [] as string[] }];
+
+	it('final_waits_for_the_other_matches', () => {
+		fin.match_id = 'mf';
+		others[0]!.match_id = 'm1';
+		const ms = [
+			{ id: 'mf', court_id: null, state: 'waiting' as const },
+			{ id: 'm1', court_id: null, state: 'finished' as const }
+		];
+		// Another node has no match yet.
+		expect(whereText(fin, ms, courtsOf, d)).toEqual({ text: 'After the other matches', live: false });
+		expect(canFillCourts(d, ms, courtsOf)).toBe(false);
+		// Every other node has a match, one unfinished on no court.
+		others.slice(1).forEach((n, i) => (n.match_id = `mo${i}`));
+		const all = [
+			...ms,
+			...others.slice(1).map((n, i) => ({ id: n.match_id!, court_id: null, state: i === 0 ? ('waiting' as const) : ('finished' as const) }))
+		];
+		expect(whereText(fin, all, courtsOf, d)?.text).toBe('After the other matches');
+		expect(canFillCourts(d, all, courtsOf)).toBe(true); // the waiting other match can go
+		// All others finished or on a court: the final takes its turn.
+		const done = all.map((m) => (m.id === 'mf' ? m : { ...m, state: 'finished' as const }));
+		expect(whereText(fin, done, courtsOf, d)?.text).toBe('Next free court');
+		expect(canFillCourts(d, done, courtsOf)).toBe(true);
+		fin.match_id = null;
+		others.forEach((n) => (n.match_id = null));
 	});
 });
 

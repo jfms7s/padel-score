@@ -12,7 +12,7 @@
 
 	const t = strings.tournament;
 	const match = $derived(node.match_id === null ? undefined : event.matches.find((m) => m.id === node.match_id));
-	const where = $derived(whereText(node, event.matches, event.courts));
+	const where = $derived(whereText(node, event.matches, event.courts, data));
 	const sides = $derived(
 		([0, 1] as const).map((i) => {
 			const slot = slotText(data, node, i, event.teams);

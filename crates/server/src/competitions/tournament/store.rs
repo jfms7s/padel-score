@@ -261,7 +261,8 @@ pub enum Choice {
 /// again, with the event's `finished_at`). `Replay` needs a running event
 /// (`Conflict("event_finished")`) and carries out `Bracket::replay`; then every hold still set
 /// is looked at again, as a result would be, since the matches it was waiting on may be gone.
-/// Returns the withdrawn match ids.
+/// A team kept as played stays in its slot even if a later `Replay` elsewhere discards the match
+/// it played on. Returns the withdrawn match ids.
 pub async fn decide_in(
     tx: &mut Tx<'_>,
     ev: &Competition,
