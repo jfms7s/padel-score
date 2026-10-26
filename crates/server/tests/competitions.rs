@@ -6,8 +6,9 @@
 )]
 
 use padel_score_server::commands::{
-    Authority, Command, CommandOutcome, CommandRequest, apply_command,
+    Authority, Command, CommandOutcome, CommandRequest, FinalRequest, apply_command, record_final,
 };
+use padel_score_server::competitions::courts::event_matches_in;
 use padel_score_server::competitions::places::{Place, places, validate_places};
 use padel_score_server::competitions::{
     Competition, Kind, MAX_TEAMS, NewCompetition, Status, TeamChange,
@@ -15,7 +16,7 @@ use padel_score_server::competitions::{
 use padel_score_server::db;
 use padel_score_server::players::PlayerChange;
 use padel_score_server::store::{Store, StoreError};
-use padel_scoring::{DeuceRule, Format, SetRules, Team};
+use padel_scoring::{DeuceRule, FinalScore, Format, SetRules, Team};
 use serde_json::json;
 use sqlx::SqlitePool;
 
@@ -703,11 +704,12 @@ async fn running_event(s: &Store, pool: &SqlitePool) -> (Competition, Vec<String
     (ev, teams)
 }
 
-/// A running non-stop event of the same four teams with one court, status set directly. A
-/// tournament now works out its places from its bracket, so the tests of Finish with places
-/// given by the coordinator use this kind, whose places (in phase 6) are always given.
-async fn hand_placed_event(s: &Store, pool: &SqlitePool) -> (Competition, Vec<String>) {
-    let mut ev = s
+/// A non-stop event of the same four teams on one court, started through `start_competition`,
+/// so its whole schedule (six matches) is made. Phase 6 used a non-stop as the kind whose places
+/// the coordinator typed; since phase 8 a non-stop works its places out from its standings, so
+/// the Finish tests below drive the places through results instead.
+async fn non_stop_event(s: &Store) -> (Competition, Vec<String>) {
+    let ev = s
         .create_competition(
             A,
             NewCompetition {
@@ -726,9 +728,62 @@ async fn hand_placed_event(s: &Store, pool: &SqlitePool) -> (Competition, Vec<St
         teams.push(s.add_team(A, &ev.id, players, None, 10).await.unwrap().id);
     }
     s.add_court(A, &ev.id, None).await.unwrap();
-    start(pool, &ev.id, "running").await;
-    ev.status = Status::Running;
+    let ev = s.start_competition(A, &ev.id, 20).await.unwrap();
     (ev, teams)
+}
+
+/// Types the timed result `games_x`-`games_y` of the scheduled match between teams `x` and `y`,
+/// whichever side of the match each is on.
+async fn result(
+    s: &Store,
+    pool: &SqlitePool,
+    ev: &Competition,
+    (x, games_x): (&str, u16),
+    (y, games_y): (&str, u16),
+) {
+    let mut conn = pool.acquire().await.unwrap();
+    let m = event_matches_in(&mut conn, &ev.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|m| (m.team_a_id == x && m.team_b_id == y) || (m.team_a_id == y && m.team_b_id == x))
+        .expect("the schedule has the pairing");
+    drop(conn);
+    let (a, b) = if m.team_a_id == x {
+        (games_x, games_y)
+    } else {
+        (games_y, games_x)
+    };
+    let owned = s.match_owned_by(&m.match_id, A).await.unwrap().unwrap();
+    let req = FinalRequest {
+        client_id: format!("final:{}", m.match_id),
+        base_revision: None,
+        score: FinalScore::Timed {
+            a,
+            b,
+            overtime_winner: None,
+        },
+    };
+    match record_final(s, &owned, req, Authority::Owner, 60)
+        .await
+        .unwrap()
+    {
+        CommandOutcome::Applied(_) => {}
+        other => panic!("expected Applied, got {other:?}"),
+    }
+}
+
+/// The event's places as written to the placings, sorted by team id.
+async fn written_places(pool: &SqlitePool, ev: &Competition) -> Vec<Place> {
+    let mut conn = pool.acquire().await.unwrap();
+    let mut got = places(&mut conn, &ev.id).await.unwrap();
+    got.sort_by(|a, b| a.team_id.cmp(&b.team_id));
+    got
+}
+
+fn sorted(mut v: Vec<Place>) -> Vec<Place> {
+    v.sort_by(|a, b| a.team_id.cmp(&b.team_id));
+    v
 }
 
 fn one_set() -> Format {
@@ -790,18 +845,20 @@ fn four_places(spec: [(u32, u32); 4], teams: &[String]) -> Vec<Place> {
         .collect()
 }
 
+/// Finish writes one placing per player, two per team. The places come from the standings:
+/// Ana and Marta win both their matches, Eva and Ines beat Rui and Joao on games won.
 #[tokio::test]
 async fn finish_writes_two_placings_per_team() {
     let (s, pool) = setup().await;
-    let (ev, teams) = hand_placed_event(&s, &pool).await;
-    let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
-    let (done, rotated) = s
-        .finish_competition(A, &ev.id, Some(given.clone()), 90)
-        .await
-        .unwrap();
+    let (ev, teams) = non_stop_event(&s).await;
+    let t = |i: usize| teams[i].as_str();
+    result(&s, &pool, &ev, (t(0), 6), (t(1), 1)).await;
+    result(&s, &pool, &ev, (t(0), 6), (t(2), 2)).await;
+    result(&s, &pool, &ev, (t(1), 6), (t(3), 0)).await;
+    result(&s, &pool, &ev, (t(2), 6), (t(3), 3)).await;
+    let (done, _) = s.finish_competition(A, &ev.id, None, 90).await.unwrap();
     assert_eq!(done.status, Status::Finished);
     assert_eq!(done.finished_at, Some(90));
-    assert!(rotated.is_empty());
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM placings WHERE event_id = ?")
         .bind(&ev.id)
         .fetch_one(&pool)
@@ -817,18 +874,18 @@ async fn finish_writes_two_placings_per_team() {
     assert_eq!(placings[0].event_name, "Sunday cup");
     assert_eq!(placings[0].event_kind, "non_stop");
     assert_eq!(placings[0].finished_at, 90);
-    let mut conn = pool.acquire().await.unwrap();
-    assert_eq!(places(&mut conn, &ev.id).await.unwrap(), given);
+    let expected = four_places([(1, 1), (3, 3), (2, 2), (4, 4)], &teams);
+    assert_eq!(written_places(&pool, &ev).await, sorted(expected));
 }
 
+/// Teams the standings cannot split share a place range: Eva and Ines, and Tiago and Luis, have
+/// not played, so they share 3rd to 4th.
 #[tokio::test]
 async fn finish_shared_place() {
     let (s, pool) = setup().await;
-    let (ev, teams) = hand_placed_event(&s, &pool).await;
-    let given = four_places([(1, 1), (2, 2), (3, 4), (3, 4)], &teams);
-    s.finish_competition(A, &ev.id, Some(given), 90)
-        .await
-        .unwrap();
+    let (ev, teams) = non_stop_event(&s).await;
+    result(&s, &pool, &ev, (&teams[0], 6), (&teams[1], 1)).await;
+    s.finish_competition(A, &ev.id, None, 90).await.unwrap();
     let rows: Vec<(String, i64, i64)> = sqlx::query_as(
         "SELECT p.name, pl.place, pl.place_to FROM placings pl \
          JOIN players p ON p.id = pl.player_id WHERE pl.event_id = ? ORDER BY p.name",
@@ -841,24 +898,36 @@ async fn finish_shared_place() {
         let row = rows.iter().find(|r| r.0 == name).unwrap();
         assert_eq!((row.1, row.2), (3, 4), "{name}");
     }
+    for (name, place) in [("Ana", 1), ("Rui", 2)] {
+        let row = rows.iter().find(|r| r.0 == name).unwrap();
+        assert_eq!((row.1, row.2), (place, place), "{name}");
+    }
 }
 
+/// Phase 6 refused a Finish without places (422) for a kind whose places are typed. No kind
+/// takes typed places any more: a non-stop finishes without them, and places it is sent (even
+/// ones that do not tile the field) are ignored for the computed ones. Finish still needs a
+/// running event and its owner.
 #[tokio::test]
-async fn finish_without_places_is_422() {
+async fn finish_computes_places_and_ignores_given_ones() {
     let (s, pool) = setup().await;
-    let (ev, teams) = hand_placed_event(&s, &pool).await;
-    let err = s.finish_competition(A, &ev.id, None, 90).await.unwrap_err();
-    assert!(matches!(err, StoreError::InvalidField("places")), "{err:?}");
-    let bad = four_places([(1, 1), (2, 2), (3, 3), (3, 3)], &teams);
-    let err = s
-        .finish_competition(A, &ev.id, Some(bad), 90)
-        .await
-        .unwrap_err();
-    assert!(matches!(err, StoreError::InvalidField("places")), "{err:?}");
-    let ev = s.competition(A, &ev.id).await.unwrap().unwrap();
-    assert_eq!(ev.status, Status::Running);
+    let (ev, teams) = non_stop_event(&s).await;
+    result(&s, &pool, &ev, (&teams[3], 6), (&teams[0], 2)).await;
     let err = s.finish_competition(B, &ev.id, None, 90).await.unwrap_err();
     assert!(matches!(err, StoreError::NotFound), "{err:?}");
+    let bad = four_places([(1, 1), (2, 2), (3, 3), (3, 3)], &teams);
+    let (done, _) = s
+        .finish_competition(A, &ev.id, Some(bad), 90)
+        .await
+        .unwrap();
+    assert_eq!(done.status, Status::Finished);
+    let expected = four_places([(2, 2), (3, 4), (3, 4), (1, 1)], &teams);
+    assert_eq!(written_places(&pool, &ev).await, sorted(expected));
+    let err = s.finish_competition(A, &ev.id, None, 95).await.unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("event_not_running")),
+        "{err:?}"
+    );
 }
 
 async fn scorer_token(pool: &SqlitePool, match_id: &str) -> String {
@@ -890,37 +959,38 @@ async fn win_for_a(s: &Store, match_id: &str) {
 #[tokio::test]
 async fn finish_rotates_match_tokens_and_clears_courts() {
     let (s, pool) = setup().await;
-    let (ev, teams) = hand_placed_event(&s, &pool).await;
-    let court = padel_score_server::competitions::courts::courts_in(
-        &mut pool.acquire().await.unwrap(),
-        &ev.id,
-    )
-    .await
-    .unwrap()
-    .remove(0);
-    let m1 = s
-        .create_event_match(A, &ev.id, &teams[0], &teams[1], None, Some(&court.id), 30)
+    let (ev, _) = non_stop_event(&s).await;
+    let mut conn = pool.acquire().await.unwrap();
+    let court = padel_score_server::competitions::courts::courts_in(&mut conn, &ev.id)
+        .await
+        .unwrap()
+        .remove(0);
+    let scheduled: Vec<String> = event_matches_in(&mut conn, &ev.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|m| m.match_id)
+        .collect();
+    drop(conn);
+    assert_eq!(scheduled.len(), 6);
+    sqlx::query("UPDATE courts SET current_match_id = ? WHERE id = ?")
+        .bind(&scheduled[0])
+        .bind(&court.id)
+        .execute(&pool)
         .await
         .unwrap();
-    let m2 = s
-        .create_event_match(A, &ev.id, &teams[2], &teams[3], None, None, 30)
-        .await
-        .unwrap();
-    let before = (
-        scorer_token(&pool, &m1.match_id).await,
-        scorer_token(&pool, &m2.match_id).await,
-    );
-    let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
-    let (_, mut rotated) = s
-        .finish_competition(A, &ev.id, Some(given), 90)
-        .await
-        .unwrap();
+    let mut before = Vec::new();
+    for id in &scheduled {
+        before.push(scorer_token(&pool, id).await);
+    }
+    let (_, mut rotated) = s.finish_competition(A, &ev.id, None, 90).await.unwrap();
     rotated.sort();
-    let mut expected = vec![m1.match_id.clone(), m2.match_id.clone()];
+    let mut expected = scheduled.clone();
     expected.sort();
     assert_eq!(rotated, expected);
-    assert_ne!(scorer_token(&pool, &m1.match_id).await, before.0);
-    assert_ne!(scorer_token(&pool, &m2.match_id).await, before.1);
+    for (id, old) in scheduled.iter().zip(&before) {
+        assert_ne!(&scorer_token(&pool, id).await, old, "{id}");
+    }
     let current: Option<String> =
         sqlx::query_scalar("SELECT current_match_id FROM courts WHERE id = ?")
             .bind(&court.id)
@@ -992,12 +1062,9 @@ async fn event_match_in_history_has_event_context() {
 
 #[tokio::test]
 async fn placings_are_owner_filtered() {
-    let (s, pool) = setup().await;
-    let (ev, teams) = hand_placed_event(&s, &pool).await;
-    let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
-    s.finish_competition(A, &ev.id, Some(given), 90)
-        .await
-        .unwrap();
+    let (s, _) = setup().await;
+    let (ev, _) = non_stop_event(&s).await;
+    s.finish_competition(A, &ev.id, None, 90).await.unwrap();
     let ana = s.list_players(A).await.unwrap();
     let ana = ana.iter().find(|p| p.name == "Ana").unwrap();
     assert_eq!(s.placings(A, &ana.id).await.unwrap().len(), 1);

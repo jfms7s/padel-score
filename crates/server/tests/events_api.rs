@@ -82,7 +82,7 @@ async fn clear_draw(pool: &sqlx::SqlitePool) {
         .unwrap();
 }
 
-/// A non-stop event: phase 6's places are given by the coordinator at Finish.
+/// A non-stop event (timed matches, places worked out from the standings at Finish).
 fn non_stop(name: &str) -> Value {
     json!({
         "name": name,
@@ -897,46 +897,58 @@ async fn rotate_ends_old_fence_stream() {
     assert_eq!(res.status, StatusCode::NOT_FOUND);
 }
 
+/// Phase 6 finished with places the coordinator typed. No kind takes typed places now: a
+/// non-stop's Finish works them out from its standings and ignores any it is sent (here, one
+/// place that would not tile the field, which phase 6 refused with 422).
 #[tokio::test]
 async fn finish_via_api_writes_placings() {
     let (state, pool, app, _admin, raw) = with_admin().await;
-    // A tournament's places come from its bracket; this test finishes with places it gives.
     let (id, teams, courts, match_id) =
         running_event_of(&state, &pool, &app, &raw, non_stop("Sunday cup")).await;
+    // Ana and Marta win each of their scheduled matches 6-2.
+    let d = detail(&state, &app, &raw, &id).await;
+    let theirs: Vec<(String, bool)> = d["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["id"] != json!(match_id))
+        .filter_map(|m| {
+            let id = m["id"].as_str().unwrap().to_owned();
+            if m["team_a"] == json!(teams[0]) {
+                Some((id, true))
+            } else if m["team_b"] == json!(teams[0]) {
+                Some((id, false))
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(theirs.len(), 3);
+    for (m, on_a) in &theirs {
+        let (a, b) = if *on_a { (6, 2) } else { (2, 6) };
+        let res = call(
+            &state,
+            &app,
+            &raw,
+            Method::POST,
+            &format!("/api/events/{id}/matches/{m}/result"),
+            Some(json!({
+                "client_id": format!("r-{m}"),
+                "score": { "timed": { "a": a, "b": b, "overtime_winner": null } },
+            })),
+        )
+        .await;
+        assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    }
     let path = format!("/api/events/{id}/finish");
-    let bad = call(
-        &state,
-        &app,
-        &raw,
-        Method::POST,
-        &path,
-        Some(json!({ "places": [{ "team_id": teams[0], "place": 1, "place_to": 1 }] })),
-    )
-    .await;
-    assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(
-        bad.body,
-        json!({ "error": "validation", "field": "places" })
-    );
-    let places = json!([
-        { "team_id": teams[0], "place": 1, "place_to": 1 },
-        { "team_id": teams[1], "place": 2, "place_to": 2 },
-        { "team_id": teams[2], "place": 3, "place_to": 4 },
-        { "team_id": teams[3], "place": 3, "place_to": 4 },
-    ]);
-    let res = call(
-        &state,
-        &app,
-        &raw,
-        Method::POST,
-        &path,
-        Some(json!({ "places": places })),
-    )
-    .await;
+    let ignored = json!({ "places": [{ "team_id": teams[0], "place": 1, "place_to": 1 }] });
+    let res = call(&state, &app, &raw, Method::POST, &path, Some(ignored)).await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
     assert_eq!(res.body["event"]["status"], json!("finished"));
     assert_eq!(res.body["places"].as_array().unwrap().len(), 4);
     assert_eq!(res.body["places"][0]["team_id"], json!(teams[0]));
+    assert_eq!(res.body["places"][0]["place"], json!(1));
+    assert_eq!(res.body["places"][0]["place_to"], json!(1));
     assert_eq!(match_in(&res.body, &match_id)["court_id"], json!(courts[0]));
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM placings WHERE event_id = ?")
         .bind(&id)
@@ -944,15 +956,7 @@ async fn finish_via_api_writes_placings() {
         .await
         .unwrap();
     assert_eq!(rows, 8);
-    let again = call(
-        &state,
-        &app,
-        &raw,
-        Method::POST,
-        &path,
-        Some(json!({ "places": places })),
-    )
-    .await;
+    let again = call(&state, &app, &raw, Method::POST, &path, Some(json!({}))).await;
     assert_eq!(again.status, StatusCode::CONFLICT);
     assert_eq!(again.body["error"], json!("event_not_running"));
 }

@@ -28,7 +28,7 @@ fn one_set() -> Value {
     .unwrap()
 }
 
-/// A non-stop event: phase 6's places are given by the coordinator at Finish.
+/// A non-stop event (timed matches, places worked out from the standings at Finish).
 fn non_stop() -> Value {
     json!({
         "name": "Sunday cup",
@@ -477,7 +477,8 @@ async fn rotated_court_token_is_404_and_stream_ends() {
 #[tokio::test]
 async fn finished_event_court_scorer_is_410_viewer_ok() {
     let (state, pool, app, _admin, raw) = with_admin().await;
-    // A tournament's places come from its bracket; this test finishes with places it gives.
+    // Phase 6 finished this with typed places; a non-stop works its own out, so Finish sends
+    // none. What this test is about is the court links once the event is finished.
     let ev = running_event_of(&state, &pool, &app, &raw, non_stop()).await;
     let d = detail(&state, &app, &raw, &ev.id).await;
     let (scorer, viewer) = court_tokens(&d, &ev.courts[0]);
@@ -486,19 +487,13 @@ async fn finished_event_court_scorer_is_410_viewer_ok() {
     let mut watcher = open(&app, &format!("/api/court/{viewer}/stream")).await;
     watcher.next("court").await;
 
-    let places = json!([
-        { "team_id": ev.teams[0], "place": 1, "place_to": 1 },
-        { "team_id": ev.teams[1], "place": 2, "place_to": 2 },
-        { "team_id": ev.teams[2], "place": 3, "place_to": 4 },
-        { "team_id": ev.teams[3], "place": 3, "place_to": 4 },
-    ]);
     let res = call(
         &state,
         &app,
         &raw,
         Method::POST,
         &format!("/api/events/{}/finish", ev.id),
-        Some(json!({ "places": places })),
+        Some(json!({})),
     )
     .await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
