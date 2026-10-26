@@ -248,8 +248,7 @@
 
 {#if claiming}
 	<ClaimSheet
-		{token}
-		slot={claiming}
+		target={{ kind: 'match_slot', spectator_token: token, team: claiming.team, position: claiming.position }}
 		onclose={() => {
 			claiming = null;
 			void loadSlots(token, () => true);

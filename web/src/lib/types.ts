@@ -663,8 +663,18 @@ export interface SlotState {
 	state: SlotStateName;
 }
 
-/** What a claim points at. */
-export type ClaimTarget = { kind: 'match_slot'; spectator_token: string; team: Team; position: number };
+/** One player of an event's team (position 0 or 1): `GET /api/event-view/{token}/slots`. */
+export interface EventSlotState {
+	team_id: string;
+	position: number;
+	name: string;
+	state: SlotStateName;
+}
+
+/** What a claim points at: a match's picked slot, or a player of an event's team. */
+export type ClaimTarget =
+	| { kind: 'match_slot'; spectator_token: string; team: Team; position: number }
+	| { kind: 'event_team_slot'; event_view_token: string; team_id: string; position: number };
 
 /** A claim as the coordinator sees it: `GET /api/claims`. */
 export interface Claim {
@@ -700,7 +710,10 @@ export interface CreatedLinkCode {
 	expires_in: number;
 }
 
-/** One match of a combined history; the redacted form has no names, coordinator or link. */
+/**
+ * One match of a combined history; the redacted form has no names, coordinator or link, and of
+ * an event match's event only the kind.
+ */
 export type LinkedEntry =
 	| {
 			match_id: string;
@@ -712,6 +725,8 @@ export type LinkedEntry =
 			teams: Record<Team, string[]>;
 			coordinator_name: string;
 			spectator_token: string;
+			/** Event matches only. */
+			event?: EventContext;
 	  }
 	| {
 			match_id: string;
@@ -720,13 +735,18 @@ export type LinkedEntry =
 			side: Team;
 			score: FinalScore;
 			redacted: true;
+			/** Event matches only: the kind, nothing else. */
+			event?: { kind: EventKind };
 	  };
+
+/** A placing in a combined history: the event's name only where the viewer may see it. */
+export type LinkedPlacing = Omit<Placing, 'event_name'> & { event_name?: string };
 
 /** `GET /api/me/results`, `/api/players/{id}/linked-history` and `/api/profiles/{token}`. */
 export interface LinkedHistory extends Page<LinkedEntry> {
 	display_name: string;
 	record: PlayerRecord;
-	placings: Placing[];
+	placings: LinkedPlacing[];
 }
 
 export type Visibility = 'private' | 'coordinators' | 'public';
