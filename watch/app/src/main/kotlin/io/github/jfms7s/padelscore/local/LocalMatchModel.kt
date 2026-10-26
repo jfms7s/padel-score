@@ -40,18 +40,18 @@ data class LocalUi(
  */
 fun LocalUi.feedbackSince(since: Long): Feedback = if (feedbackId == since) Feedback.None else feedback
 
-/** The rules and first server picked so far; null until picked (or known from the last setup). */
+/** The rules and serving team picked so far; null until picked (or known from the last setup). */
 data class SetupDraft(
     val deuce: DeuceRule?,
     val sets: SetsFormat?,
     val deciding: DecidingSet?,
-    val firstServer: Player?,
+    val firstTeam: Team?,
 ) {
     fun filledFrom(last: LocalSetup): SetupDraft = SetupDraft(
         deuce = deuce ?: last.rules.deuce,
         sets = sets ?: last.rules.sets,
         deciding = deciding ?: last.rules.deciding,
-        firstServer = firstServer ?: last.start.firstServer,
+        firstTeam = firstTeam ?: last.start.firstServer.team,
     )
 }
 
@@ -123,14 +123,15 @@ class LocalMatchModel(
 
     fun pickDeciding(deciding: DecidingSet) = _draft.update { it.copy(deciding = deciding) }
 
-    fun pickFirstServer(player: Player) = _draft.update { it.copy(firstServer = player) }
-
-    /** The finished setup, with [index] the first server of the other pair; null if a pick is missing. */
-    fun pickOtherServer(index: Int): LocalSetup? {
+    /**
+     * The finished setup, with [team] serving first and each pair starting on its second player; null if a pick is
+     * missing. The team is recorded in the draft either way.
+     */
+    fun pickFirstTeam(team: Team): LocalSetup? {
+        _draft.update { it.copy(firstTeam = team) }
         val d = _draft.value
         val rules = SetRules(d.deuce ?: return null, d.sets ?: return null, d.deciding ?: return null)
-        val start = Start(d.firstServer ?: return null, index)
-        return LocalSetup(rules, start).takeIf { it.valid }
+        return LocalSetup(rules, Start(Player(team, 1), 1)).takeIf { it.valid }
     }
 
     private suspend fun load(state: LocalStoreState) {

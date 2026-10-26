@@ -209,9 +209,9 @@ async fn event_match_records_players_and_names() {
         Start {
             first_server: Player {
                 team: Team::A,
-                index: 0
+                index: 1
             },
-            other_first_server: 0,
+            other_first_server: 1,
         }
     );
     let rows = sqlx::query(

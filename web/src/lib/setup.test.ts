@@ -6,6 +6,8 @@ import {
 	defaultSetup,
 	listRecent,
 	loadLastSetup,
+	nameOrSlot,
+	slotName,
 	afterCreate,
 	matchLabel,
 	recentSpectator,
@@ -14,7 +16,6 @@ import {
 	SETS_FORMATS,
 	DECIDING_SETS,
 	saveLastSetup,
-	serveChoices,
 	setSets,
 	toCreateRequest,
 	type Setup,
@@ -61,8 +62,7 @@ describe('setup', () => {
 			sets: 'one',
 			deciding: 'full_set',
 			teams: { a: ['', ''], b: ['', ''] },
-			firstServer: { team: 'a', index: 0 },
-			otherFirstServer: 0,
+			serve: { team: 'a', first: { a: 1, b: 1 } },
 			players: { a: [null, null], b: [null, null] }
 		});
 	});
@@ -97,12 +97,11 @@ describe('setup', () => {
 			deuce: 'advantage',
 			sets: 'best_of_3',
 			deciding: 'super_tie_break',
-			firstServer: { team: 'b', index: 1 },
-			otherFirstServer: 1
+			serve: { team: 'b', first: { a: 0, b: 1 } }
 		});
 		expect(toCreateRequest(s)).toEqual({
 			format: { sets: { deuce: 'advantage', sets: 'best_of_3', deciding: 'super_tie_break' } },
-			start: { first_server: { team: 'b', index: 1 }, other_first_server: 1 },
+			start: { first_server: { team: 'b', index: 1 }, other_first_server: 0 },
 			teams: { a: ['Ana', 'Rui'], b: ['João', 'Marta'] }
 		});
 	});
@@ -142,12 +141,44 @@ describe('setup', () => {
 		});
 	});
 
-	it('serve choices fall back to Player 1 to 4 placeholders and follow the first server', () => {
-		const blank = defaultSetup();
-		expect(serveChoices(blank).first.map((c) => c.label)).toEqual(['Player 1', 'Player 2', 'Player 3', 'Player 4']);
-		expect(serveChoices(blank).other.map((c) => c.label)).toEqual(['Player 3', 'Player 4']);
-		const s = named({ firstServer: { team: 'b', index: 0 } });
-		expect(serveChoices(s).other.map((c) => c.label)).toEqual(['Ana', 'Rui']);
+	it('names each slot Player 1..4, team A then team B', () => {
+		expect([slotName('a', 0), slotName('a', 1), slotName('b', 0), slotName('b', 1)]).toEqual([
+			'Player 1',
+			'Player 2',
+			'Player 3',
+			'Player 4'
+		]);
+		const teams = { a: [' Ana ', ''] as [string, string], b: ['  ', 'Marta'] as [string, string] };
+		expect(nameOrSlot(teams, 'a', 0)).toBe('Ana');
+		expect(nameOrSlot(teams, 'a', 1)).toBe('Player 2');
+		expect(nameOrSlot(teams, 'b', 0)).toBe('Player 3');
+		expect(nameOrSlot(teams, 'b', 1)).toBe('Marta');
+	});
+
+	it('remembers the serve order in the new shape', () => {
+		const st = fakeStorage();
+		saveLastSetup(st, named({ serve: { team: 'b', first: { a: 0, b: 1 } } }));
+		const stored = JSON.parse(st.data[LAST_SETUP_KEY]!);
+		expect(stored.serveTeam).toBe('b');
+		expect(stored.serveFirst).toEqual({ a: 0, b: 1 });
+		expect(stored).not.toHaveProperty('firstServer');
+		expect(loadLastSetup(st).serve).toEqual({ team: 'b', first: { a: 0, b: 1 } });
+	});
+
+	it('loads the old firstServer + otherFirstServer shape losslessly', () => {
+		const { serve: _s, ...rest } = named();
+		const old = (firstServer: object, otherFirstServer: number) =>
+			fakeStorage({ [LAST_SETUP_KEY]: JSON.stringify({ ...rest, firstServer, otherFirstServer }) });
+		expect(loadLastSetup(old({ team: 'a', index: 0 }, 0)).serve).toEqual({ team: 'a', first: { a: 0, b: 0 } });
+		expect(loadLastSetup(old({ team: 'b', index: 0 }, 1)).serve).toEqual({ team: 'b', first: { a: 1, b: 0 } });
+		expect(loadLastSetup(old({ team: 'b', index: 1 }, 0)).serve).toEqual({ team: 'b', first: { a: 0, b: 1 } });
+	});
+
+	it('a stored setup with no serve fields keeps its rules and defaults the serve', () => {
+		const { serve: _s, ...rest } = named({ deuce: 'star_point' });
+		const loaded = loadLastSetup(fakeStorage({ [LAST_SETUP_KEY]: JSON.stringify(rest) }));
+		expect(loaded.deuce).toBe('star_point');
+		expect(loaded.serve).toEqual(defaultSetup().serve);
 	});
 });
 
@@ -202,10 +233,10 @@ describe('option sweep', () => {
 			for (const sets of SETS_FORMATS)
 				for (const deciding of DECIDING_SETS)
 					for (const team of ['a', 'b'] as const)
-						for (const index of [0, 1])
+						for (const index of [0, 1] as const)
 							for (const other of [0, 1] as const) {
 								const r = toCreateRequest(
-									named({ deuce, sets, deciding, firstServer: { team, index }, otherFirstServer: other })
+									named({ deuce, sets, deciding, serve: { team, first: { a: index, b: other } } })
 								);
 								n++;
 								const f = (r.format as { sets: { sets: string; deciding: string } }).sets;
@@ -223,13 +254,18 @@ describe('option sweep', () => {
 		expect(loadLastSetup(st).deciding).toBe('full_set');
 	});
 
-	it('a saved bad index or team falls back to the default', () => {
+	it('a saved bad serve choice falls back to the default', () => {
+		const { serve: _s, ...rest } = named();
 		for (const bad of [
-			{ firstServer: { team: 'a', index: 2 } },
-			{ firstServer: { team: 'c', index: 0 } },
-			{ otherFirstServer: 5 }
+			{ firstServer: { team: 'a', index: 2 }, otherFirstServer: 0 },
+			{ firstServer: { team: 'c', index: 0 }, otherFirstServer: 0 },
+			{ firstServer: { team: 'a', index: 0 }, otherFirstServer: 5 },
+			{ firstServer: { team: 'a', index: 0 } },
+			{ serveTeam: 'c', serveFirst: { a: 0, b: 0 } },
+			{ serveTeam: 'a', serveFirst: { a: 2, b: 0 } },
+			{ serveTeam: 'a' }
 		]) {
-			const st = fakeStorage({ [LAST_SETUP_KEY]: JSON.stringify({ ...named(), ...bad }) });
+			const st = fakeStorage({ [LAST_SETUP_KEY]: JSON.stringify({ ...rest, ...bad }) });
 			expect(loadLastSetup(st)).toEqual(defaultSetup());
 		}
 	});

@@ -243,23 +243,44 @@ class LocalMatchModelTest {
         )
         val m = model(FakeLocalMatchStore(LocalStoreState(null, last)))
         assertEquals(
-            SetupDraft(DeuceRule.STAR_POINT, SetsFormat.BEST_OF_3, DecidingSet.SUPER_TIE_BREAK, Player(Team.B, 1)),
+            SetupDraft(DeuceRule.STAR_POINT, SetsFormat.BEST_OF_3, DecidingSet.SUPER_TIE_BREAK, Team.B),
             m.draft.value,
         )
         m.pickDeuce(DeuceRule.ADVANTAGE)
         m.pickSets(SetsFormat.ONE)
         assertEquals(
-            SetupDraft(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET, Player(Team.B, 1)),
+            SetupDraft(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET, Team.B),
             m.draft.value,
         )
-        m.pickFirstServer(Player(Team.A, 0))
         assertEquals(
             LocalSetup(
                 SetRules(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET),
-                Start(firstServer = Player(Team.A, 0), otherFirstServer = 0),
+                Start(firstServer = Player(Team.A, 1), otherFirstServer = 1),
             ),
-            m.pickOtherServer(0),
+            m.pickFirstTeam(Team.A),
         )
+        assertEquals(Team.A, m.draft.value.firstTeam)
+    }
+
+    @Test
+    fun a_stored_match_with_the_old_first_server_index_still_loads_and_replays() {
+        val old = LocalSetup(setup.rules, Start(firstServer = Player(Team.A, 0), otherFirstServer = 0))
+        val points = listOf(Team.A, Team.A, Team.B)
+        val m = model(FakeLocalMatchStore(LocalStoreState(LocalMatch(old, points), old)))
+        val ui = m.ui.value
+        assertEquals(LocalMatch(old, points), ui.match)
+        assertEquals(GameScore(PointCall.THIRTY, PointCall.FIFTEEN, 0, false), game(m))
+    }
+
+    @Test
+    fun a_last_setup_with_the_old_first_server_index_still_loads() {
+        val last = LocalSetup(
+            SetRules(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET),
+            Start(firstServer = Player(Team.B, 0), otherFirstServer = 0),
+        )
+        val m = model(FakeLocalMatchStore(LocalStoreState(null, last)))
+        assertEquals(last, m.ui.value.lastSetup)
+        assertEquals(Team.B, m.draft.value.firstTeam)
     }
 
     @Test
@@ -268,15 +289,14 @@ class LocalMatchModelTest {
         assertEquals(SetupDraft(null, null, null, null), m.draft.value)
         m.pickDeuce(DeuceRule.GOLDEN_POINT)
         m.pickSets(SetsFormat.BEST_OF_3)
-        assertNull(m.pickOtherServer(0))
+        assertNull(m.pickFirstTeam(Team.B))
         m.pickDeciding(DecidingSet.SUPER_TIE_BREAK)
-        m.pickFirstServer(Player(Team.B, 0))
         assertEquals(
             LocalSetup(
                 SetRules(DeuceRule.GOLDEN_POINT, SetsFormat.BEST_OF_3, DecidingSet.SUPER_TIE_BREAK),
-                Start(firstServer = Player(Team.B, 0), otherFirstServer = 1),
+                Start(firstServer = Player(Team.B, 1), otherFirstServer = 1),
             ),
-            m.pickOtherServer(1),
+            m.pickFirstTeam(Team.B),
         )
     }
 

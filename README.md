@@ -85,7 +85,7 @@ Event matches show in history and on player pages as "Sunday cup · Match 1".
 
 `watch/` is a Wear OS 3+ app (built for a Galaxy Watch) that scores a match from the wrist. Pick a live match, tap a half of the screen to give that side the point, and hold Undo to take one back. It signs in with a code, so no password is typed on the watch.
 
-**Local match.** "Local match" is on the first-run settings, sign-in and match-list screens, and needs no server, sign-in or network. Four quick picks set it up: the deuce rule, the number of sets, the deciding set (only for best of three) and who serves, which takes two steps as on the web. Then score with the usual taps and hold Undo to take a point back. Swipe away to keep the match; "Resume local match" and "Discard local match" (which asks first) are on the first screen. When it's finished, Play again starts another and Back closes it. The match is kept on the watch through app restarts and reboots until it's closed or discarded, and nothing is kept after.
+**Local match.** "Local match" is on the first-run settings, sign-in and match-list screens, and needs no server, sign-in or network. Four quick picks set it up: the deuce rule, the number of sets, the deciding set (only for best of three) and which team serves first (the other pair's order is set for you). Then score with the usual taps and hold Undo to take a point back. Swipe away to keep the match; "Resume local match" and "Discard local match" (which asks first) are on the first screen. When it's finished, Play again starts another and Back closes it. The match is kept on the watch through app restarts and reboots until it's closed or discarded, and nothing is kept after.
 
 **Build.** Needs JDK 21 and the Android SDK:
 

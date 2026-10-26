@@ -30,7 +30,6 @@ import io.github.jfms7s.padelscore.R
 import io.github.jfms7s.padelscore.local.engine.DecidingSet
 import io.github.jfms7s.padelscore.local.engine.DeuceRule
 import io.github.jfms7s.padelscore.local.engine.SetsFormat
-import io.github.jfms7s.padelscore.net.Player
 import io.github.jfms7s.padelscore.net.Team
 import io.github.jfms7s.padelscore.score.Feedback
 
@@ -124,46 +123,27 @@ fun LocalDecidingScreen(model: LocalMatchModel, onNext: () -> Unit) {
     )
 }
 
-@Composable
-fun LocalServeScreen(model: LocalMatchModel, onNext: () -> Unit) {
-    val draft by model.draft.collectAsState()
-    val players = listOf(Player(Team.A, 0), Player(Team.A, 1), Player(Team.B, 0), Player(Team.B, 1))
-    ChoiceScreen(
-        title = stringResource(R.string.local_serve_title),
-        hint = stringResource(R.string.local_serve_hint),
-        options = players.map { playerName(it) },
-        highlighted = draft.firstServer?.let(players::indexOf),
-        onPick = { model.pickFirstServer(players[it]); onNext() },
-    )
-}
-
 /**
- * The other pair's two players; a pick finishes the setup, which [onNext] receives. A start that failed to save
- * says so here, where the pick can be tapped again.
+ * The serving team; a pick finishes the setup, which [onNext] receives. A start that failed to save says so here,
+ * where the pick can be tapped again.
  */
 @Composable
-fun LocalOtherServerScreen(model: LocalMatchModel, onNext: (LocalSetup) -> Unit) {
+fun LocalServeScreen(model: LocalMatchModel, onNext: (LocalSetup) -> Unit) {
     val draft by model.draft.collectAsState()
     val ui by model.ui.collectAsState()
     val opened = remember { model.ui.value.feedbackId }
     val notSaved = ui.feedbackSince(opened) == Feedback.NotSaved
-    val otherTeam = if (draft.firstServer?.team == Team.A) Team.B else Team.A
-    val players = listOf(Player(otherTeam, 0), Player(otherTeam, 1))
-    // The last pick counts only while the serving pair is the same one it was then.
-    val last = ui.lastSetup?.start?.takeIf { it.firstServer.team == draft.firstServer?.team }
+    val teams = Team.entries
     ChoiceScreen(
-        title = stringResource(R.string.local_other_title),
-        hint = null,
-        options = players.map { playerName(it) },
-        highlighted = last?.otherFirstServer,
-        onPick = { index -> model.pickOtherServer(index)?.let(onNext) },
+        title = stringResource(R.string.local_serve_title),
+        hint = stringResource(R.string.local_serve_hint),
+        options = teams.map { teamName(it) },
+        highlighted = draft.firstTeam?.let(teams::indexOf),
+        onPick = { model.pickFirstTeam(teams[it])?.let(onNext) },
         notice = if (notSaved) stringResource(R.string.local_not_saved) else null,
     )
 }
 
 @Composable
-private fun playerName(player: Player): String = stringResource(
-    R.string.local_player,
-    stringResource(if (player.team == Team.A) R.string.local_team_a else R.string.local_team_b),
-    player.index + 1,
-)
+private fun teamName(team: Team): String =
+    stringResource(if (team == Team.A) R.string.local_team_a else R.string.local_team_b)

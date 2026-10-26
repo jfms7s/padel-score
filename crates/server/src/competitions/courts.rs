@@ -275,9 +275,9 @@ pub async fn create_event_match_in(
             start: Start {
                 first_server: Player {
                     team: Team::A,
-                    index: 0,
+                    index: 1,
                 },
-                other_first_server: 0,
+                other_first_server: 1,
             },
             teams: Teams {
                 a: [a1.name.clone(), a2.name.clone()],

@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { ApiError, createMatch } from '#lib/api.ts';
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
+	import ServeOrderFields from '#lib/components/ServeOrderFields.svelte';
 	import { listPlayers } from '#lib/players.ts';
 	import { bootSession } from '#lib/session.ts';
 	import { safeStorage } from '#lib/storage.ts';
@@ -14,7 +15,6 @@
 		MAX_NAME_LENGTH,
 		defaultSetup,
 		loadLastSetup,
-		serveChoices,
 		setSets,
 		toCreateRequest
 	} from '#lib/setup.ts';
@@ -69,11 +69,6 @@
 	let stranded = $state<string | null>(null);
 
 	const oneSet = $derived(setup.sets === 'one');
-	const choices = $derived(serveChoices(setup));
-
-	function pickFirstServer(team: 'a' | 'b', index: number) {
-		setup.firstServer = { team, index };
-	}
 
 	// Pressed by the user, once per press: createMatch has no idempotency key, so it is never
 	// retried automatically (a lost reply would orphan a match).
@@ -187,32 +182,7 @@
 			{#if playersFailed}<p class="hint" role="status">{strings.players.listFailed}</p>{/if}
 		</div>
 
-		<div class="field" role="group" aria-labelledby="l-first">
-			<span class="label" id="l-first">{t.firstServer}</span>
-			<div class="seg">
-				{#each choices.first as c (`${c.player.team}${c.player.index}`)}
-					<button
-						type="button"
-						aria-pressed={setup.firstServer.team === c.player.team && setup.firstServer.index === c.player.index}
-						onclick={() => pickFirstServer(c.player.team, c.player.index)}
-					>
-						{c.label}
-					</button>
-				{/each}
-			</div>
-			<p class="hint">{t.firstServerHint}</p>
-		</div>
-
-		<div class="field" role="group" aria-labelledby="l-other">
-			<span class="label" id="l-other">{t.otherFirstServer}</span>
-			<div class="seg">
-				{#each choices.other as c (c.index)}
-					<button type="button" aria-pressed={setup.otherFirstServer === c.index} onclick={() => (setup.otherFirstServer = c.index)}>
-						{c.label}
-					</button>
-				{/each}
-			</div>
-		</div>
+		<ServeOrderFields bind:order={setup.serve} teams={setup.teams} />
 
 		{#if stranded}
 			<p class="ok" role="status">{t.created} <a href={stranded}>{t.openMatch}</a></p>

@@ -80,6 +80,31 @@ describe('fenceModel', () => {
 		expect(third.serveSide).toBe('left');
 	});
 
+	it('names the serving player only when a name was entered', () => {
+		const unnamed = v(newMatch);
+		unnamed.teams = { a: ['Player 1', 'Player 2'], b: ['Player 3', 'Player 4'] };
+		const m = fenceModel(unnamed);
+		expect(m.a.serving).toBe(true);
+		expect(m.servingPlayerName).toBeNull();
+
+		// A placeholder from neither the slot nor the server's per-team fallback is a name like any other.
+		const server = unnamed.score.server;
+		const mixed = v(newMatch);
+		mixed.teams = { a: ['Player 3', 'Player 4'], b: ['Player 3', 'Player 4'] };
+		mixed.teams[server.team][server.index] = server.index === 0 ? 'Player 2' : 'Player 3';
+		expect(fenceModel(mixed).servingPlayerName).toBe(mixed.teams[server.team][server.index]);
+
+		// The server names blanks by position within the team, so team B's are stored as Player 1 / Player 2.
+		const serverBlanks = v(newMatch);
+		serverBlanks.teams = { a: ['Player 1', 'Player 2'], b: ['Player 1', 'Player 2'] };
+		expect(fenceModel(serverBlanks).servingPlayerName).toBeNull();
+
+		const partly = v(newMatch);
+		partly.teams = { a: ['Ana', 'Player 2'], b: ['Player 3', 'Player 4'] };
+		partly.teams[server.team][server.index] = 'Rita';
+		expect(fenceModel(partly).servingPlayerName).toBe('Rita');
+	});
+
 	it('names teams and counts games and sets', () => {
 		const m = fenceModel(v(thirdGame));
 		expect(m.a.name).toBe('Ana / Rui');

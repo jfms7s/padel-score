@@ -23,6 +23,13 @@ export const strings = {
 
 	teamName: (first: string, second: string) => `${first} / ${second}`,
 
+	// Who serves first: the pick on New match and on the court phone.
+	serve: {
+		first: 'Serves first',
+		hint: 'Not sure? Spin the racket and tap the winner.',
+		firstFor: (team: string) => `First to serve for ${team}`
+	},
+
 	// The advantage call on the scoreboard.
 	advantageShort: 'AD',
 
@@ -46,9 +53,6 @@ export const strings = {
 		teams: 'Teams',
 		teamPlayer: (team: 'A' | 'B', n: number) => `Team ${team} player ${n}`,
 		player: (n: number) => `Player ${n}`,
-		firstServer: 'First to serve',
-		firstServerHint: 'Not sure? Spin the racket and tap the winner.',
-		otherFirstServer: 'First to serve for the other pair',
 		start: 'Start match',
 		starting: 'Starting…',
 		failed: "Couldn't start the match.",
@@ -93,10 +97,13 @@ export const strings = {
 			left: 'serving from the left',
 			receiver_chooses: 'receiver picks the side'
 		},
-		ballTitle: (player: string, side: 'right' | 'left' | 'centre') =>
-			side === 'centre'
-				? `${player} serves, the receiver picks the side`
-				: `${player} serves from the ${side}, behind the baseline`,
+		playerServing: (player: string) => `${player} serving`,
+		sideFrom: {
+			right: 'from the right',
+			left: 'from the left',
+			receiver_chooses: 'receiver picks the side'
+		},
+		pointToServing: (team: string, player: string) => `Point to ${team}, ${player} serving`,
 		wins: (team: string) => `${team} win`,
 		draw: 'Draw',
 		newMatch: 'New match',
@@ -721,8 +728,6 @@ export const strings = {
 		loadFailed: 'Couldn’t load this court. Check the connection and reload.',
 		reload: 'Reload',
 		serveTitle: 'Who serves first?',
-		serveHint: 'Not sure? Spin the racket and tap the winner.',
-		otherServer: 'First to serve for the other pair',
 		startScoring: 'Start scoring',
 		starting: 'Starting…',
 		changeServer: 'Change who serves',
@@ -918,7 +923,7 @@ export const strings = {
 		phones: (n: number) => (n === 1 ? '1 phone' : `${n} phones`),
 		games: 'Games',
 		sets: 'Sets',
-		serving: (names: string) => `${names} serving`,
+		serving: (player: string) => `${player} serving`,
 		// The match list.
 		onCourt: 'On court',
 		waiting: 'Waiting',
