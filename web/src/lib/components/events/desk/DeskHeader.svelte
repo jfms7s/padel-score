@@ -22,7 +22,8 @@
 		busy: boolean;
 		/** The key of the link just copied; this one's is `spectator`. */
 		copied: string | null;
-		copyFailed: boolean;
+		/** The key of the link that couldn't be copied. */
+		copyFailed: string | null;
 		oncopy: () => void;
 		onstart: () => void;
 		/** Opens the Finish tab. */
@@ -60,12 +61,12 @@
 		{/if}
 	</div>
 	{#if status === 'setup'}<p class="hint start-hint">{t.startHint}</p>{/if}
-	{#if copyFailed}<p class="hint start-hint" role="alert">{t.copyFailed}</p>{/if}
+	{#if copyFailed === 'spectator'}<p class="hint start-hint" role="alert">{t.copyFailed}</p>{/if}
 </header>
 
 {#if ev.kind === 'non_stop' && status === 'running'}
 	<div class="clock-strip">
-		<KindPanel event={detail} audience="coordinator" parts="clock" />
+		<KindPanel event={detail} audience="coordinator" parts="clock" clockVariant="strip" />
 	</div>
 {/if}
 
@@ -104,34 +105,5 @@
 	}
 	.clock-strip {
 		margin-top: 12px;
-	}
-	/* The clock is a strip here, as it shows on every tab: round, time, state, then its buttons
-	   (on their own line when the row is full). */
-	.clock-strip :global(.clock) {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 4px 16px;
-		padding: 10px 16px;
-		text-align: left;
-	}
-	.clock-strip :global(.clock .time),
-	.clock-strip :global(.clock .digit) {
-		font-size: 46px;
-	}
-	.clock-strip :global(.clock > .actions) {
-		flex: 1 1 14rem;
-		justify-content: flex-end;
-		margin: 0;
-	}
-	.clock-strip :global(.clock .actions button) {
-		flex: none;
-		padding: 0 16px;
-	}
-	.clock-strip :global(.clock > .confirm),
-	.clock-strip :global(.clock > .hint),
-	.clock-strip :global(.clock > .error) {
-		flex-basis: 100%;
-		margin: 0;
 	}
 </style>

@@ -113,10 +113,11 @@
 	// ---- copying links ---------------------------------------------------------------------
 
 	let copied = $state<string | null>(null);
-	let copyFailed = $state(false);
+	/** The key of the link that couldn't be copied: its own place says so. */
+	let copyFailed = $state<string | null>(null);
 
 	async function copy(key: string, link: string) {
-		copyFailed = false;
+		copyFailed = null;
 		try {
 			await navigator.clipboard.writeText(link);
 			copied = key;
@@ -124,7 +125,7 @@
 				if (copied === key) copied = null;
 			}, 2000);
 		} catch {
-			copyFailed = true;
+			copyFailed = key;
 		}
 	}
 
@@ -154,16 +155,21 @@
 		players = [...players.filter((p) => p.id !== player.id), player];
 	}
 
-	function newTeam(pair: [string, string], name: string): Promise<boolean> {
-		return act('teams', async () => {
+	// A form's `done` runs as soon as its call succeeds, before the refresh: a failed refresh
+	// must not leave the form filled in, where a retry would repeat the call.
+
+	function newTeam(pair: [string, string], name: string, done: () => void) {
+		void act('teams', async () => {
 			await addTeam(id, name === '' ? { players: pair } : { players: pair, name });
+			done();
 			await refresh();
 		});
 	}
 
-	function renameTeam(team: EventTeam, name: string): Promise<boolean> {
-		return act('teams', async () => {
+	function renameTeam(team: EventTeam, name: string, done: () => void) {
+		void act('teams', async () => {
 			await updateTeam(id, team.id, { name: name === '' ? null : name });
+			done();
 			await refresh();
 		});
 	}
@@ -177,9 +183,10 @@
 
 	// ---- courts ----------------------------------------------------------------------------
 
-	function rotate(court: CourtOut): Promise<boolean> {
-		return act('courts', async () => {
+	function rotate(court: CourtOut, done: () => void) {
+		void act('courts', async () => {
 			await rotateCourt(id, court.id);
+			done();
 			await refresh();
 		});
 	}
@@ -199,9 +206,10 @@
 
 	// ---- matches ---------------------------------------------------------------------------
 
-	function newMatch(body: NewEventMatch): Promise<boolean> {
-		return act('matches', async () => {
+	function newMatch(body: NewEventMatch, done: () => void) {
+		void act('matches', async () => {
 			await createEventMatch(id, body);
+			done();
 			await refresh();
 		});
 	}
@@ -233,6 +241,7 @@
 	function finish(places?: Place[]) {
 		void act('lifecycle', async () => {
 			detail = await finishEvent(id, places);
+			select('live');
 		});
 	}
 </script>

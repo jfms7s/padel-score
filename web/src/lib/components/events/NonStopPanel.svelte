@@ -2,7 +2,8 @@
 	Owned by phase 8 (the non-stop). The non-stop's part of the event screen, for the coordinator or a
 	spectator: the clock (buttons for the coordinator only), the standings and the schedule. The data
 	arrives in `kind_data` on the stream the page already holds. `parts` shows only the clock or only
-	the tables (side by side on a desktop), for a page that places them apart.
+	the tables (side by side on a desktop), for a page that places them apart; `clockVariant` is the
+	clock's layout.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -18,8 +19,14 @@
 	let {
 		event,
 		audience,
-		parts = 'all'
-	}: { event: EventDetail | EventView; audience: 'coordinator' | 'spectator'; parts?: 'all' | 'clock' | 'tables' } = $props();
+		parts = 'all',
+		clockVariant = 'full'
+	}: {
+		event: EventDetail | EventView;
+		audience: 'coordinator' | 'spectator';
+		parts?: 'all' | 'clock' | 'tables';
+		clockVariant?: 'full' | 'strip';
+	} = $props();
 
 	const data = $derived(nonStopData(event.kind_data));
 
@@ -34,6 +41,7 @@
 			rounds={data.rounds}
 			waves={data.waves}
 			controls={audience === 'coordinator'}
+			variant={clockVariant}
 		/>
 	{/if}
 	{#if parts !== 'clock'}

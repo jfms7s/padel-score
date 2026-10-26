@@ -1,7 +1,7 @@
 <!--
 	The desk's Teams tab: the teams with rename and (in setup) remove, and the add-team form
 	beside them on a desktop; a tournament's settings sit below in setup. The page runs the
-	calls; a call's promise says whether it worked, so a form can clear.
+	calls and calls `done` once one succeeds, so a form can clear.
 -->
 <script lang="ts">
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
@@ -31,8 +31,8 @@
 		failure: string | undefined;
 		/** Show a message in this tab, or clear the page's failures with null. */
 		onfail: (message: string | null) => void;
-		onadd: (pair: [string, string], name: string) => Promise<boolean>;
-		onrename: (team: EventTeam, name: string) => Promise<boolean>;
+		onadd: (pair: [string, string], name: string, done: () => void) => void;
+		onrename: (team: EventTeam, name: string, done: () => void) => void;
 		onremove: (team: EventTeam) => void;
 		/** A player made in the picker, for the list. */
 		onplayer: (player: Player) => void;
@@ -51,7 +51,7 @@
 
 	const inTeams = $derived(teams.flatMap((tm) => tm.players.map((p) => p.id)));
 
-	async function submitTeam(event: SubmitEvent) {
+	function submitTeam(event: SubmitEvent) {
 		event.preventDefault();
 		if (first.id === null || second.id === null) {
 			onfail(t.pickBoth);
@@ -61,11 +61,11 @@
 			onfail(t.samePlayer);
 			return;
 		}
-		if (await onadd([first.id, second.id], teamName.trim())) {
+		onadd([first.id, second.id], teamName.trim(), () => {
 			first = { name: '', id: null };
 			second = { name: '', id: null };
 			teamName = '';
-		}
+		});
 	}
 
 	function startRename(team: EventTeam) {
@@ -74,9 +74,9 @@
 		onfail(null);
 	}
 
-	async function submitRename(event: SubmitEvent, team: EventTeam) {
+	function submitRename(event: SubmitEvent, team: EventTeam) {
 		event.preventDefault();
-		if (await onrename(team, renameText.trim())) renaming = null;
+		onrename(team, renameText.trim(), () => (renaming = null));
 	}
 </script>
 

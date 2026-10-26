@@ -29,9 +29,11 @@
 		failure: string | undefined;
 		/** The key of the link just copied. */
 		copied: string | null;
-		copyFailed: boolean;
+		/** The key of the link that couldn't be copied; the header shows the spectator link's. */
+		copyFailed: string | null;
 		oncopy: (key: string, link: string) => void;
-		onrotate: (court: CourtOut) => Promise<boolean>;
+		/** `done` runs once the new code is made. */
+		onrotate: (court: CourtOut, done: () => void) => void;
 		onnext: (court: CourtOut) => void;
 		onaddcourt: () => void;
 	} = $props();
@@ -46,8 +48,8 @@
 
 	const matchById = (mid: string | null) => (mid === null ? undefined : matches.find((m) => m.id === mid));
 
-	async function confirmRotate(court: CourtOut) {
-		if (await onrotate(court)) rotating = null;
+	function confirmRotate(court: CourtOut) {
+		onrotate(court, () => (rotating = null));
 	}
 </script>
 
@@ -121,7 +123,7 @@
 			</div>
 		</article>
 	</div>
-	{#if copyFailed}<p class="hint" role="alert">{t.copyFailed}</p>{/if}
+	{#if copyFailed !== null && copyFailed !== 'spectator'}<p class="hint" role="alert">{t.copyFailed}</p>{/if}
 	{#if status !== 'finished'}
 		<button class="secondary wide" type="button" disabled={busy} onclick={onaddcourt}>{t.addCourt}</button>
 	{/if}

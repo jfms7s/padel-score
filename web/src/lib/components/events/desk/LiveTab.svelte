@@ -41,11 +41,14 @@
 
 	/** The phone, tablet and desktop layouts differ in what they show, not only in where. */
 	type Size = 'phone' | 'tablet' | 'desk';
-	let size = $state<Size>('phone');
+	const measure = (): Size =>
+		matchMedia('(min-width: 1100px)').matches ? 'desk' : matchMedia('(min-width: 700px)').matches ? 'tablet' : 'phone';
+	// Read at once, so a wide screen doesn't flash the phone layout first.
+	let size = $state<Size>(typeof window === 'undefined' ? 'phone' : measure());
 	$effect(() => {
 		const tablet = matchMedia('(min-width: 700px)');
 		const desk = matchMedia('(min-width: 1100px)');
-		const update = () => (size = desk.matches ? 'desk' : tablet.matches ? 'tablet' : 'phone');
+		const update = () => (size = measure());
 		update();
 		tablet.addEventListener('change', update);
 		desk.addEventListener('change', update);
@@ -94,7 +97,8 @@
 	{#if failure}<p class="error" role="alert">{failure}</p>{/if}
 
 	{#if courts.length > 0}
-		<div class="live-courts">
+		<!-- A tablet fits up to three courts in a row, more in two columns. -->
+		<div class="live-courts" style:--cols={courts.length <= 3 ? courts.length : 2}>
 			{#each courts as court (court.id)}
 				<CourtTile {court} {matches} {teams} {busy} compact={size !== 'desk'} onnext={running ? () => onnext(court) : undefined} />
 			{/each}
@@ -218,10 +222,13 @@
 	}
 	@media (min-width: 700px) {
 		.live-courts {
-			grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+			grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
 		}
 	}
 	@media (min-width: 1100px) {
+		.live-courts {
+			grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+		}
 		.live-split {
 			grid-template-columns: minmax(0, 1fr) 360px;
 		}

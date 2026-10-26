@@ -25,7 +25,8 @@
 		busy: boolean;
 		failure: string | undefined;
 		onfail: (message: string) => void;
-		oncreate: (body: NewEventMatch) => Promise<boolean>;
+		/** `done` runs once the match is made. */
+		oncreate: (body: NewEventMatch, done: () => void) => void;
 		onmove: (m: EventMatch, courtId: string) => void;
 		/** Throws to refuse; the list explains it in place. */
 		onsave: (m: EventMatch, score: TypedScore, clientId: string) => Promise<void>;
@@ -44,7 +45,7 @@
 	let matchLabel = $state('');
 	const running = $derived(status === 'running');
 
-	async function submitMatch(event: SubmitEvent) {
+	function submitMatch(event: SubmitEvent) {
 		event.preventDefault();
 		if (teamA === '' || teamB === '') {
 			onfail(t.pickTeam);
@@ -55,18 +56,20 @@
 			return;
 		}
 		const label = matchLabel.trim();
-		const made = await oncreate({
-			team_a: teamA,
-			team_b: teamB,
-			...(matchCourt === '' ? {} : { court_id: matchCourt }),
-			...(label === '' ? {} : { label })
-		});
-		if (made) {
-			teamA = '';
-			teamB = '';
-			matchCourt = '';
-			matchLabel = '';
-		}
+		oncreate(
+			{
+				team_a: teamA,
+				team_b: teamB,
+				...(matchCourt === '' ? {} : { court_id: matchCourt }),
+				...(label === '' ? {} : { label })
+			},
+			() => {
+				teamA = '';
+				teamB = '';
+				matchCourt = '';
+				matchLabel = '';
+			}
+		);
 	}
 </script>
 
