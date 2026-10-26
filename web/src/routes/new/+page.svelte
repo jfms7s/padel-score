@@ -214,9 +214,6 @@
 			</div>
 		</div>
 
-		</div>
-		</div>
-
 		{#if stranded}
 			<p class="ok" role="status">{t.created} <a href={stranded}>{t.openMatch}</a></p>
 		{/if}
@@ -229,6 +226,8 @@
 		{/if}
 
 		<button class="primary" type="submit" disabled={busy}>{busy ? t.starting : t.start}</button>
+		</div>
+		</div>
 	</form>
 </main>
 
@@ -238,11 +237,7 @@
 		margin: 0 auto;
 		padding: 16px 16px 48px;
 	}
-	.cols {
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-	}
+	.cols,
 	.col {
 		display: flex;
 		flex-direction: column;

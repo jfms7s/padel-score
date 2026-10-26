@@ -71,7 +71,7 @@
 		});
 </script>
 
-<main class="acct page-wide">
+<main class="acct page-wide-desk">
 	<h1>{a.title}</h1>
 	{#if phase === 'loading'}
 		<p class="hint">{t.loading}</p>

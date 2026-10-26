@@ -70,7 +70,7 @@
 	const openable = (m: MyMatch): m is MyMatch & { scorer_token: string } => typeof m.scorer_token === 'string';
 </script>
 
-<main class:signed={signedIn}>
+<main class:signed={signedIn} class:page-wide-desk={signedIn} class:page-narrow={!signedIn}>
 	<div class="cols">
 	<div class="col">
 	<h1>{strings.appName}</h1>
@@ -153,9 +153,8 @@
 
 <style>
 	main {
-		max-width: 28rem;
-		margin: 0 auto;
-		padding: 16px 16px 48px;
+		padding-top: 16px;
+		padding-bottom: 48px;
 	}
 	h1 {
 		margin: 0 0 8px;
@@ -228,11 +227,6 @@
 		display: none;
 	}
 	@media (min-width: 1100px) {
-		main.signed {
-			max-width: 1440px;
-			padding-left: 24px;
-			padding-right: 24px;
-		}
 		main.signed .cols {
 			display: grid;
 			grid-template-columns: repeat(2, minmax(0, 1fr));

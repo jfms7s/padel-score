@@ -168,7 +168,7 @@
 	}
 </script>
 
-<main class="acct page-wide">
+<main class="acct page-wide-desk">
 	<a class="back" href="/players">{t.backToPlayers}</a>
 	{#if loadFailure}
 		<h1>{strings.players.title}</h1>

@@ -290,7 +290,8 @@ button {
 /* Page widths. Narrow is the phone column (forms, account pages); wide fills a desktop up to a
    cap. Gutters grow at tablet width. */
 .page-narrow,
-.page-wide {
+.page-wide,
+.page-wide-desk {
 	margin: 0 auto;
 	padding-left: 16px;
 	padding-right: 16px;
@@ -303,9 +304,20 @@ button {
 }
 @media (min-width: 700px) {
 	.page-narrow,
-	.page-wide {
+	.page-wide,
+	.page-wide-desk {
 		padding-left: 24px;
 		padding-right: 24px;
+	}
+}
+
+/* Narrow like a phone column below 1100px, wide from there (the desktop layouts). */
+.page-wide-desk {
+	max-width: 28rem;
+}
+@media (min-width: 1100px) {
+	.page-wide-desk {
+		max-width: 1440px;
 	}
 }
 

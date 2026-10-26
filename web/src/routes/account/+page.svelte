@@ -148,7 +148,7 @@
 		);
 </script>
 
-<main class="acct page-wide">
+<main class="acct page-wide-desk">
 	<h1>{a.title}</h1>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
