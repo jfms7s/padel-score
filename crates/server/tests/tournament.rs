@@ -13,7 +13,7 @@ use padel_score_server::commands::{
     record_final,
 };
 use padel_score_server::competitions::courts::{Court, courts_in, event_matches_in};
-use padel_score_server::competitions::tournament::bracket::{Plan, Pos, Side};
+use padel_score_server::competitions::tournament::bracket::{Layout, Plan, Pos, Side};
 use padel_score_server::competitions::tournament::store::{
     Choice, apply_plan_in, fill_courts_in, load_in, withdraw_in,
 };
@@ -320,15 +320,7 @@ async fn start_draws_and_fills_courts() {
     let made = event_matches_in(&mut conn, &ev.id).await.unwrap();
     drop(conn);
     let labels: Vec<_> = made.iter().map(|m| m.label.as_str()).collect();
-    assert_eq!(
-        labels,
-        [
-            "Quarter-final 1",
-            "Quarter-final 2",
-            "Quarter-final 3",
-            "Quarter-final 4"
-        ]
-    );
+    assert_eq!(labels, [label(QF1), label(QF2), label(QF3), label(QF4)]);
     let mut seen = HashSet::new();
     for m in &made {
         assert!(seen.insert(m.team_a_id.clone()));
@@ -472,6 +464,11 @@ const QF4: Pos = pos(1, 8, 3);
 const SF1: Pos = pos(1, 4, 0);
 const PS1: Pos = pos(5, 4, 0);
 const FINAL: Pos = pos(1, 2, 0);
+
+/// The label the server gives the match at `p` in an 8-team tournament with full placement.
+fn label(p: Pos) -> String {
+    Layout::new(8, true).unwrap().label(p)
+}
 
 /// When the coordinator presses Finish in these tests.
 const FINISHED_AT: i64 = 5_000;
@@ -782,7 +779,7 @@ async fn apply_plan_carries_out_every_part() {
     assert_eq!(sf1.3, Some(side(&r1, Team::A)));
     assert_eq!(sf1.4, Some(side(&r2, Team::A)));
     let m = sf1.5.unwrap();
-    assert_eq!(label_of(&pool, &m).await, "Semi-final 1");
+    assert_eq!(label_of(&pool, &m).await, label(SF1));
     assert!(is_held(&pool, &ev, QF1).await);
     // Both courts are busy, so the new match waits.
     assert_eq!(court_of(&pool, &m).await, None);
@@ -801,14 +798,11 @@ async fn results_move_teams_on() {
     let sf1 = node(&pool, &ev, SF1).await;
     assert_eq!(sf1.3, Some(side(&r1, Team::A)));
     assert_eq!(sf1.4, Some(side(&r2, Team::B)));
-    assert_eq!(label_of(&pool, &sf1.5.unwrap()).await, "Semi-final 1");
+    assert_eq!(label_of(&pool, &sf1.5.unwrap()).await, label(SF1));
     let ps1 = node(&pool, &ev, PS1).await;
     assert_eq!(ps1.3, Some(side(&r1, Team::B)));
     assert_eq!(ps1.4, Some(side(&r2, Team::A)));
-    assert_eq!(
-        label_of(&pool, &ps1.5.unwrap()).await,
-        "Placement semi 1 (5th–8th)"
-    );
+    assert_eq!(label_of(&pool, &ps1.5.unwrap()).await, label(PS1));
     check_rows(&pool, &ev).await;
 }
 
@@ -1364,4 +1358,26 @@ async fn keep_after_finish_rewrites_placings() {
     let written = placing_rows(&pool, &ev).await;
     assert_eq!(written.len(), 16);
     assert!(written.iter().all(|r| r.4 == FINISHED_AT));
+}
+
+/// The label of every position of a 32-team tournament with full placement, as the web tests
+/// read it (`web/src/lib/fixtures/tournament-labels.json`). A label depends only on the
+/// position, so the smaller layouts are covered too. Regenerate with `UPDATE_FIXTURES=1`.
+#[test]
+fn web_label_fixture_matches_layout() {
+    let layout = Layout::new(32, true).unwrap();
+    let rows: Vec<Value> = layout
+        .positions()
+        .into_iter()
+        .map(|p| json!({ "place_from": p.place_from, "size": p.size, "idx": p.idx, "label": layout.label(p) }))
+        .collect();
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../web/src/lib/fixtures/tournament-labels.json"
+    );
+    let want = serde_json::to_string_pretty(&rows).unwrap() + "\n";
+    if std::env::var_os("UPDATE_FIXTURES").is_some() {
+        std::fs::write(path, &want).unwrap();
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), want);
 }

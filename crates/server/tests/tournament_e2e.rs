@@ -22,7 +22,7 @@ use padel_score_server::AppState;
 use padel_scoring::{DecidingSet, DeuceRule, Format, SetRules, SetsFormat};
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
-use support::{Res, as_session, req, send, with_admin};
+use support::{Res, as_session, ps, qf, req, send, sf, with_admin};
 
 fn one_set() -> Value {
     serde_json::to_value(Format::Sets(SetRules {
@@ -562,9 +562,7 @@ async fn eight_team_two_court_tournament_runs_end_to_end() {
     let d = ctx.detail().await;
     assert_eq!(nodes(&d).len(), 12);
     assert_eq!(d["kind_data"]["can_redraw"], json!(true));
-    let old_quarters: Vec<String> = (1..=4)
-        .map(|i| match_id(&d, &format!("Quarter-final {i}")))
-        .collect();
+    let old_quarters: Vec<String> = (1..=4).map(|i| match_id(&d, &qf(i))).collect();
     assert_eq!(d["matches"].as_array().unwrap().len(), 4);
 
     // Redraw once: the quarter-finals are made again.
@@ -573,9 +571,7 @@ async fn eight_team_two_court_tournament_runs_end_to_end() {
         .await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
     let d = ctx.detail().await;
-    let quarters: Vec<String> = (1..=4)
-        .map(|i| match_id(&d, &format!("Quarter-final {i}")))
-        .collect();
+    let quarters: Vec<String> = (1..=4).map(|i| match_id(&d, &qf(i))).collect();
     for old in &old_quarters {
         assert!(
             !has_match(&d, old),
@@ -596,11 +592,11 @@ async fn eight_team_two_court_tournament_runs_end_to_end() {
     ctx.play(qf2, Mode::CourtFinal, true).await;
     let d = ctx.detail().await;
     assert_eq!(d["kind_data"]["can_redraw"], json!(false));
-    let sf1 = match_id(&d, "Semi-final 1");
-    let ps1 = match_id(&d, "Placement semi 1 (5th–8th)");
+    let sf1 = match_id(&d, &sf(1));
+    let ps1 = match_id(&d, &ps(1));
     assert_eq!(
-        node(&d, "Semi-final 1")["teams"][0],
-        node(&d, "Quarter-final 1")["teams"][0],
+        node(&d, &sf(1))["teams"][0],
+        node(&d, &qf(1))["teams"][0],
         "side A of quarter-final 1 won"
     );
 
@@ -608,43 +604,30 @@ async fn eight_team_two_court_tournament_runs_end_to_end() {
     ctx.flip(qf1).await;
     let d = ctx.detail().await;
     assert!(held_labels(&d).is_empty(), "{:?}", held_labels(&d));
-    let (new_sf1, new_ps1) = (
-        match_id(&d, "Semi-final 1"),
-        match_id(&d, "Placement semi 1 (5th–8th)"),
-    );
+    let (new_sf1, new_ps1) = (match_id(&d, &sf(1)), match_id(&d, &ps(1)));
     assert_ne!(new_sf1, sf1);
     assert_ne!(new_ps1, ps1);
     assert!(!has_match(&d, &sf1) && !has_match(&d, &ps1));
-    let qf1_teams = &node(&d, "Quarter-final 1")["teams"];
-    assert_eq!(node(&d, "Semi-final 1")["teams"][0], qf1_teams[1]);
-    assert_eq!(
-        node(&d, "Placement semi 1 (5th–8th)")["teams"][0],
-        qf1_teams[0]
-    );
+    let qf1_teams = &node(&d, &qf(1))["teams"];
+    assert_eq!(node(&d, &sf(1))["teams"][0], qf1_teams[1]);
+    assert_eq!(node(&d, &ps(1))["teams"][0], qf1_teams[0]);
     let sf1 = new_sf1;
 
     // Quarter-finals 3 and 4; the semi-finals of the other half are made.
     ctx.play(qf3, Mode::Coordinator, true).await;
     ctx.play(qf4, Mode::Points, false).await;
     let d = ctx.detail().await;
-    let sf2 = match_id(&d, "Semi-final 2");
-    let ps2 = match_id(&d, "Placement semi 2 (5th–8th)");
+    let sf2 = match_id(&d, &sf(2));
+    let ps2 = match_id(&d, &ps(2));
 
     // Semi-final 1 and placement semi 1 are on the courts. A point on semi-final 1, then a
     // correction to quarter-final 2 that changes its winner: held, the coordinator keeps it.
     ctx.start_match(&sf1).await;
     ctx.flip(qf2).await;
     let d = ctx.detail().await;
-    assert_eq!(held_labels(&d), ["Quarter-final 2"]);
-    assert_eq!(
-        node(&d, "Quarter-final 2")["replay_discards"],
-        json!(["Semi-final 1", "Placement semi 1 (5th–8th)"])
-    );
-    assert_eq!(
-        match_id(&d, "Semi-final 1"),
-        sf1,
-        "nothing downstream changed"
-    );
+    assert_eq!(held_labels(&d), [&qf(2)]);
+    assert_eq!(node(&d, &qf(2))["replay_discards"], json!([&sf(1), &ps(1)]));
+    assert_eq!(match_id(&d, &sf(1)), sf1, "nothing downstream changed");
     let finish = format!("/api/events/{}/finish", ctx.id);
     let res = ctx.post(&finish, Some(json!({}))).await;
     assert_eq!(res.status, StatusCode::CONFLICT);
@@ -658,17 +641,17 @@ async fn eight_team_two_court_tournament_runs_end_to_end() {
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
     let d = ctx.detail().await;
     assert!(held_labels(&d).is_empty());
-    assert_eq!(match_id(&d, "Semi-final 1"), sf1, "kept as played");
+    assert_eq!(match_id(&d, &sf(1)), sf1, "kept as played");
     assert_eq!(match_in(&d, &sf1)["state"], json!("live"));
 
     // Play semi-final 1 on, then placement semi 1, which brings the other half onto the courts.
     ctx.play(&sf1, Mode::Points, true).await;
     let d = ctx.detail().await;
-    let ps1 = match_id(&d, "Placement semi 1 (5th–8th)");
+    let ps1 = match_id(&d, &ps(1));
     ctx.play(&ps1, Mode::CourtFinal, false).await;
     let d = ctx.detail().await;
-    assert_eq!(match_id(&d, "Semi-final 2"), sf2);
-    assert_eq!(match_id(&d, "Placement semi 2 (5th–8th)"), ps2);
+    assert_eq!(match_id(&d, &sf(2)), sf2);
+    assert_eq!(match_id(&d, &ps(2)), ps2);
 
     // Placement semi 2 has started; correct quarter-final 3 so its winner flips: held, replayed.
     let old_ps2_court = match_in(&d, &ps2)["court_id"].as_str().unwrap().to_owned();
@@ -680,11 +663,8 @@ async fn eight_team_two_court_tournament_runs_end_to_end() {
         .to_owned();
     ctx.flip(qf3).await;
     let d = ctx.detail().await;
-    assert_eq!(held_labels(&d), ["Quarter-final 3"]);
-    assert_eq!(
-        node(&d, "Quarter-final 3")["replay_discards"],
-        json!(["Semi-final 2", "Placement semi 2 (5th–8th)"])
-    );
+    assert_eq!(held_labels(&d), [&qf(3)]);
+    assert_eq!(node(&d, &qf(3))["replay_discards"], json!([&sf(2), &ps(2)]));
     let res = ctx
         .post(
             &format!("/api/events/{}/bracket/decisions/{qf3}", ctx.id),
@@ -696,22 +676,16 @@ async fn eight_team_two_court_tournament_runs_end_to_end() {
     assert!(held_labels(&d).is_empty());
     // The discarded matches are gone and made again with the right teams.
     assert!(!has_match(&d, &sf2) && !has_match(&d, &ps2));
-    let (new_sf2, new_ps2) = (
-        match_id(&d, "Semi-final 2"),
-        match_id(&d, "Placement semi 2 (5th–8th)"),
-    );
+    let (new_sf2, new_ps2) = (match_id(&d, &sf(2)), match_id(&d, &ps(2)));
     assert_ne!(new_sf2, sf2);
     assert_ne!(new_ps2, ps2);
-    let qf3_teams = &node(&d, "Quarter-final 3")["teams"];
+    let qf3_teams = &node(&d, &qf(3))["teams"];
     assert_eq!(
-        node(&d, "Semi-final 2")["teams"][0],
+        node(&d, &sf(2))["teams"][0],
         qf3_teams[1],
         "the corrected winner"
     );
-    assert_eq!(
-        node(&d, "Placement semi 2 (5th–8th)")["teams"][0],
-        qf3_teams[0]
-    );
+    assert_eq!(node(&d, &ps(2))["teams"][0], qf3_teams[0]);
     // The old scoring link is dead, and the court phone that showed placement semi 2 has moved
     // on to a match that exists.
     let gone = ctx

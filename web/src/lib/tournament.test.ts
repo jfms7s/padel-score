@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { strings } from './strings';
+import labelRows from './fixtures/tournament-labels.json';
 import {
 	bracketSections,
 	canFillCourts,
@@ -15,18 +16,21 @@ import {
 } from './tournament';
 import type { CourtOut, EventMatch, EventTeam, FinalScore, Score } from './types';
 
-// ---- fixtures: the JSON the server writes (crates/server .../tournament/store.rs) --------
+// ---- fixtures: the JSON the server writes (crates/server .../tournament/store.rs). ---
 
 type P = [number, number]; // [place_from, size]
 const pos = (place_from: number, size: number, idx: number) => ({ place_from, size, idx });
-const ordinal = (n: number) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
+
+/** Every label the server writes (Layout::label), checked against Rust by tournament.rs. */
+const LABELS = new Map<string, string>(
+	(labelRows as { place_from: number; size: number; idx: number; label: string }[]).map((r) => [
+		`${r.place_from},${r.size},${r.idx}`,
+		r.label
+	])
+);
 
 function labelOf([from, size]: P, idx: number): string {
-	const i = idx + 1;
-	if (from === 1) return size === 2 ? 'Final' : size === 4 ? `Semi-final ${i}` : size === 8 ? `Quarter-final ${i}` : `Round of ${size}, match ${i}`;
-	if (size <= 2) return `${ordinal(from)} place`;
-	const round = size === 4 ? 'semi' : size === 8 ? 'QF' : 'R16';
-	return `Placement ${round} ${i} (${ordinal(from)}–${ordinal(from + size - 1)})`;
+	return LABELS.get(`${from},${size},${idx}`)!;
 }
 
 /** The draws of `teams` in Layout::positions order (size descending, place_from, idx). */
