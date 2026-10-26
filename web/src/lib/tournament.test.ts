@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { strings } from './strings';
 import {
 	bracketSections,
+	canFillCourts,
+	finishBlocker,
+	heldText,
 	slotText,
 	sideScore,
 	teamCountHint,
@@ -253,5 +256,66 @@ describe('strings', () => {
 			expect(errors[code], code).toEqual(expect.any(String));
 			expect(errors[code]).not.toBe('');
 		}
+	});
+});
+
+describe('heldText', () => {
+	const held = (discards: string[] | undefined): BracketNode => {
+		const d = tournament(8, true);
+		const n = d.nodes.find((x) => x.label === 'Quarter-final 1')!;
+		n.held = true;
+		if (discards) n.replay_discards = discards;
+		return n;
+	};
+
+	it('held_warning_text', () => {
+		const d = tournament(8, true);
+		const n = held(['Semi-final 1', 'Final']);
+		const h = heldText(d, n, false);
+		expect(h.warning).toBe('Quarter-final 1’s result changed after Semi-final 1 started.');
+		expect(h.replay).toBe('Replay 2 matches: Semi-final 1, Final. Their scores are discarded.');
+		expect(h.keep).toBe('The later matches stand. The new score counts only for Quarter-final 1.');
+		expect(h.finishedNote).toBeNull();
+	});
+
+	it('held_text_for_one_match_and_none', () => {
+		const d = tournament(8, true);
+		expect(heldText(d, held(['Final']), false).replay).toBe('Replay 1 match: Final. Their scores are discarded.');
+		const none = heldText(d, held(undefined), false);
+		expect(none.replay).toBeNull();
+		expect(none.warning).toContain('a later match');
+	});
+
+	it('held_after_finish_offers_only_keep', () => {
+		const h = heldText(tournament(8, true), held(['Final']), true);
+		expect(h.replay).toBeNull();
+		expect(h.finishedNote).toBe('The event is finished, so later matches can’t be replayed.');
+	});
+});
+
+describe('finishBlocker', () => {
+	it('finish_reason', () => {
+		const d = tournament(4, false);
+		expect(finishBlocker(d)).toBe('unfinished');
+		d.places = [{ team_id: 't1', place: 1, place_to: 1 }];
+		expect(finishBlocker(d)).toBeNull();
+		d.nodes[0]!.held = true;
+		expect(finishBlocker(d)).toBe('decision');
+		d.places = null;
+		expect(finishBlocker(d)).toBe('decision');
+	});
+});
+
+describe('canFillCourts', () => {
+	const d = tournament(4, false);
+	d.nodes[0]!.match_id = 'm1';
+	const m = (state: 'waiting' | 'live' | 'finished', court_id: string | null) => [{ id: 'm1', court_id, state }];
+	const court = (current: string | null, queue: string[] = []) => ({ id: 'c1', name: 'Court 1', current, queue });
+
+	it('fill_courts_offered', () => {
+		expect(canFillCourts(d, m('waiting', null), [court(null)])).toBe(true);
+		expect(canFillCourts(d, m('waiting', null), [court('x', [])].map((c) => ({ ...c, current: 'm1' })))).toBe(false);
+		expect(canFillCourts(d, m('waiting', 'c1'), [court(null, ['m1'])])).toBe(false);
+		expect(canFillCourts(d, m('waiting', null), [])).toBe(false);
 	});
 });
