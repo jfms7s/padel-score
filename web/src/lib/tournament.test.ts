@@ -341,6 +341,8 @@ describe('final held back', () => {
 		expect(canFillCourts(d, ms, courtsOf)).toBe(false);
 		// Every other node has a match, one unfinished on no court.
 		others.slice(1).forEach((n, i) => (n.match_id = `mo${i}`));
+		// A match the list doesn't have yet blocks, as the server's LEFT JOIN does.
+		expect(whereText(fin, ms, courtsOf, d)?.text).toBe('After the other matches');
 		const all = [
 			...ms,
 			...others.slice(1).map((n, i) => ({ id: n.match_id!, court_id: null, state: i === 0 ? ('waiting' as const) : ('finished' as const) }))

@@ -104,7 +104,7 @@
 												disabled={busy !== null}
 												onclick={() => run(`replay-${matchId}`, () => decideBracket(id, matchId, 'replay'))}
 											>
-												{ev.confirm}
+												{busy === `replay-${matchId}` ? t.replaying : ev.confirm}
 											</button>
 											<button class="secondary" type="button" onclick={() => (replaying = null)}>{ev.cancel}</button>
 										</div>
