@@ -331,15 +331,15 @@ describe('levelOnPoints', () => {
 
 describe('courtLine', () => {
 	it('courtLine_text', () => {
-		expect(strings.nonStop.courtLine('Court 2', 3, 7)).toBe('Round 3 of 7, court 2');
-		expect(strings.nonStop.courtLine('Court 2', 3, 7, 1, 1)).toBe('Round 3 of 7, court 2');
+		expect(strings.nonStop.courtLine('Court 2', 3, 7)).toBe('Round 3 of 7, Court 2');
+		expect(strings.nonStop.courtLine('Court 2', 3, 7, 1, 1)).toBe('Round 3 of 7, Court 2');
 	});
 
 	it('courtLine_text_with_waves', () => {
-		expect(strings.nonStop.courtLine('Court 2', 3, 7, 2, 2)).toBe('Round 3 of 7, wave 2, court 2');
+		expect(strings.nonStop.courtLine('Court 2', 3, 7, 2, 2)).toBe('Round 3 of 7, wave 2, Court 2');
 	});
 
-	it('courtLine_keeps_a_name_without_the_court_prefix', () => {
-		expect(strings.nonStop.courtLine('Centre', 1, 7)).toBe('Round 1 of 7, court Centre');
+	it('courtLine_shows_the_name_as_given', () => {
+		expect(strings.nonStop.courtLine('Centre', 1, 7)).toBe('Round 1 of 7, Centre');
 	});
 });
