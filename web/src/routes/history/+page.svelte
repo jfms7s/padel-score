@@ -51,7 +51,7 @@
 	}
 </script>
 
-<main class="acct">
+<main class="acct page-wide">
 	<a class="back" href="/">{t.back}</a>
 	<h1>{t.title}</h1>
 	{#if loadFailure}
@@ -61,7 +61,7 @@
 		{#if items.length === 0}
 			<p class="hint">{t.empty}</p>
 		{:else}
-			<ul class="list" aria-label={t.title}>
+			<ul class="list grid-auto" style="--min: 360px" aria-label={t.title}>
 				{#each items as entry (entry.match_id)}
 					<ResultRow {entry} />
 				{/each}
@@ -85,6 +85,7 @@
 	}
 	.more {
 		width: 100%;
+		max-width: 28rem;
 		margin-top: 12px;
 	}
 	.more-error {
