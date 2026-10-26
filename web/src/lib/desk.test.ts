@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { courtTile, deskTabs, groupMatches, moveRow, nextUnfinished, resolveTab } from './desk';
+import { courtTile, deskTabs, groupMatches, isJumpKey, moveRow, nextUnfinished, resolveTab } from './desk';
 import type { EventMatch, EventTeam, FinalScore, Score } from './types';
 
 function team(id: string, name: string): EventTeam {
@@ -54,6 +54,20 @@ const final: FinalScore = {
 	overtime: false,
 	timed: false
 };
+
+describe('jump key', () => {
+	const field = { closest: (sel: string) => (sel.includes('input') ? {} : null) };
+	const base = { key: '/', ctrlKey: false, metaKey: false, altKey: false, defaultPrevented: false, target: {} as EventTarget };
+	it('takes a bare slash outside fields', () => {
+		expect(isJumpKey({ ...base, target: { closest: () => null } as unknown as EventTarget })).toBe(true);
+	});
+	it('ignores fields, modifiers, other keys and handled presses', () => {
+		expect(isJumpKey({ ...base, target: field as unknown as EventTarget })).toBe(false);
+		expect(isJumpKey({ ...base, ctrlKey: true })).toBe(false);
+		expect(isJumpKey({ ...base, key: 'a' })).toBe(false);
+		expect(isJumpKey({ ...base, defaultPrevented: true })).toBe(false);
+	});
+});
 
 describe('tabs', () => {
 	it('lists the tabs per status', () => {

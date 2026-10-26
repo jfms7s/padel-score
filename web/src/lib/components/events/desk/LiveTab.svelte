@@ -9,7 +9,7 @@
 	import CourtTile from '#lib/components/events/CourtTile.svelte';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import MatchList from '#lib/components/events/MatchList.svelte';
-	import { groupMatches } from '#lib/desk.ts';
+	import { groupMatches, isJumpKey } from '#lib/desk.ts';
 	import { teamText } from '#lib/events.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { CourtOut, EventDetail, EventMatch, TypedScore } from '#lib/types.ts';
@@ -33,6 +33,12 @@
 	} = $props();
 
 	const t = strings.desk;
+
+	/** The list that takes `/` (the one on screen). */
+	let list = $state<{ openFirst: () => boolean } | undefined>();
+	function jump(e: KeyboardEvent) {
+		if (isJumpKey(e) && list?.openFirst()) e.preventDefault();
+	}
 	const te = strings.events;
 
 	const status = $derived(detail.event.status);
@@ -87,6 +93,8 @@
 	</section>
 {/if}
 
+<svelte:window onkeydown={jump} />
+
 <div class="live">
 	{#if freeCourt}
 		{@const court = freeCourt}
@@ -109,7 +117,7 @@
 		{#if waiting.length > 0}
 			<section class="panel" aria-labelledby="h-up-next">
 				<h2 id="h-up-next">{t.upNext}</h2>
-				<MatchList matches={waiting} {courts} {teams} format={detail.event.format} mode="entry" onsave={running ? onsave : undefined} {busy} />
+				<MatchList bind:this={list} matches={waiting} {courts} {teams} format={detail.event.format} mode="entry" onsave={running ? onsave : undefined} {busy} />
 			</section>
 		{/if}
 	{:else}
@@ -121,6 +129,7 @@
 				<section class="panel" aria-labelledby="h-live-matches">
 					<h2 id="h-live-matches">{te.matches}</h2>
 					<MatchList
+						bind:this={list}
 						{matches}
 						{courts}
 						{teams}

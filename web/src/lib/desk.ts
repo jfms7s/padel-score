@@ -28,6 +28,16 @@ export function resolveTab(param: string | null, status: EventStatus): DeskTab {
 	return tab ?? defaultTab(status);
 }
 
+/**
+ * Whether a key press is the bare `/` that jumps to the first unfinished match: not typed into
+ * a field, no modifier held.
+ */
+export function isJumpKey(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'defaultPrevented'> & { target: EventTarget | null }): boolean {
+	if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return false;
+	const target = e.target as { closest?: (selector: string) => unknown } | null;
+	return !target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+}
+
 export type MatchGroups<M> = { onCourt: M[]; waiting: M[]; finished: M[] };
 
 /** Live matches and the ones a court is about to play, the waiting rest, and the finished. */

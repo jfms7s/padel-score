@@ -204,14 +204,24 @@
 		if (to !== null) rowButtons[to]?.focus();
 	}
 
+	/** Open the first unfinished row's field (the first row when all are finished). */
+	export function openFirst(): boolean {
+		if (!wide || !editable) return false;
+		const mid = nextUnfinished(rowIds, unfinished, null, true) ?? rowIds[0];
+		if (mid === undefined) return false;
+		open(mid);
+		return true;
+	}
+
 	function listKey(e: KeyboardEvent) {
 		if (e.key !== '/' || !wide || !editable) return;
 		const target = e.target as HTMLElement;
 		if (target.closest('input, textarea, select')) return;
 		e.preventDefault();
+		// On a focused row `/` opens that row; elsewhere in the list, the first unfinished.
 		const focused = rowIds.find((mid) => rowButtons[mid] === target);
-		const mid = focused ?? nextUnfinished(rowIds, unfinished, null, true) ?? rowIds[0];
-		if (mid !== undefined) open(mid);
+		if (focused !== undefined) open(focused);
+		else openFirst();
 	}
 
 	async function sheetSave(m: M, score: TypedScore) {

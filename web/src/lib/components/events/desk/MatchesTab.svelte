@@ -4,6 +4,7 @@
 -->
 <script lang="ts">
 	import MatchList from '#lib/components/events/MatchList.svelte';
+	import { isJumpKey } from '#lib/desk.ts';
 	import { teamText } from '#lib/events.ts';
 	import { MAX_NAME_LENGTH } from '#lib/setup.ts';
 	import { strings } from '#lib/strings.ts';
@@ -33,6 +34,12 @@
 	} = $props();
 
 	const t = strings.events;
+
+	/** The list that takes `/`. */
+	let list = $state<{ openFirst: () => boolean } | undefined>();
+	function jump(e: KeyboardEvent) {
+		if (isJumpKey(e) && list?.openFirst()) e.preventDefault();
+	}
 
 	const ev = $derived(detail.event);
 	const status = $derived(ev.status);
@@ -73,6 +80,8 @@
 	}
 </script>
 
+<svelte:window onkeydown={jump} />
+
 <section aria-labelledby="h-matches">
 	<h2 id="h-matches">{t.matches}</h2>
 	<div class="layout" class:with-form={running}>
@@ -82,6 +91,7 @@
 			{:else}
 				<div class="panel">
 					<MatchList
+						bind:this={list}
 						{matches}
 						{courts}
 						{teams}
