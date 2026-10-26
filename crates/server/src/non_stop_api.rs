@@ -31,7 +31,7 @@ use crate::commands::{
 };
 use crate::competitions::non_stop::clock::{
     ClockAction, any_running_non_stop_in, clear_time_up_in, due_go_in, due_slots_in, mark_done_in,
-    next_deadline_in, pending_time_up_in, went_in,
+    next_deadline_in, pending_time_up_in, system_now_ms, went_in,
 };
 use crate::competitions::view::{EventDetail, event_detail};
 use crate::results;
@@ -53,20 +53,15 @@ pub fn routes() -> Router<AppState> {
         .layer(axum::middleware::map_response(accounts::secret_headers))
 }
 
-/// The current system time in unix ms (0 before the epoch).
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
-}
-
 #[derive(Debug, Serialize)]
 struct Time {
     now_ms: i64,
 }
 
 async fn time() -> Json<Time> {
-    Json(Time { now_ms: now_ms() })
+    Json(Time {
+        now_ms: system_now_ms(),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,7 +79,7 @@ async fn clock(
     let owner = &user.user.id;
     state
         .store
-        .clock_action(owner, &id, body.action, body.slot, now_ms())
+        .clock_action(owner, &id, body.action, body.slot, system_now_ms())
         .await?;
     state.clock_wake.notify_one();
     state.hub.notify_event(&id);
@@ -239,18 +234,42 @@ async fn close_due_slots(state: &AppState, now_ms: i64) {
         }
     };
     for (event_id, slot) in due {
-        let done = async {
-            let mut tx = state.store.begin().await?;
-            mark_done_in(&mut tx, &event_id, slot, now_ms).await?;
-            tx.commit().await?;
-            Ok::<(), StoreError>(())
-        }
-        .await;
-        match done {
-            Ok(()) => state.hub.notify_event(&event_id),
+        match end_slot(&state.store, &event_id, slot, now_ms).await {
+            Ok(true) => state.hub.notify_event(&event_id),
+            Ok(false) => {}
             Err(error) => tracing::error!(event_id, slot, %error, "cannot end the non-stop slot"),
         }
     }
+}
+
+/// The end of one slot whose time is up, in one transaction: [`mark_done_in`]. Returns whether
+/// it ended; `false` (nothing written) when the slot is no longer due to end as of `now_ms` (a
+/// Pause, an End or a finish committed since it was found due): the predicate of
+/// `due_slots_in` is re-checked under the write lock, as [`go_slot`] does for the go.
+pub async fn end_slot(
+    store: &Store,
+    event_id: &str,
+    slot: u32,
+    now_ms: i64,
+) -> Result<bool, StoreError> {
+    let mut tx = store.begin().await?;
+    let due: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM non_stop_slots s JOIN competitions c ON c.id = s.event_id \
+         WHERE s.event_id = ? AND s.slot = ? AND c.status = 'running' \
+         AND s.state = 'running' AND s.ends_at_ms <= ?",
+    )
+    .bind(event_id)
+    .bind(slot)
+    .bind(now_ms)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if due.is_none() {
+        // Dropping `tx` rolls it back.
+        return Ok(false);
+    }
+    mark_done_in(&mut tx, event_id, slot, now_ms).await?;
+    tx.commit().await?;
+    Ok(true)
 }
 
 /// A flagged match that still needs its time-up: the match and its log head. `None` when it is
@@ -445,12 +464,12 @@ async fn next_wait(store: &Store, now_ms: i64) -> Result<Option<Duration>, Store
 /// non-stop event is running, and on every `clock_wake`, until shutdown.
 pub async fn run_clock(state: AppState) {
     loop {
-        let now = now_ms();
+        let now = system_now_ms();
         let applied = fire_due(&state, now).await;
         if applied > 0 {
             tracing::info!(applied, "non-stop time called");
         }
-        let wait = match next_wait(&state.store, now_ms()).await {
+        let wait = match next_wait(&state.store, system_now_ms()).await {
             Ok(wait) => wait,
             Err(error) => {
                 tracing::error!(%error, "cannot read the next non-stop deadline");

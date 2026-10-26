@@ -19,7 +19,7 @@ use padel_score_server::commands::{
 };
 use padel_score_server::competitions::non_stop::clock::{COUNT_IN_MS, ClockAction};
 use padel_score_server::competitions::{Audience, Kind, NewCompetition, competition_in, kinds};
-use padel_score_server::non_stop_api::{fire_due, go_slot, run_clock};
+use padel_score_server::non_stop_api::{end_slot, fire_due, go_slot, run_clock};
 use padel_score_server::store::{Store, events_in, match_by_id_in};
 use padel_score_server::{AppState, hub::Subscription};
 use padel_scoring::{DeuceRule, Event, FinalScore, Format, Status, Team};
@@ -769,4 +769,38 @@ async fn run_clock_wakes_on_start() {
         .await
         .unwrap()
         .unwrap();
+}
+
+#[tokio::test]
+async fn end_skips_a_slot_paused_or_ended_since_it_was_found_due() {
+    let ev = running(None).await;
+    ev.clock(ClockAction::Start, 1, T).await;
+    fire_due(&ev.state, GO).await;
+    let done_at = || async {
+        sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT done_at_ms FROM non_stop_slots WHERE event_id = ? AND slot = 1",
+        )
+        .bind(&ev.id)
+        .fetch_one(&ev.pool)
+        .await
+        .unwrap()
+    };
+    // The runner found the slot due at ENDS; a Pause committed before its end runs.
+    ev.clock(ClockAction::Pause, 1, ENDS - 1_000).await;
+    assert!(!end_slot(ev.store(), &ev.id, 1, ENDS).await.unwrap());
+    assert_eq!(ev.slot_state(1).await, "paused");
+    assert_eq!(done_at().await, None);
+
+    // Resumed with a second left: not due at ENDS + 500, due at ENDS + 1_000 + COUNT_IN_MS.
+    ev.clock(ClockAction::Resume, 1, ENDS).await;
+    assert!(!end_slot(ev.store(), &ev.id, 1, ENDS + 500).await.unwrap());
+    assert_eq!(ev.slot_state(1).await, "running");
+    let end = ENDS + 1_000 + COUNT_IN_MS;
+    assert!(end_slot(ev.store(), &ev.id, 1, end).await.unwrap());
+    assert_eq!(ev.slot_state(1).await, "done");
+    assert_eq!(done_at().await, Some(end));
+
+    // Once done (here by the runner, as by an End), a late end writes nothing.
+    assert!(!end_slot(ev.store(), &ev.id, 1, end + 5_000).await.unwrap());
+    assert_eq!(done_at().await, Some(end));
 }
