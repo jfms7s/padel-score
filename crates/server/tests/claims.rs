@@ -659,6 +659,7 @@ async fn claims_need_session() {
     let token = device_token(&w.state.store, &w.ana_id).await;
     let routes = [
         (Method::GET, format!("/api/view/{}/slots", w.token)),
+        (Method::GET, "/api/event-view/any/slots".to_owned()),
         (Method::POST, "/api/claims/preview".to_owned()),
         (Method::POST, "/api/claims".to_owned()),
         (Method::GET, "/api/claims".to_owned()),
