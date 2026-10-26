@@ -371,7 +371,8 @@ export function rulesText(format: Format): string {
 
 /** A live match's score: the sets' games (or a timed match's games), then the point. */
 export function liveScoreText(score: Score): string {
-	const games = score.sets.length > 0 ? score.sets.map((s) => `${s.a}-${s.b}`).join(' ') : `${score.games[0]}-${score.games[1]}`;
+	const games =
+		score.sets.length > 0 ? score.sets.map((s) => `${s.a}-${s.b}`).join(' ') : `${score.games[0]}-${score.games[1]}`;
 	const c = score.current;
 	if (c === 'none') return games;
 	const point = 'game' in c ? `${pointLabel(c.game.a)}-${pointLabel(c.game.b)}` : `${c.tie_break.a}-${c.tie_break.b}`;

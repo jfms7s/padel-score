@@ -79,7 +79,11 @@ function serve(status: number, body: unknown, headers: Record<string, string> = 
 	return calls;
 }
 
-const fail = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e as ApiError);
+const fail = (p: Promise<unknown>) =>
+	p.then(
+		() => null,
+		(e: unknown) => e as ApiError
+	);
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -106,7 +110,9 @@ describe('the auth client', () => {
 		expect(authMessage(taken)).toBe(strings.auth.errors.email_taken);
 
 		serve(409, setupDoneConflict);
-		expect(await fail(setup({ setup_code: 'x', email: 'a@b.test', display_name: 'A', password: '12345678' }))).toMatchObject({
+		expect(
+			await fail(setup({ setup_code: 'x', email: 'a@b.test', display_name: 'A', password: '12345678' }))
+		).toMatchObject({
 			status: 409,
 			code: 'setup_done'
 		});
@@ -170,7 +176,10 @@ describe('the auth client', () => {
 			'POST /api/device/ABCD-EFGH/deny',
 			'DELETE /api/me/devices/d1'
 		]);
-		expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ current_password: 'old-pass-1', new_password: 'new-pass-1' });
+		expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
+			current_password: 'old-pass-1',
+			new_password: 'new-pass-1'
+		});
 		expect(JSON.parse(String(calls[5]?.init?.body))).toEqual({ code: 'code', password: 'new-pass-1' });
 	});
 

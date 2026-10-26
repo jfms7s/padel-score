@@ -53,7 +53,9 @@ describe('validateFinal', () => {
 		});
 		expect(validateFinal(SETS, { sets: [] })).toEqual({ error: 'match_not_finished' });
 		const timed: Format = { timed: { deuce: 'advantage', draws_allowed: false } };
-		expect(validateFinal(timed, { timed: { a: 3, b: 3, overtime_winner: null } })).toEqual({ error: 'draw_not_allowed' });
+		expect(validateFinal(timed, { timed: { a: 3, b: 3, overtime_winner: null } })).toEqual({
+			error: 'draw_not_allowed'
+		});
 		expect(validateFinal(timed, { timed: { a: 3, b: 3, overtime_winner: 'b' } })).toEqual({ winner: 'b' });
 		expect(validateFinal(timed, { sets: [] })).toEqual({ error: 'wrong_format' });
 	});

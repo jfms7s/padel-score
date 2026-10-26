@@ -24,7 +24,10 @@ describe('fixtures match the wire types', () => {
 		expect(isMatchView((fixture('commands-409-conflict') as { view: unknown }).view, STRICT)).toBe(true);
 		expect(isMatchView(fixture('replace-200'), STRICT)).toBe(true);
 		const frame = readFileSync(new URL('./fixtures/stream-state.txt', import.meta.url), 'utf8');
-		const data = frame.split('\n').find((l) => l.startsWith('data: '))!.slice(6);
+		const data = frame
+			.split('\n')
+			.find((l) => l.startsWith('data: '))!
+			.slice(6);
 		expect(isMatchView(JSON.parse(data), STRICT)).toBe(true);
 	});
 

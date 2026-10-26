@@ -33,7 +33,9 @@ const court = (c: Clock | null, name = 'Court 1', waves = 1): CourtState => ({
 
 /** The text of the banner's HTML, tags dropped. */
 const html = (state: CourtState, viewer = false): string =>
-	render(NonStopCourtBanner, { props: { court: state, viewer } }).body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+	render(NonStopCourtBanner, { props: { court: state, viewer } })
+		.body.replace(/<[^>]*>/g, ' ')
+		.replace(/\s+/g, ' ');
 
 describe('NonStopCourtBanner', () => {
 	beforeEach(() => {
@@ -76,7 +78,9 @@ describe('NonStopCourtBanner', () => {
 
 	it('running after the go: the countdown, no status and no practice note', () => {
 		const text = html(
-			court(clock('running', { went: true, starts_at_ms: NOW - 60_000, ends_at_ms: NOW + 90_000, remaining_ms: 150_000 }))
+			court(
+				clock('running', { went: true, starts_at_ms: NOW - 60_000, ends_at_ms: NOW + 90_000, remaining_ms: 150_000 })
+			)
 		);
 		expect(text).toContain('01:30');
 		expect(text).not.toContain(t.paused);

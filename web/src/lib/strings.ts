@@ -63,10 +63,8 @@ export const strings = {
 		leadInSet: (name: string, hi: number, lo: number, set: number) =>
 			`Change ends. ${name} lead ${hi}–${lo} in set ${set}.`,
 		levelInSet: (a: number, b: number, set: number) => `Change ends. ${a}–${b} in set ${set}.`,
-		tookSet: (name: string, set: number, hi: number, lo: number) =>
-			`Change ends. ${name} took set ${set} ${hi}–${lo}.`,
-		tieBreakLead: (name: string, hi: number, lo: number) =>
-			`Change ends. ${name} lead ${hi}–${lo} in the tie-break.`,
+		tookSet: (name: string, set: number, hi: number, lo: number) => `Change ends. ${name} took set ${set} ${hi}–${lo}.`,
+		tieBreakLead: (name: string, hi: number, lo: number) => `Change ends. ${name} lead ${hi}–${lo} in the tie-break.`,
 		tieBreakLevel: (a: number, b: number) => `Change ends. ${a}–${b} in the tie-break.`,
 		lead: (name: string, hi: number, lo: number) => `Change ends. ${name} lead ${hi}–${lo}.`,
 		level: (a: number, b: number) => `Change ends. ${a}–${b}.`
@@ -119,8 +117,7 @@ export const strings = {
 		undoConflict: 'The score changed, so nothing was undone.',
 		nothingToUndo: 'Nothing to undo.',
 		failed: (message: string) => `Couldn't send that. ${message}`,
-		lockedDropped: (n: number) =>
-			`The coordinator entered the result. ${n} queued ${n === 1 ? 'tap' : 'taps'} dropped.`
+		lockedDropped: (n: number) => `The coordinator entered the result. ${n} queued ${n === 1 ? 'tap' : 'taps'} dropped.`
 	},
 
 	// Taps made offline, and the choice when the server moved meanwhile.
@@ -308,8 +305,7 @@ export const strings = {
 			last_admin: "You can't disable the last admin.",
 			device_code_used: 'This code was already used.',
 			not_found: 'Not found.',
-			tooMany: (mins: number) =>
-				`Too many attempts. Try again in ${mins === 1 ? '1 minute' : `${mins} minutes`}.`,
+			tooMany: (mins: number) => `Too many attempts. Try again in ${mins === 1 ? '1 minute' : `${mins} minutes`}.`,
 			field: {
 				email: 'Enter a valid email address.',
 				display_name: 'Enter a name of 1 to 40 characters.',
@@ -434,9 +430,15 @@ export const strings = {
 			linkedEntries: 'Linked entries',
 			linkedEntry: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
 			unlinkLabel: (name: string, coordinator: string) => `Unlink ${name} from ${coordinator}’s players`,
-			unlinkConfirm: (name: string) => `Unlink ${name}? Their matches stay in that coordinator’s history, and leave yours.`,
+			unlinkConfirm: (name: string) =>
+				`Unlink ${name}? Their matches stay in that coordinator’s history, and leave yours.`,
 			claimsTitle: 'My claims',
-			claimStatus: { pending: 'Waiting for approval', approved: 'Approved', declined: 'Declined', withdrawn: 'Withdrawn' },
+			claimStatus: {
+				pending: 'Waiting for approval',
+				approved: 'Approved',
+				declined: 'Declined',
+				withdrawn: 'Withdrawn'
+			},
 			claimLine: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
 			withdraw: 'Withdraw',
 			withdrawLabel: (name: string) => `Withdraw your claim on ${name}`,
@@ -814,7 +816,7 @@ export const strings = {
 		finishedBlocker: {
 			unfinished: 'Some matches aren’t finished yet.',
 			decision: 'A result needs your decision first.'
-		},
+		}
 	},
 
 	// Non-stop events (phase 8).

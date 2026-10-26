@@ -87,7 +87,11 @@ describe('keepAwake', () => {
 	it('retry asks again only while no lock is held', async () => {
 		const doc = fakeDoc();
 		let refuse = true;
-		const sentinels: { release: () => Promise<void>; addEventListener: (t: 'release', h: () => void) => void; fire: () => void }[] = [];
+		const sentinels: {
+			release: () => Promise<void>;
+			addEventListener: (t: 'release', h: () => void) => void;
+			fire: () => void;
+		}[] = [];
 		const request = vi.fn(async () => {
 			if (refuse) throw new DOMException('needs a gesture', 'NotAllowedError');
 			let onRelease = () => {};

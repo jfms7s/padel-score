@@ -7,8 +7,7 @@ let context: AudioContext | null = null;
 export function unlockAudio(): AudioContext | null {
 	try {
 		const Ctor =
-			globalThis.AudioContext ??
-			(globalThis as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+			globalThis.AudioContext ?? (globalThis as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
 		if (!Ctor) return null;
 		context ??= new Ctor();
 		if (context.state === 'suspended') void context.resume().catch(() => {});

@@ -101,8 +101,7 @@ const enc = encodeURIComponent;
 /** Proxy answers while the server is down or restarting. */
 const GATEWAY = new Set([502, 503, 504]);
 
-const unreachable = (status: number) =>
-	new ApiError(status, 'network', strings.networkError, true);
+const unreachable = (status: number) => new ApiError(status, 'network', strings.networkError, true);
 
 /** How long a read or a command may take before it counts as lost (and a command is resent). */
 export const REQUEST_TIMEOUT_MS = 10_000;

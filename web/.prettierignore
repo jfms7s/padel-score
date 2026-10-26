@@ -1,0 +1,12 @@
+# generated or vendored output
+src/lib/wasm/
+build/
+.svelte-kit/
+node_modules/
+coverage/
+package-lock.json
+static/
+# serde output captured from the Rust server; regenerated, not hand-formatted
+src/lib/fixtures/*.json
+# The UI revision is rewriting every page; format the .svelte files once it lands.
+*.svelte

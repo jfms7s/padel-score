@@ -306,4 +306,3 @@ export function decideBracket(id: string, matchId: string, choice: 'replay' | 'k
 export function fillCourts(id: string): Promise<EventDetail> {
 	return accountRequest(bracket(id, '/fill-courts'), { ...signedIn, method: 'POST' });
 }
-

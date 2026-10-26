@@ -96,7 +96,10 @@ describe('server time', () => {
 	it('server_clock_is_synced_once_a_sync_resolves', async () => {
 		let release!: () => void;
 		const gate = new Promise<void>((r) => (release = r));
-		const c = createServerClock(async () => (await gate, 2000), () => 0);
+		const c = createServerClock(
+			async () => (await gate, 2000),
+			() => 0
+		);
 		expect(c.synced()).toBe(false);
 		const pending = c.sync();
 		expect(c.synced()).toBe(false);
@@ -106,14 +109,20 @@ describe('server time', () => {
 		expect(c.now()).toBe(2000);
 		c.stop();
 		// A sync that got no sample still resolves: the phone's own time is all there is.
-		const down = createServerClock(async () => Promise.reject(new Error('down')), () => 5);
+		const down = createServerClock(
+			async () => Promise.reject(new Error('down')),
+			() => 5
+		);
 		await down.sync();
 		expect(down.synced()).toBe(true);
 		down.stop();
 	});
 
 	it('server_clock_survives_a_failed_sync', async () => {
-		const c = createServerClock(async () => Promise.reject(new Error('down')), () => 5);
+		const c = createServerClock(
+			async () => Promise.reject(new Error('down')),
+			() => 5
+		);
 		await c.sync();
 		expect(c.now()).toBe(5);
 		c.stop();
@@ -150,9 +159,9 @@ describe('countdown', () => {
 
 	it('paused_and_ready_show_remaining', () => {
 		for (const state of ['paused', 'ready'] as const)
-			expect(
-				remainingMs(clock({ state, remaining_ms: 402_000, starts_at_ms: null, ends_at_ms: null }), 5)
-			).toBe(402_000);
+			expect(remainingMs(clock({ state, remaining_ms: 402_000, starts_at_ms: null, ends_at_ms: null }), 5)).toBe(
+				402_000
+			);
 	});
 
 	it('done_is_zero', () => {
@@ -224,7 +233,12 @@ describe('beeps and horn', () => {
 	});
 
 	it('playHorn_never_throws', () => {
-		const ctx = { currentTime: 0, get destination(): never { throw new Error('boom'); } } as unknown as AudioContext;
+		const ctx = {
+			currentTime: 0,
+			get destination(): never {
+				throw new Error('boom');
+			}
+		} as unknown as AudioContext;
 		expect(() => playHorn(ctx)).not.toThrow();
 		expect(() => playBeep(ctx, false)).not.toThrow();
 	});
@@ -321,7 +335,15 @@ describe('placeText', () => {
 describe('levelOnPoints', () => {
 	it('marks_teams_level_on_points_even_when_places_differ', () => {
 		const row = (team_id: string, place: number, points: number): StandingRow => ({
-			team_id, place, place_to: place, played: 3, won: 0, drawn: 0, lost: 0, games_won: 0, points
+			team_id,
+			place,
+			place_to: place,
+			played: 3,
+			won: 0,
+			drawn: 0,
+			lost: 0,
+			games_won: 0,
+			points
 		});
 		const rows = [row('a', 1, 9), row('b', 2, 4), row('c', 3, 4), row('d', 4, 1)];
 		expect([...levelOnPoints(rows)].sort()).toEqual(['b', 'c']);

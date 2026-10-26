@@ -59,7 +59,11 @@ function tournament(teams: number, full: boolean): TournamentData {
 }
 
 const sizes = (d: TournamentData) =>
-	bracketSections(d).map((s) => ({ kind: s.kind, title: s.title, cols: s.columns.map((c) => [c.title, c.nodes.length]) }));
+	bracketSections(d).map((s) => ({
+		kind: s.kind,
+		title: s.title,
+		cols: s.columns.map((c) => [c.title, c.nodes.length])
+	}));
 
 describe('bracketSections', () => {
 	it('sections_for_eight_full', () => {
@@ -140,10 +144,7 @@ function eight(): TournamentData {
 	const by = (label: string) => d.nodes.find((n) => n.label === label)!;
 	by('Quarter-final 1').teams = ['t1', 't2'];
 	by('Quarter-final 2').teams = ['t3', null];
-	by('Semi-final 1').from = [
-		{ winner_of: pos(1, 8, 0) },
-		{ winner_of: pos(1, 8, 1) }
-	];
+	by('Semi-final 1').from = [{ winner_of: pos(1, 8, 0) }, { winner_of: pos(1, 8, 1) }];
 	by('Semi-final 2').from = [{ winner_of: pos(1, 8, 2) }, { winner_of: pos(1, 8, 3) }];
 	by('Placement semi 1 (5th–8th)').from = [{ loser_of: pos(1, 8, 0) }, { loser_of: pos(1, 8, 1) }];
 	return d;
@@ -164,7 +165,10 @@ describe('slotText', () => {
 			known: false
 		});
 		// Loser of a match whose teams are both known.
-		expect(slotText(d, by('Placement semi 1 (5th–8th)'), 0, teams)).toEqual({ text: 'Leo / Sara or Duarte / Rita', known: false });
+		expect(slotText(d, by('Placement semi 1 (5th–8th)'), 0, teams)).toEqual({
+			text: 'Leo / Sara or Duarte / Rita',
+			known: false
+		});
 		// No team and no source: not drawn yet.
 		expect(slotText(d, by('Quarter-final 4'), 0, teams)).toEqual({ text: strings.tournament.toBeDrawn, known: false });
 	});
@@ -218,7 +222,18 @@ describe('sideScore', () => {
 		// A timed result has no sets: the games.
 		expect(sideScore(match({ result: result([], [5, 3]) }), 'b')).toBe('3');
 		// Live: the sets so far, else the games.
-		expect(sideScore(match({ state: 'live', live: score([[6, 3], [2, 1]]) }), 'a')).toBe('6 2');
+		expect(
+			sideScore(
+				match({
+					state: 'live',
+					live: score([
+						[6, 3],
+						[2, 1]
+					])
+				}),
+				'a'
+			)
+		).toBe('6 2');
 		expect(sideScore(match({ state: 'live', live: score([], [4, 2]) }), 'b')).toBe('2');
 		expect(sideScore(match({}), 'a')).toBe('');
 	});
@@ -288,12 +303,16 @@ describe('heldText', () => {
 			{ id: 'm2', state: 'live' as const }
 		];
 		expect(heldText(d, n, false, matches).warning).toBe('Quarter-final 1’s result changed after Semi-final 1 started.');
-		expect(heldText(d, n, false, [{ id: 'm1', state: 'waiting' }]).warning).toBe('Quarter-final 1’s result changed after a later match started.');
+		expect(heldText(d, n, false, [{ id: 'm1', state: 'waiting' }]).warning).toBe(
+			'Quarter-final 1’s result changed after a later match started.'
+		);
 	});
 
 	it('held_text_for_one_match_and_none', () => {
 		const d = tournament(8, true);
-		expect(heldText(d, held(['Final']), false).replay).toBe('Replay 1 match: Final. Started matches lose their scores.');
+		expect(heldText(d, held(['Final']), false).replay).toBe(
+			'Replay 1 match: Final. Started matches lose their scores.'
+		);
 		const none = heldText(d, held(undefined), false);
 		expect(none.replay).toBeNull();
 		expect(none.warning).toBe('Quarter-final 1’s result changed after a later match started.');
@@ -342,7 +361,11 @@ describe('final held back', () => {
 		expect(whereText(fin, ms, courtsOf, d)?.text).toBe('After the other matches');
 		const all = [
 			...ms,
-			...others.slice(1).map((n, i) => ({ id: n.match_id!, court_id: null, state: i === 0 ? ('waiting' as const) : ('finished' as const) }))
+			...others.slice(1).map((n, i) => ({
+				id: n.match_id!,
+				court_id: null,
+				state: i === 0 ? ('waiting' as const) : ('finished' as const)
+			}))
 		];
 		expect(whereText(fin, all, courtsOf, d)?.text).toBe('After the other matches');
 		expect(canFillCourts(d, all, courtsOf)).toBe(true); // the waiting other match can go
@@ -363,7 +386,13 @@ describe('canFillCourts', () => {
 
 	it('fill_courts_offered', () => {
 		expect(canFillCourts(d, m('waiting', null), [court(null)])).toBe(true);
-		expect(canFillCourts(d, m('waiting', null), [court('x', [])].map((c) => ({ ...c, current: 'm1' })))).toBe(false);
+		expect(
+			canFillCourts(
+				d,
+				m('waiting', null),
+				[court('x', [])].map((c) => ({ ...c, current: 'm1' }))
+			)
+		).toBe(false);
 		expect(canFillCourts(d, m('waiting', 'c1'), [court(null, ['m1'])])).toBe(false);
 		expect(canFillCourts(d, m('waiting', null), [])).toBe(false);
 	});
