@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { approveClaim, declineClaim, linkLabel, linkMessage, listClaims, previewText } from '#lib/linking.ts';
 	import { addPlayer, listPlayers, nameKey, playerMessage, recordText, updatePlayer } from '#lib/players.ts';
 	import { MAX_NAME_LENGTH } from '#lib/setup.ts';
 	import { requireSignedIn, session } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { Player, PlayerChange } from '#lib/types.ts';
+	import type { Claim, Player, PlayerChange } from '#lib/types.ts';
 
 	const t = strings.players;
+	const l = strings.linking;
 
 	let players = $state<Player[]>([]);
 	let loaded = $state(false);
@@ -16,6 +18,12 @@
 	let failure = $state<string | null>(null);
 	let done = $state<string | null>(null);
 	let busy = $state(false);
+
+	let claims = $state<Claim[]>([]);
+	/** The claim whose Decline is waiting for a yes. */
+	let declining = $state<string | null>(null);
+	/** What went wrong with each claim, shown on its own row. */
+	let claimFailures = $state<Record<string, string>>({});
 
 	/** The player being renamed, and the name being typed. */
 	let editing = $state<string | null>(null);
@@ -35,6 +43,8 @@
 		try {
 			players = await listPlayers();
 			loaded = true;
+			// The list is usable without the claims, so a failure here is only noted.
+			claims = await listClaims().catch(() => []);
 		} catch (e) {
 			loadFailure = playerMessage(e);
 		}
@@ -83,6 +93,32 @@
 		});
 	}
 
+	/** Approve or decline, then reload the list: the entry's link and its claim count changed. */
+	async function decide(claim: Claim, approve: boolean) {
+		if (busy) return;
+		busy = true;
+		failure = null;
+		done = null;
+		declining = null;
+		const { [claim.id]: _gone, ...rest } = claimFailures;
+		claimFailures = rest;
+		try {
+			await (approve ? approveClaim(claim.id) : declineClaim(claim.id));
+			done = approve ? l.approved(claim.player.name) : l.declined;
+		} catch (e) {
+			claimFailures = { ...claimFailures, [claim.id]: linkMessage(e) };
+			// E.g. 409 `player_linked` when the entry was linked another way meanwhile: the message
+			// stays on the row, and Decline stays available.
+		}
+		try {
+			[players, claims] = await Promise.all([listPlayers(), listClaims()]);
+		} catch (e) {
+			failure = playerMessage(e);
+		} finally {
+			busy = false;
+		}
+	}
+
 	function startRename(player: Player) {
 		editing = player.id;
 		editName = player.name;
@@ -105,6 +141,12 @@
 	}
 </script>
 
+{#snippet linkInfo(player: Player)}
+	{@const label = linkLabel(player)}
+	{#if label}<span class="hint">{label}</span>{/if}
+	{#if player.pending_claims > 0}<span class="badge">{l.claimBadge(player.pending_claims)}</span>{/if}
+{/snippet}
+
 <main class="acct">
 	<a class="back" href="/">{t.back}</a>
 	<h1>{t.title}</h1>
@@ -126,6 +168,52 @@
 		</form>
 		{#if failure}<p class="error" role="alert">{failure}</p>{/if}
 		{#if done}<p class="ok" role="status">{done}</p>{/if}
+
+		{#if claims.length > 0}
+			<h2>{l.claims}</h2>
+			<p class="hint">{l.claimsHint}</p>
+			<ul class="list" aria-label={l.claims}>
+				{#each claims as claim (claim.id)}
+					<li class="row claim">
+						<div class="what">
+							<strong>{l.claimFor(claim.claimant.display_name, claim.claimant.email)}</strong>
+							<span>{l.claimOn(claim.player.name)}</span>
+							<span class="hint">{previewText(claim.preview)}</span>
+							{#if claimFailures[claim.id]}
+								<span class="error" role="alert">{claimFailures[claim.id]}</span>
+							{/if}
+						</div>
+						{#if declining === claim.id}
+							<p class="confirm">{l.declineConfirm(claim.claimant.display_name, claim.player.name)}</p>
+							<div class="actions">
+								<button class="danger" type="button" disabled={busy} onclick={() => decide(claim, false)}
+									>{l.declineYes}</button
+								>
+								<button class="secondary" type="button" onclick={() => (declining = null)}>{t.cancel}</button>
+							</div>
+						{:else}
+							<div class="actions">
+								<button
+									class="primary"
+									type="button"
+									disabled={busy}
+									aria-label={l.approveLabel(claim.claimant.display_name, claim.player.name)}
+									onclick={() => decide(claim, true)}>{l.approve}</button
+								>
+								<button
+									class="secondary"
+									type="button"
+									disabled={busy}
+									aria-label={l.declineLabel(claim.claimant.display_name, claim.player.name)}
+									onclick={() => (declining = claim.id)}>{l.decline}</button
+								>
+							</div>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+			<h2>{t.title}</h2>
+		{/if}
 
 		{#if active.length === 0}
 			<p class="hint">{t.none}</p>
@@ -153,6 +241,7 @@
 							<a class="what" href="/players/{encodeURIComponent(player.id)}" aria-label={t.openLabel(player.name)}>
 								<strong>{player.name}</strong>
 								<span class="hint">{recordText(player.record)}</span>
+								{@render linkInfo(player)}
 							</a>
 							<div class="actions">
 								<button
@@ -185,6 +274,7 @@
 						<a class="what" href="/players/{encodeURIComponent(player.id)}" aria-label={t.openLabel(player.name)}>
 							<strong>{player.name}</strong>
 							<span class="hint">{recordText(player.record)}</span>
+							{@render linkInfo(player)}
 						</a>
 						<button
 							class="secondary"
@@ -233,6 +323,22 @@
 		text-decoration: underline;
 		text-decoration-color: var(--line);
 		text-underline-offset: 3px;
+	}
+	.what .badge {
+		align-self: flex-start;
+		margin-left: 0;
+	}
+	.claim {
+		flex-wrap: wrap;
+	}
+	.claim .what {
+		flex: 1 1 14rem;
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	.claim .confirm {
+		flex: 1 1 100%;
+		margin: 0;
 	}
 	.rename {
 		flex: 1;

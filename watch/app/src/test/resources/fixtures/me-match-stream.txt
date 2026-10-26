@@ -1,0 +1,3 @@
+event: state
+data: {"id":"7b7d0a96-8f76-4dcc-bff8-1b97b81a3772","format":{"sets":{"deuce":"golden_point","sets":"best_of_3","deciding":"super_tie_break"}},"start":{"first_server":{"team":"a","index":0},"other_first_server":0},"teams":{"a":["Ana","Rui"],"b":["João","Marta"]},"revision":0,"head_seq":0,"events":[],"score":{"sets":[{"a":0,"b":0,"tiebreak":null}],"sets_won":[0,0],"games":[0,0],"regulation_games":[0,0],"current":{"game":{"a":"love","b":"love","deuces":0,"deciding_point":false}},"server":{"team":"a","index":0},"side":"right","change_ends":false,"overtime":false,"time_up":false,"status":"in_progress"}}
+

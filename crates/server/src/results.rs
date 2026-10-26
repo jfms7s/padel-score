@@ -254,11 +254,11 @@ pub struct Placing {
     pub finished_at: i64,
 }
 
-fn bad_row(msg: String) -> StoreError {
+pub(crate) fn bad_row(msg: String) -> StoreError {
     StoreError::Db(sqlx::Error::Decode(msg.into()))
 }
 
-fn parse_team(text: &str) -> Result<Team, StoreError> {
+pub(crate) fn parse_team(text: &str) -> Result<Team, StoreError> {
     match text {
         "a" => Ok(Team::A),
         "b" => Ok(Team::B),
@@ -290,10 +290,12 @@ macro_rules! event_joins {
          LEFT JOIN competitions c ON c.id = cm.event_id"
     };
 }
+pub(crate) use event_joins;
+pub(crate) use history_columns;
 
 /// Append the keyset condition (entries strictly older than `before`), the newest-first order
 /// and a `limit + 1` row limit, so the extra row tells whether there is a next page.
-fn push_page(q: &mut QueryBuilder<Sqlite>, before: Option<&Cursor>, limit: u32) {
+pub(crate) fn push_page(q: &mut QueryBuilder<Sqlite>, before: Option<&Cursor>, limit: u32) {
     if let Some(cursor) = before {
         q.push(" AND (r.finished_at, r.match_id) < (")
             .push_bind(cursor.finished_at)
@@ -305,7 +307,7 @@ fn push_page(q: &mut QueryBuilder<Sqlite>, before: Option<&Cursor>, limit: u32) 
         .push_bind(i64::from(limit) + 1);
 }
 
-fn entry_from_row(row: &SqliteRow) -> Result<HistoryEntry, StoreError> {
+pub(crate) fn entry_from_row(row: &SqliteRow) -> Result<HistoryEntry, StoreError> {
     let winner: Option<String> = row.try_get("winner")?;
     let event_id: Option<String> = row.try_get("event_id")?;
     let event = match event_id {
@@ -329,25 +331,38 @@ fn entry_from_row(row: &SqliteRow) -> Result<HistoryEntry, StoreError> {
     })
 }
 
-/// Keep `limit` rows and say where the next page starts, if there is one.
-fn split_page<T>(
+/// Keep `limit` rows and say where the next page starts, if there is one. `key` gives an item's
+/// place in the `(finished_at, match_id)` order.
+pub(crate) fn split_page<T>(
     mut items: Vec<T>,
     limit: u32,
-    key: impl Fn(&T) -> &HistoryEntry,
+    key: impl Fn(&T) -> Cursor,
 ) -> (Vec<T>, Option<Cursor>) {
     let limit = usize::try_from(limit).unwrap_or(usize::MAX);
     if items.len() <= limit {
         return (items, None);
     }
     items.truncate(limit);
-    let next = items.last().map(|item| {
-        let entry = key(item);
-        Cursor {
-            finished_at: entry.finished_at,
-            match_id: entry.match_id.clone(),
-        }
-    });
+    let next = items.last().map(key);
     (items, next)
+}
+
+impl HistoryEntry {
+    pub(crate) fn cursor(&self) -> Cursor {
+        Cursor {
+            finished_at: self.finished_at,
+            match_id: self.match_id.clone(),
+        }
+    }
+}
+
+/// How a match went for the side `side`; `winner` is `None` for a draw.
+pub(crate) fn outcome_of(winner: Option<Team>, side: Team) -> Outcome {
+    match winner {
+        None => Outcome::Draw,
+        Some(w) if w == side => Outcome::Win,
+        Some(_) => Outcome::Loss,
+    }
 }
 
 /// The record columns over `match_players mp JOIN match_results r`.
@@ -358,8 +373,9 @@ macro_rules! record_columns {
          SUM(CASE WHEN r.winner IS NULL THEN 1 ELSE 0 END) AS draws"
     };
 }
+pub(crate) use record_columns;
 
-fn record_from_row(row: &SqliteRow) -> Result<Record, StoreError> {
+pub(crate) fn record_from_row(row: &SqliteRow) -> Result<Record, StoreError> {
     Ok(Record {
         wins: count(row, "wins")?,
         losses: count(row, "losses")?,
@@ -429,7 +445,7 @@ impl Store {
             .iter()
             .map(entry_from_row)
             .collect::<Result<Vec<_>, _>>()?;
-        let (mut items, next) = split_page(items, limit, |e| e);
+        let (mut items, next) = split_page(items, limit, HistoryEntry::cursor);
         self.fill_players(&mut items.iter_mut().collect::<Vec<_>>())
             .await?;
         Ok((items, next))
@@ -467,11 +483,7 @@ impl Store {
             .map(|row| {
                 let entry = entry_from_row(row)?;
                 let side = parse_team(row.try_get::<&str, _>("side")?)?;
-                let outcome = match entry.winner {
-                    None => Outcome::Draw,
-                    Some(winner) if winner == side => Outcome::Win,
-                    Some(_) => Outcome::Loss,
-                };
+                let outcome = outcome_of(entry.winner, side);
                 Ok(PlayerHistoryEntry {
                     entry,
                     side,
@@ -479,7 +491,7 @@ impl Store {
                 })
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let (mut items, next) = split_page(items, limit, |e| &e.entry);
+        let (mut items, next) = split_page(items, limit, |e| e.entry.cursor());
         self.fill_players(&mut items.iter_mut().map(|e| &mut e.entry).collect::<Vec<_>>())
             .await?;
         Ok(Some((items, next)))
@@ -536,18 +548,18 @@ impl Store {
         .bind(owner)
         .fetch_all(self.pool())
         .await?;
-        rows.iter()
-            .map(|row| {
-                Ok(Placing {
-                    event_id: row.try_get("event_id")?,
-                    event_name: row.try_get("event_name")?,
-                    event_kind: row.try_get("event_kind")?,
-                    place: row.try_get("place")?,
-                    place_to: row.try_get("place_to")?,
-                    field_size: row.try_get("field_size")?,
-                    finished_at: row.try_get("finished_at")?,
-                })
-            })
-            .collect()
+        rows.iter().map(placing_from_row).collect()
     }
+}
+
+pub(crate) fn placing_from_row(row: &SqliteRow) -> Result<Placing, StoreError> {
+    Ok(Placing {
+        event_id: row.try_get("event_id")?,
+        event_name: row.try_get("event_name")?,
+        event_kind: row.try_get("event_kind")?,
+        place: row.try_get("place")?,
+        place_to: row.try_get("place_to")?,
+        field_size: row.try_get("field_size")?,
+        finished_at: row.try_get("finished_at")?,
+    })
 }
