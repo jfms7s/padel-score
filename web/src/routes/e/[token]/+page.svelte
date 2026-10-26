@@ -1,15 +1,19 @@
 <script lang="ts">
 	// The event for spectators: each court with its live match, the matches with their results,
 	// the final positions once finished, and the kind's own panel. Read only, from the event's
-	// viewing link; it never holds a scoring token.
+	// viewing link; it never holds a scoring token. A signed-in viewer also gets "That's me" on
+	// the teams' players, to claim their entry.
 	import { page } from '$app/state';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import { matchResultText } from '#lib/court.ts';
 	import { eventViewStreamUrl, getEventView, isEventDetail, matchText, matchViewPath, rulesText, teamText } from '#lib/events.ts';
 	import { ApiError } from '#lib/api.ts';
+	import { getEventSlots } from '#lib/linking.ts';
+	import { session } from '#lib/session.ts';
+	import ClaimSheet from '#lib/components/ClaimSheet.svelte';
 	import { openSseStream, type StreamStatus } from '#lib/stream.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { EventView, EventViewMatch } from '#lib/types.ts';
+	import type { EventSlotState, EventView, EventViewMatch } from '#lib/types.ts';
 
 	const t = strings.court;
 	const te = strings.events;
@@ -62,6 +66,34 @@
 		return () => {
 			live = false;
 			s.close();
+		};
+	});
+
+	// "That's me", only when a session is known. Signed out, or on any failure, there are no
+	// slots and the page is unchanged.
+	let slots = $state.raw<EventSlotState[]>([]);
+	let claiming = $state<EventSlotState | null>(null);
+	const signedIn = $derived($session.status === 'signed_in');
+	const claimable = $derived(slots.filter((x) => x.state !== 'linked' && x.state !== 'declined'));
+
+	async function loadSlots(tk: string, live: () => boolean) {
+		try {
+			const list = await getEventSlots(tk);
+			if (live()) slots = list;
+		} catch {
+			if (live()) slots = [];
+		}
+	}
+
+	$effect(() => {
+		const tk = token;
+		slots = [];
+		claiming = null;
+		if (!signedIn) return;
+		let live = true;
+		void loadSlots(tk, () => live);
+		return () => {
+			live = false;
 		};
 	});
 </script>
@@ -157,10 +189,50 @@
 		</section>
 
 		<KindPanel event={detail} audience="spectator" />
+
+		{#if claimable.length > 0}
+			<section aria-labelledby="h-claims">
+				<h2 id="h-claims">{strings.linking.thatsMe}</h2>
+				<ul class="list" aria-labelledby="h-claims">
+					{#each claimable as slot (`${slot.team_id}${slot.position}`)}
+						<li class="row">
+							<span class="what">
+								<strong>{slot.name}</strong>
+								<span class="hint">{teamName(slot.team_id)}</span>
+							</span>
+							<div class="actions">
+								{#if slot.state === 'claimable'}
+									<button
+										class="secondary"
+										type="button"
+										aria-label={strings.linking.thatsMeLabel(slot.name)}
+										onclick={() => (claiming = slot)}>{strings.linking.thatsMe}</button
+									>
+								{:else if slot.state === 'pending'}
+									<span class="hint">{strings.linking.claimSentShort}</span>
+								{:else if slot.state === 'yours'}
+									<span class="hint">{strings.linking.you}</span>
+								{/if}
+							</div>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 	{:else}
 		<p class="hint">{t.eventLoading}</p>
 	{/if}
 </main>
+
+{#if claiming}
+	<ClaimSheet
+		target={{ kind: 'event_team_slot', event_view_token: token, team_id: claiming.team_id, position: claiming.position }}
+		onclose={() => {
+			claiming = null;
+			void loadSlots(token, () => true);
+		}}
+	/>
+{/if}
 
 <style>
 	.head h1 {

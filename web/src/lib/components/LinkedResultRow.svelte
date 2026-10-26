@@ -22,6 +22,12 @@
 		<time datetime={new Date(entry.finished_at * 1000).toISOString()}>{shortDate(entry.finished_at)}</time>
 		<span class="outcome {entry.outcome}">{outcomeText(entry)}</span>
 	</div>
+	{#if entry.event}
+		<!-- A redacted event match keeps only its kind. -->
+		<p class="event">
+			{entry.redacted ? strings.events.kinds[entry.event.kind] : t.eventMatch(entry.event.name, entry.event.label)}
+		</p>
+	{/if}
 	{#if entry.redacted}
 		<p class="who hint">{strings.linking.anotherCoordinators}</p>
 	{:else}
@@ -48,6 +54,13 @@
 </li>
 
 <style>
+	.event {
+		margin: 0;
+		font-size: 14px;
+		font-weight: 650;
+		color: var(--muted);
+		overflow-wrap: anywhere;
+	}
 	.result {
 		display: flex;
 		flex-direction: column;
