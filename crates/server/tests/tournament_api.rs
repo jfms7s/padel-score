@@ -317,7 +317,7 @@ async fn detail_has_bracket() {
         assert_eq!(n["held"], json!(false), "{n}");
         assert!(n.get("replay_discards").is_none(), "{n}");
         let label = n["label"].as_str().unwrap();
-        if label.starts_with("Quarter-final") {
+        if (1..=4).any(|i| label == format!("Quarter-final {i}")) {
             assert!(n["match_id"].is_string(), "{n}");
             assert_eq!(n["from"], json!([null, null]), "{n}");
             assert!(

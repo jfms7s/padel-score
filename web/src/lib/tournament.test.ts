@@ -223,17 +223,10 @@ describe('sideScore', () => {
 describe('teamCountHint', () => {
 	it('team_count_hint', () => {
 		for (const n of [4, 8, 16, 32]) expect(teamCountHint(n)).toBeNull();
-		const six = teamCountHint(6)!;
-		expect(six).toContain('4');
-		expect(six).toContain('8');
-		expect(six).toBe('6 teams don’t make a bracket: add 2 teams to make 8, or remove 2 teams to make 4.');
-		const three = teamCountHint(3)!;
-		expect(three).toContain('4');
-		expect(three).not.toContain('remove');
-		const forty = teamCountHint(40)!;
-		expect(forty).toContain('32');
-		expect(forty).not.toContain('add');
-		expect(teamCountHint(7)).toContain('add 1 team to');
+		expect(teamCountHint(6)).toBe('6 teams don’t make a bracket: add 2 teams to make 8, or remove 2 teams to make 4.');
+		expect(teamCountHint(3)).toBe('3 teams don’t make a bracket: add 1 team to make 4.');
+		expect(teamCountHint(40)).toBe('40 teams don’t make a bracket: remove 8 teams to make 32.');
+		expect(teamCountHint(7)).toBe('7 teams don’t make a bracket: add 1 team to make 8, or remove 3 teams to make 4.');
 	});
 });
 
@@ -291,7 +284,7 @@ describe('heldText', () => {
 			{ id: 'm2', state: 'live' as const }
 		];
 		expect(heldText(d, n, false, matches).warning).toBe('Quarter-final 1’s result changed after Semi-final 1 started.');
-		expect(heldText(d, n, false, [{ id: 'm1', state: 'waiting' }]).warning).toContain('a later match');
+		expect(heldText(d, n, false, [{ id: 'm1', state: 'waiting' }]).warning).toBe('Quarter-final 1’s result changed after a later match started.');
 	});
 
 	it('held_text_for_one_match_and_none', () => {
@@ -299,7 +292,7 @@ describe('heldText', () => {
 		expect(heldText(d, held(['Final']), false).replay).toBe('Replay 1 match: Final. Started matches lose their scores.');
 		const none = heldText(d, held(undefined), false);
 		expect(none.replay).toBeNull();
-		expect(none.warning).toContain('a later match');
+		expect(none.warning).toBe('Quarter-final 1’s result changed after a later match started.');
 	});
 
 	it('held_after_finish_offers_only_keep', () => {
