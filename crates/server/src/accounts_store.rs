@@ -1177,7 +1177,8 @@ impl Store {
 
     /// The candidates for the user's live matches: their newest [`OWNED_MATCH_CANDIDATES`]
     /// matches by last activity, newest first, leaving out those with a `match_results` row
-    /// (every finished owned match has one). The caller still checks each candidate's status,
+    /// (every finished owned match has one) and event matches not on a court now (a queued event
+    /// match is not live). The caller still checks each candidate's status,
     /// as a match finished before the startup backfill ran has no row yet. A live match is one
     /// being scored, so it sits near the top.
     pub async fn live_matches_for_owner(
@@ -1187,6 +1188,8 @@ impl Store {
         let rows = sqlx::query(select_matches!(
             "WHERE owner_user_id = ? \
              AND NOT EXISTS (SELECT 1 FROM match_results r WHERE r.match_id = matches.id) \
+             AND (NOT EXISTS (SELECT 1 FROM competition_matches cm WHERE cm.match_id = matches.id) \
+             OR EXISTS (SELECT 1 FROM courts c WHERE c.current_match_id = matches.id)) \
              ORDER BY last_activity_at DESC, created_at DESC, rowid DESC LIMIT ?"
         ))
         .bind(user_id)

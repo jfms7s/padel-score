@@ -13,6 +13,7 @@ import type {
 	ClaimPreview,
 	ClaimTarget,
 	CreatedLinkCode,
+	EventSlotState,
 	LinkedEntry,
 	LinkedHistory,
 	MyClaim,
@@ -68,6 +69,13 @@ export function codeDeadline(expiresIn: number, receivedAt: number): number {
 export async function getSlots(spectatorToken: string): Promise<SlotState[]> {
 	// Not `signedIn`: the spectator page is public, so a 401 must never send the viewer to sign-in.
 	const list = await accountRequest<{ items: SlotState[] }>(`/api/view/${enc(spectatorToken)}/slots`);
+	return list.items;
+}
+
+/** Each team's two players on an event's viewing page, for a signed-in viewer. */
+export async function getEventSlots(eventViewToken: string): Promise<EventSlotState[]> {
+	// Not `signedIn`, as for `getSlots`: the event's viewing page is public.
+	const list = await accountRequest<{ items: EventSlotState[] }>(`/api/event-view/${enc(eventViewToken)}/slots`);
 	return list.items;
 }
 

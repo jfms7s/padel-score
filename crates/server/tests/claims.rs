@@ -10,6 +10,7 @@ mod support;
 use axum::Router;
 use axum::http::{Method, StatusCode};
 use padel_score_server::AppState;
+use padel_score_server::competitions::{Kind, NewCompetition};
 use padel_score_server::players::PlayerSlots;
 use padel_score_server::store::{NewMatch, Teams};
 use padel_scoring::{DecidingSet, DeuceRule, Format, Player, SetRules, SetsFormat, Start, Team};
@@ -658,6 +659,7 @@ async fn claims_need_session() {
     let token = device_token(&w.state.store, &w.ana_id).await;
     let routes = [
         (Method::GET, format!("/api/view/{}/slots", w.token)),
+        (Method::GET, "/api/event-view/any/slots".to_owned()),
         (Method::POST, "/api/claims/preview".to_owned()),
         (Method::POST, "/api/claims".to_owned()),
         (Method::GET, "/api/claims".to_owned()),
@@ -814,4 +816,143 @@ async fn own_pending_claim_is_approved_when_the_claimant_accepts_a_qr() {
     assert_eq!(claim["id"], id.as_str());
     assert_eq!(claim["status"], "approved");
     assert!(claim["decided_at"].as_i64().is_some());
+}
+
+/// Ana's event with teams (Rui, Sam) and (Bia, Cat): `(event view token, [team ids])`.
+async fn event_world(w: &World) -> (String, [String; 2]) {
+    let store = &w.state.store;
+    let ev = store
+        .create_competition(
+            &w.ana_id,
+            NewCompetition {
+                name: "Sunday cup".into(),
+                kind: Kind::Tournament,
+                format: format(),
+                settings: None,
+            },
+            1,
+        )
+        .await
+        .unwrap();
+    let bia = store
+        .create_or_get_player(&w.ana_id, "Bia", 1)
+        .await
+        .unwrap()
+        .0
+        .id;
+    let cat = store
+        .create_or_get_player(&w.ana_id, "Cat", 1)
+        .await
+        .unwrap()
+        .0
+        .id;
+    let t1 = store
+        .add_team(&w.ana_id, &ev.id, [w.rui.clone(), w.sam.clone()], None, 1)
+        .await
+        .unwrap();
+    let t2 = store
+        .add_team(&w.ana_id, &ev.id, [bia, cat], None, 1)
+        .await
+        .unwrap();
+    (ev.spectator_token, [t1.id, t2.id])
+}
+
+fn event_target(token: &str, team_id: &str, position: u8) -> Value {
+    json!({ "kind": "event_team_slot", "event_view_token": token, "team_id": team_id,
+            "position": position })
+}
+
+#[tokio::test]
+async fn event_slot_claim_round_trip() {
+    let w = world().await;
+    let (token, [t1, t2]) = event_world(&w).await;
+    let slots_path = format!("/api/event-view/{token}/slots");
+
+    let res = w.call(&w.r1, Method::GET, &slots_path, None).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(
+        res.body["items"],
+        json!([
+            { "team_id": t1, "position": 0, "name": "Rui", "state": "claimable" },
+            { "team_id": t1, "position": 1, "name": "Sam", "state": "claimable" },
+            { "team_id": t2, "position": 0, "name": "Bia", "state": "claimable" },
+            { "team_id": t2, "position": 1, "name": "Cat", "state": "claimable" },
+        ])
+    );
+
+    // Sam's preview counts the event, which has no placing yet.
+    let res = w
+        .call(
+            &w.r1,
+            Method::POST,
+            "/api/claims/preview",
+            Some(event_target(&token, &t1, 1)),
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.body["name"], "Sam");
+    assert_eq!(res.body["events"], 1);
+
+    let made = w
+        .call(
+            &w.r1,
+            Method::POST,
+            "/api/claims",
+            Some(event_target(&token, &t1, 1)),
+        )
+        .await;
+    assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
+    let res = w.call(&w.r1, Method::GET, &slots_path, None).await;
+    assert_eq!(res.body["items"][1]["state"], "pending");
+
+    let inbox = w.inbox().await;
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0]["player"], json!({ "id": w.sam, "name": "Sam" }));
+    let res = w.approve(&w.ana, inbox[0]["id"].as_str().unwrap()).await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+
+    let links = w.call(&w.r1, Method::GET, "/api/me/links", None).await;
+    assert_eq!(links.body["items"][0]["player_id"], w.sam.as_str());
+    let res = w.call(&w.r1, Method::GET, &slots_path, None).await;
+    assert_eq!(res.body["items"][1]["state"], "yours");
+    let res = w.call(&w.r2, Method::GET, &slots_path, None).await;
+    assert_eq!(res.body["items"][1]["state"], "linked");
+    assert_eq!(res.body["items"][0]["state"], "claimable");
+}
+
+#[tokio::test]
+async fn event_slot_targets_that_do_not_resolve_are_404() {
+    let w = world().await;
+    let (token, [t1, _]) = event_world(&w).await;
+    // A team of another event: the target must name the event the team is in.
+    let (other_token, [other_team, _]) = event_world(&w).await;
+    let bad = [
+        event_target("no-such-token", &t1, 0),
+        event_target(&token, &other_team, 0),
+        event_target(&other_token, &t1, 0),
+        event_target(&token, &t1, 2),
+        event_target(&token, "no-such-team", 0),
+    ];
+    for target in bad {
+        for path in ["/api/claims/preview", "/api/claims"] {
+            let res = w
+                .call(&w.r1, Method::POST, path, Some(target.clone()))
+                .await;
+            assert_eq!(res.status, StatusCode::NOT_FOUND, "{path} {target}");
+        }
+    }
+    let res = w
+        .call(&w.r1, Method::GET, "/api/event-view/no-such/slots", None)
+        .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    // A scoring or court token is not an event view token.
+    let res = w
+        .call(
+            &w.r1,
+            Method::GET,
+            &format!("/api/event-view/{}/slots", w.token),
+            None,
+        )
+        .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
 }

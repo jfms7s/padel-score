@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Two QR codes, "Scoring" (a second phone or a watch can keep score) and "Viewing" (read
 	// only), each with a copy-link button.
-	import QRCode from 'qrcode';
+	import QrCode from '#lib/components/QrCode.svelte';
 	import { strings } from '#lib/strings.ts';
 
 	let {
@@ -12,33 +12,8 @@
 
 	const s = strings.share;
 	let dialog: HTMLDialogElement | undefined = $state();
-	let codes = $state<{ scoring: string; viewing: string | null }>({ scoring: '', viewing: null });
 	let copied = $state<'scoring' | 'viewing' | null>(null);
 	let copyFailed = $state(false);
-
-	const svg = (text: string) =>
-		QRCode.toString(text, {
-			type: 'svg',
-			margin: 1,
-			errorCorrectionLevel: 'M',
-			color: { dark: '#0b2236', light: '#ffffff' }
-		});
-
-	$effect(() => {
-		const sc = scoring;
-		const vw = viewing;
-		let live = true;
-		void Promise.all([svg(sc), vw ? svg(vw) : Promise.resolve(null)])
-			.then(([a, b]) => {
-				if (live) codes = { scoring: a, viewing: b };
-			})
-			.catch(() => {
-				// The links below still work without the pictures.
-			});
-		return () => {
-			live = false;
-		};
-	});
 
 	$effect(() => {
 		if (!dialog) return;
@@ -69,14 +44,11 @@
 			</form>
 		</header>
 		<div class="codes">
-			{#each [{ key: 'scoring', label: s.scoring, hint: s.scoringHint, link: scoring, code: codes.scoring }, { key: 'viewing', label: s.viewing, hint: s.viewingHint, link: viewing, code: codes.viewing }] as item (item.key)}
+			{#each [{ key: 'scoring', label: s.scoring, hint: s.scoringHint, link: scoring }, { key: 'viewing', label: s.viewing, hint: s.viewingHint, link: viewing }] as item (item.key)}
 				{@const key = item.key as 'scoring' | 'viewing'}
 				<figure class="qr">
 					{#if item.link}
-						<div class="code" role="img" aria-label={s.qr(item.label)}>
-							<!-- The SVG is generated locally by the qrcode library from our own link. -->
-							{@html item.code}
-						</div>
+						<div class="code"><QrCode text={item.link} label={s.qr(item.label)} /></div>
 						<figcaption>
 							<strong>{item.label}</strong>
 							<span class="hint">{item.hint}</span>
@@ -143,17 +115,8 @@
 		background: var(--glass);
 	}
 	.code {
-		width: min(100%, 220px);
-		aspect-ratio: 1;
-		align-self: center;
-		background: #fff;
-		border-radius: 8px;
-		padding: 6px;
-	}
-	.code :global(svg) {
-		display: block;
-		width: 100%;
-		height: 100%;
+		display: flex;
+		justify-content: center;
 	}
 	figcaption {
 		display: flex;

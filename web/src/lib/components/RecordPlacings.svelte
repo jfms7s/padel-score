@@ -2,9 +2,9 @@
 	// A record as three big numbers, then any placings: the top of a player's own results and of a
 	// public profile.
 	import { strings } from '#lib/strings.ts';
-	import type { Placing, PlayerRecord } from '#lib/types.ts';
+	import type { LinkedPlacing, PlayerRecord } from '#lib/types.ts';
 
-	let { record, placings }: { record: PlayerRecord; placings: Placing[] } = $props();
+	let { record, placings }: { record: PlayerRecord; placings: LinkedPlacing[] } = $props();
 
 	const t = strings.history;
 </script>
@@ -22,8 +22,10 @@
 	<h2>{t.placings}</h2>
 	<ul class="list" aria-label={t.placings}>
 		{#each placings as p (p.event_id)}
+			{@const placing = t.placing(p.place, p.place_to, p.field_size, p.event_kind)}
 			<li class="row">
-				<span>{t.placing(p.place, p.place_to, p.field_size, p.event_kind)}</span>
+				<!-- The event's name only where the viewer may see it (their own, or this coordinator's). -->
+				<span>{p.event_name ? t.placingIn(p.event_name, placing) : placing}</span>
 				<time class="hint" datetime={new Date(p.finished_at * 1000).toISOString()}
 					>{new Date(p.finished_at * 1000).toLocaleDateString()}</time
 				>

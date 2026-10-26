@@ -118,6 +118,8 @@ export interface MatchView {
 	/** The effective events only, in seq order. */
 	events: ViewEvent[];
 	score: Score;
+	/** The coordinator typed the result: scoring links can't change it. Present only when true. */
+	locked?: boolean;
 }
 
 /** Internally tagged on `kind`. */
@@ -159,6 +161,8 @@ export interface CreatedMatch {
 /** Every non-2xx body the API sends has an `error` code. */
 export type ApiErrorBody =
 	| { error: 'conflict'; view: MatchView }
+	| { error: 'locked'; view: MatchView }
+	| { error: 'invalid_score'; reason: InvalidScore }
 	| { error: 'rejected'; kind: ErrorKind; index: number }
 	| { error: 'invalid'; message: string }
 	| { error: 'invalid_match'; message: string }
@@ -172,7 +176,8 @@ export type ApiErrorBody =
 	  }
 	| { error: 'validation'; field: string }
 	| { error: 'too_many_requests'; retry_after_secs: number }
-	| { error: AccountErrorCode };
+	| { error: AccountErrorCode }
+	| { error: EventErrorCode };
 
 // ---- accounts (crates/server/src/accounts.rs, owned.rs, device.rs) ------------------------
 
@@ -286,6 +291,8 @@ export interface MyMatch {
 	view: MatchView;
 	scorer_token?: string;
 	spectator_token?: string;
+	/** An event match on a court: where it is, e.g. "Court 1 · Sunday cup". */
+	context?: string;
 }
 
 // ---- players and history (crates/server/src/players_api.rs, results.rs) -----------------
@@ -359,6 +366,16 @@ export interface HistoryEntry {
 	score: FinalScore;
 	/** The final view is at `/v/{spectator_token}`. */
 	spectator_token: string;
+	/** Event matches only: the event it was played in. */
+	event?: EventContext;
+}
+
+/** Where an event match in history was played. */
+export interface EventContext {
+	id: string;
+	name: string;
+	kind: EventKind;
+	label: string;
 }
 
 export type Outcome = 'win' | 'loss' | 'draw';
@@ -372,7 +389,8 @@ export interface PlayerHistoryEntry extends HistoryEntry {
 /** A place in a tournament or non-stop event (phases 6-8). */
 export interface Placing {
 	event_id: string;
-	event_kind: 'tournament' | 'non_stop';
+	event_name: string;
+	event_kind: EventKind;
 	place: number;
 	/** Equal to `place` unless the place is shared (3rd-4th). */
 	place_to: number;
@@ -390,6 +408,230 @@ export interface Page<T> {
 export interface PlayerPage extends Page<PlayerHistoryEntry> {
 	player: Player;
 	placings: Placing[];
+}
+
+// ---- events (crates/server/src/events_api.rs, court_api.rs, competitions/) --------------
+
+/** The events routes' error codes (409, 410, 422 `invalid_score`). */
+export type EventErrorCode =
+	| 'already_started'
+	| 'event_started'
+	| 'event_not_running'
+	| 'event_finished'
+	| 'too_few_teams'
+	| 'no_courts'
+	| 'too_many_teams'
+	| 'too_many_courts'
+	| 'player_in_team'
+	| 'court_in_use'
+	| 'match_not_finished'
+	| 'match_finished';
+
+/**
+ * A final score typed in after the fact (the engine's `FinalScore`). A 7-6 set carries its
+ * tie-break points; a deciding super tie-break is `1-0` or `0-1` with its points in `tiebreak`.
+ * `a` and `b` of a timed score are the regulation games; `overtime_winner` only when level.
+ */
+export type TypedScore =
+	| { sets: SetScore[] }
+	| { timed: { a: number; b: number; overtime_winner: Team | null } };
+
+/** Why the engine refuses a typed score. Unit variants are strings, the others one-key objects. */
+export type InvalidScore =
+	| { invalid_rules: RulesError }
+	| 'wrong_format'
+	| { impossible_set: { index: number } }
+	| { missing_tie_break: { index: number } }
+	| 'match_not_finished'
+	| 'extra_sets'
+	| 'draw_not_allowed'
+	| 'overtime_winner_when_not_level';
+
+/** The engine's `validate_final`: the winner (null for a draw), or why the score is refused. */
+export type ValidateFinalResult = { winner: Team | null } | { error: InvalidScore };
+
+/** `POST /api/score/{token}/final`: a court phone's typed result. */
+export interface FinalRequest {
+	client_id: string;
+	base_revision: number;
+	score: TypedScore;
+}
+
+/** `POST /api/events/{id}/matches/{match_id}/result`: the coordinator's, which locks the match. */
+export interface EventResultRequest {
+	client_id: string;
+	score: TypedScore;
+}
+
+export type EventKind = 'tournament' | 'non_stop';
+export type EventStatus = 'setup' | 'running' | 'finished';
+
+/** An event as `GET /api/events` lists it, and inside every detail. Times are Unix seconds. */
+export interface EventSummary {
+	id: string;
+	name: string;
+	kind: EventKind;
+	/** A tournament plays sets, a non-stop is timed. */
+	format: Format;
+	/** Owned by the kind (phases 7 and 8); `{}` in this phase. */
+	settings: Record<string, unknown>;
+	status: EventStatus;
+	created_at: number;
+	started_at: number | null;
+	finished_at: number | null;
+	team_count: number;
+	court_count: number;
+}
+
+export interface TeamPlayer {
+	id: string;
+	name: string;
+}
+
+export interface EventTeam {
+	id: string;
+	/** The shown name: the custom name, or else "Ana / Marta" from the players' names. */
+	name: string;
+	custom_name: string | null;
+	players: [TeamPlayer, TeamPlayer];
+}
+
+export type EventMatchState = 'waiting' | 'live' | 'finished';
+
+/** An event's match as the coordinator sees it. */
+export interface EventMatch {
+	/** The match id. */
+	id: string;
+	label: string;
+	/** Creation order within the event. */
+	ordinal: number;
+	/** Team ids. */
+	team_a: string;
+	team_b: string;
+	court_id: string | null;
+	state: EventMatchState;
+	/** The coordinator typed the result. */
+	locked: boolean;
+	winner: Team | null;
+	result: FinalScore | null;
+	/** The score so far, for a live match only. */
+	live: Score | null;
+	scorer_token: string;
+	spectator_token: string;
+}
+
+/** A court as the coordinator sees it. */
+export interface CourtOut {
+	id: string;
+	name: string;
+	/** 1-based, in creation order. */
+	position: number;
+	/** The court phone's link is `/c/{scorer_token}`. */
+	scorer_token: string;
+	/** The court's viewing link is `/cv/{spectator_token}`. */
+	spectator_token: string;
+	/** Court phones connected right now. */
+	phones: number;
+	/** The match on court (a finished one stays until the court moves on). */
+	current: string | null;
+	/** Match ids waiting for this court, in order. */
+	queue: string[];
+}
+
+/** A team's final position; a shared place (3rd-4th) has `place_to > place`. */
+export interface Place {
+	team_id: string;
+	place: number;
+	place_to: number;
+}
+
+/** `GET /api/events/{id}`, and each `event` frame of its stream. */
+export interface EventDetail {
+	event: EventSummary;
+	/** The whole event's viewing link is `/e/{spectator_token}`. */
+	spectator_token: string;
+	teams: EventTeam[];
+	courts: CourtOut[];
+	matches: EventMatch[];
+	/** Filled once the event is finished. */
+	places: Place[];
+	/** The kind works out the places itself, so Finish sends none (false in this phase). */
+	places_computed: boolean;
+	/** Owned by the kind (phases 7 and 8); null in this phase. */
+	kind_data: unknown;
+}
+
+/** A match on a court, as the court phone sees it. */
+export interface CourtMatch {
+	id: string;
+	label: string;
+	teams: Teams;
+	spectator_token: string;
+	/** Only for the court's scoring link. */
+	scorer_token?: string;
+}
+
+/** `GET /api/court/{token}`, and each `court` frame of its stream. */
+export interface CourtState {
+	event: { id: string; name: string; kind: EventKind; status: EventStatus };
+	court: { id: string; name: string };
+	current: CourtMatch | null;
+	/** The next match queued for this court. */
+	next: CourtMatch | null;
+	kind_data: unknown;
+}
+
+/** An event match as a spectator sees it: no scoring link. */
+export type EventViewMatch = Omit<EventMatch, 'scorer_token'>;
+
+/** A court as a spectator sees it: no scoring link and no phone count. */
+export type EventViewCourt = Omit<CourtOut, 'scorer_token' | 'phones'>;
+
+/** `GET /api/event-view/{token}`, and each `event` frame of its stream. */
+export interface EventView extends Omit<EventDetail, 'courts' | 'matches'> {
+	courts: EventViewCourt[];
+	matches: EventViewMatch[];
+}
+
+/** `POST /api/events`. */
+export interface NewEvent {
+	name: string;
+	kind: EventKind;
+	format: Format;
+	settings?: Record<string, unknown>;
+}
+
+/** `PATCH /api/events/{id}`: any of the fields. */
+export interface EventChange {
+	name?: string;
+	format?: Format;
+	settings?: Record<string, unknown>;
+}
+
+/** `POST /api/events/{id}/teams`: two player ids, and a custom name if wanted. */
+export interface NewTeam {
+	players: [string, string];
+	name?: string;
+}
+
+/** `PATCH /api/events/{id}/teams/{team_id}`: `name: null` clears the custom name. */
+export interface TeamChange {
+	name?: string | null;
+	players?: [string, string];
+}
+
+/** `POST /api/events/{id}/matches`. */
+export interface NewEventMatch {
+	team_a: string;
+	team_b: string;
+	label?: string;
+	court_id?: string;
+}
+
+/** `PATCH /api/events/{id}/matches/{match_id}`: assign, move or take off a court (null). */
+export interface MatchChange {
+	court_id: string | null;
+	label?: string;
 }
 
 // ---- linking, claims and privacy (crates/server/src/linking_api.rs) ----------------------
@@ -421,8 +663,18 @@ export interface SlotState {
 	state: SlotStateName;
 }
 
-/** What a claim points at. */
-export type ClaimTarget = { kind: 'match_slot'; spectator_token: string; team: Team; position: number };
+/** One player of an event's team (position 0 or 1): `GET /api/event-view/{token}/slots`. */
+export interface EventSlotState {
+	team_id: string;
+	position: number;
+	name: string;
+	state: SlotStateName;
+}
+
+/** What a claim points at: a match's picked slot, or a player of an event's team. */
+export type ClaimTarget =
+	| { kind: 'match_slot'; spectator_token: string; team: Team; position: number }
+	| { kind: 'event_team_slot'; event_view_token: string; team_id: string; position: number };
 
 /** A claim as the coordinator sees it: `GET /api/claims`. */
 export interface Claim {
@@ -458,7 +710,10 @@ export interface CreatedLinkCode {
 	expires_in: number;
 }
 
-/** One match of a combined history; the redacted form has no names, coordinator or link. */
+/**
+ * One match of a combined history; the redacted form has no names, coordinator or link, and of
+ * an event match's event only the kind.
+ */
 export type LinkedEntry =
 	| {
 			match_id: string;
@@ -470,6 +725,8 @@ export type LinkedEntry =
 			teams: Record<Team, string[]>;
 			coordinator_name: string;
 			spectator_token: string;
+			/** Event matches only. */
+			event?: EventContext;
 	  }
 	| {
 			match_id: string;
@@ -478,13 +735,18 @@ export type LinkedEntry =
 			side: Team;
 			score: FinalScore;
 			redacted: true;
+			/** Event matches only: the kind, nothing else. */
+			event?: { kind: EventKind };
 	  };
+
+/** A placing in a combined history: the event's name only where the viewer may see it. */
+export type LinkedPlacing = Omit<Placing, 'event_name'> & { event_name?: string };
 
 /** `GET /api/me/results`, `/api/players/{id}/linked-history` and `/api/profiles/{token}`. */
 export interface LinkedHistory extends Page<LinkedEntry> {
 	display_name: string;
 	record: PlayerRecord;
-	placings: Placing[];
+	placings: LinkedPlacing[];
 }
 
 export type Visibility = 'private' | 'coordinators' | 'public';

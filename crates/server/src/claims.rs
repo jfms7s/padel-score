@@ -14,13 +14,19 @@ use crate::store::{Store, StoreError};
 /// How many claims one person can have waiting at once.
 pub const MAX_PENDING_CLAIMS: i64 = 20;
 
-/// What a claim points at. Seam point: events add a variant for a team slot of an event.
+/// What a claim points at: a picked slot of a match, or a player of an event's team (position 0
+/// or 1, `player1_id` or `player2_id`), found by the event's viewing token.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ClaimTarget {
     MatchSlot {
         spectator_token: String,
         team: Team,
+        position: u8,
+    },
+    EventTeamSlot {
+        event_view_token: String,
+        team_id: String,
         position: u8,
     },
 }
@@ -33,28 +39,51 @@ fn team_str(team: Team) -> &'static str {
 }
 
 /// The entry a target points at and its coordinator: `(player_id, owner_user_id)`. `None` for an
-/// unknown token, an anonymous match, a free-text slot or a slot that does not exist.
+/// unknown token, an anonymous match, a free-text slot, a team of another event or a slot that
+/// does not exist.
 pub(crate) async fn resolve_target_in(
     conn: &mut SqliteConnection,
     target: &ClaimTarget,
 ) -> Result<Option<(String, String)>, StoreError> {
-    let ClaimTarget::MatchSlot {
-        spectator_token,
-        team,
-        position,
-    } = target;
-    let row = sqlx::query(
-        "SELECT p.id, p.owner_user_id FROM matches m \
-         JOIN match_players mp ON mp.match_id = m.id \
-         JOIN players p ON p.id = mp.player_id \
-         WHERE m.spectator_token = ? AND m.owner_user_id IS NOT NULL \
-           AND mp.team = ? AND mp.position = ?",
-    )
-    .bind(spectator_token)
-    .bind(team_str(*team))
-    .bind(i64::from(*position))
-    .fetch_optional(conn)
-    .await?;
+    let row = match target {
+        ClaimTarget::MatchSlot {
+            spectator_token,
+            team,
+            position,
+        } => {
+            sqlx::query(
+                "SELECT p.id, p.owner_user_id FROM matches m \
+                 JOIN match_players mp ON mp.match_id = m.id \
+                 JOIN players p ON p.id = mp.player_id \
+                 WHERE m.spectator_token = ? AND m.owner_user_id IS NOT NULL \
+                   AND mp.team = ? AND mp.position = ?",
+            )
+            .bind(spectator_token)
+            .bind(team_str(*team))
+            .bind(i64::from(*position))
+            .fetch_optional(conn)
+            .await?
+        }
+        ClaimTarget::EventTeamSlot {
+            event_view_token,
+            team_id,
+            position,
+        } => {
+            // Position 0 is `player1_id`, 1 is `player2_id`; any other matches no player.
+            sqlx::query(
+                "SELECT p.id, p.owner_user_id FROM competitions c \
+                 JOIN competition_teams ct ON ct.event_id = c.id \
+                 JOIN players p ON p.id = CASE ?3 WHEN 0 THEN ct.player1_id \
+                   WHEN 1 THEN ct.player2_id END \
+                 WHERE c.spectator_token = ?1 AND ct.id = ?2",
+            )
+            .bind(event_view_token)
+            .bind(team_id)
+            .bind(i64::from(*position))
+            .fetch_optional(conn)
+            .await?
+        }
+    };
     row.map(|r| Ok((r.try_get("id")?, r.try_get("owner_user_id")?)))
         .transpose()
 }
@@ -70,9 +99,32 @@ pub enum SlotKind {
     Declined,
 }
 
+impl SlotKind {
+    /// The state of an entry linked to `linked` (if anyone), on which the viewer `user_id` has a
+    /// claim in status `claim` (if any).
+    fn of(linked: Option<&str>, claim: Option<&str>, user_id: &str) -> SlotKind {
+        match (linked, claim) {
+            (Some(u), _) if u == user_id => SlotKind::Yours,
+            (Some(_), _) => SlotKind::Linked,
+            (None, Some("pending")) => SlotKind::Pending,
+            (None, Some("declined")) => SlotKind::Declined,
+            _ => SlotKind::Claimable,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SlotState {
     pub team: Team,
+    pub position: u8,
+    pub name: String,
+    pub state: SlotKind,
+}
+
+/// One player of an event's team, for the signed-in viewer: [`SlotState`] with the team's id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EventSlotState {
+    pub team_id: String,
     pub position: u8,
     pub name: String,
     pub state: SlotKind,
@@ -233,13 +285,7 @@ impl Store {
         for row in &rows {
             let linked: Option<String> = row.try_get("linked_user_id")?;
             let claim: Option<String> = row.try_get("claim")?;
-            let state = match (linked.as_deref(), claim.as_deref()) {
-                (Some(u), _) if u == user_id => SlotKind::Yours,
-                (Some(_), _) => SlotKind::Linked,
-                (None, Some("pending")) => SlotKind::Pending,
-                (None, Some("declined")) => SlotKind::Declined,
-                _ => SlotKind::Claimable,
-            };
+            let state = SlotKind::of(linked.as_deref(), claim.as_deref(), user_id);
             let team = match row.try_get::<String, _>("team")?.as_str() {
                 "a" => Team::A,
                 _ => Team::B,
@@ -252,6 +298,52 @@ impl Store {
             });
         }
         Ok(Some(out))
+    }
+
+    /// One state per player of each of the event's teams, in team order, for the signed-in
+    /// viewer. `None` for an unknown event viewing token.
+    pub async fn event_slots(
+        &self,
+        event_view_token: &str,
+        user_id: &str,
+    ) -> Result<Option<Vec<EventSlotState>>, StoreError> {
+        let mut conn = self.pool().acquire().await?;
+        let found: Option<String> =
+            sqlx::query_scalar("SELECT id FROM competitions WHERE spectator_token = ?")
+                .bind(event_view_token)
+                .fetch_optional(&mut *conn)
+                .await?;
+        let Some(event_id) = found else {
+            return Ok(None);
+        };
+        let rows = sqlx::query(
+            "SELECT s.team_id, s.slot, p.name, p.linked_user_id, c.status AS claim \
+             FROM (SELECT id AS team_id, position, 0 AS slot, player1_id AS player_id \
+                     FROM competition_teams WHERE event_id = ?2 \
+                   UNION ALL SELECT id, position, 1, player2_id \
+                     FROM competition_teams WHERE event_id = ?2) s \
+             JOIN players p ON p.id = s.player_id \
+             LEFT JOIN player_claims c ON c.player_id = p.id AND c.claimant_user_id = ?1 \
+             ORDER BY s.position, s.team_id, s.slot",
+        )
+        .bind(user_id)
+        .bind(event_id)
+        .fetch_all(&mut *conn)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let linked: Option<String> = row.try_get("linked_user_id")?;
+                let claim: Option<String> = row.try_get("claim")?;
+                Ok(EventSlotState {
+                    team_id: row.try_get("team_id")?,
+                    position: u8::try_from(row.try_get::<i64, _>("slot")?).unwrap_or(0),
+                    name: row.try_get("name")?,
+                    state: SlotKind::of(linked.as_deref(), claim.as_deref(), user_id),
+                })
+            })
+            .collect::<Result<_, sqlx::Error>>()
+            .map(Some)
+            .map_err(Into::into)
     }
 
     /// What a claimant sees of the target's entry. `None` when the target does not resolve.

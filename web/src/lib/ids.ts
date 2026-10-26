@@ -36,3 +36,22 @@ export function newClientId(c: CryptoLike | undefined = globalThis.crypto): stri
 	const h = Array.from(b, hex).join('');
 	return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
+
+/**
+ * One client id per typed score while a result sheet is open: sending the same score again (its
+ * answer was lost) reuses the id, so the server answers `Replayed` instead of a conflict; a
+ * different score mints a new one. `reset()` when the sheet opens again.
+ */
+export function stickyClientId(mint: () => string = () => newClientId()) {
+	let last: { key: string; id: string } | null = null;
+	return {
+		for(score: unknown): string {
+			const key = JSON.stringify(score);
+			if (last?.key !== key) last = { key, id: mint() };
+			return last.id;
+		},
+		reset() {
+			last = null;
+		}
+	};
+}

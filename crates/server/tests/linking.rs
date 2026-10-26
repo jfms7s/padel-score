@@ -9,6 +9,7 @@ mod support;
 
 use axum::http::{Method, StatusCode};
 use padel_score_server::accounts_store::NewUser;
+use padel_score_server::competitions::{Kind, NewCompetition, TeamChange};
 use padel_score_server::db;
 use padel_score_server::linking::{ClaimPreview, preview_in};
 use padel_score_server::players::PlayerSlots;
@@ -282,6 +283,181 @@ async fn overlapping_through_an_event_cannot_both_link() {
     padel_score_server::linking::link_in(&mut tx, &other, &u, 12)
         .await
         .unwrap();
+}
+
+/// A new event of `owner`'s with one team per pair of players: the event id.
+async fn event_with_teams(s: &Store, owner: &str, teams: &[[&str; 2]]) -> String {
+    let ev = s
+        .create_competition(
+            owner,
+            NewCompetition {
+                name: "Cup".into(),
+                kind: Kind::Tournament,
+                format: format(),
+                settings: None,
+            },
+            1,
+        )
+        .await
+        .unwrap();
+    for [p1, p2] in teams {
+        s.add_team(owner, &ev.id, [(*p1).to_owned(), (*p2).to_owned()], None, 1)
+            .await
+            .unwrap();
+    }
+    ev.id
+}
+
+#[tokio::test]
+async fn overlapping_through_an_event_team_cannot_both_link() {
+    let (s, _pool) = setup().await;
+    let ana = user(&s, "ana@example.com", "Ana").await;
+    let u = user(&s, "u@example.com", "U").await;
+    let rui = player(&s, &ana, "Rui").await;
+    let rui_s = player(&s, &ana, "Rui S.").await;
+    let marta = player(&s, &ana, "Marta").await;
+    let marta_s = player(&s, &ana, "Marta S.").await;
+    let x = player(&s, &ana, "X").await;
+    let y = player(&s, &ana, "Y").await;
+    let solo = player(&s, &ana, "Solo").await;
+    // Opposing teams of one event (it has not started, so there are no placings).
+    event_with_teams(&s, &ana, &[[&rui, &x], [&rui_s, &y]]).await;
+    // Partners in one team of another event.
+    event_with_teams(&s, &ana, &[[&marta, &marta_s]]).await;
+    // A team of a third event shares nothing with the others.
+    event_with_teams(&s, &ana, &[[&solo, &x]]).await;
+    let mut tx = s.begin().await.unwrap();
+    padel_score_server::linking::link_in(&mut tx, &rui, &u, 10)
+        .await
+        .unwrap();
+    let err = padel_score_server::linking::link_in(&mut tx, &rui_s, &u, 11)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("link_overlaps")),
+        "{err:?}"
+    );
+    padel_score_server::linking::link_in(&mut tx, &marta, &u, 12)
+        .await
+        .unwrap();
+    let err = padel_score_server::linking::link_in(&mut tx, &marta_s, &u, 13)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("link_overlaps")),
+        "{err:?}"
+    );
+    padel_score_server::linking::link_in(&mut tx, &solo, &u, 14)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn linked_entries_cannot_share_an_event() {
+    let (s, _pool) = setup().await;
+    let ana = user(&s, "ana@example.com", "Ana").await;
+    let u = user(&s, "u@example.com", "U").await;
+    let v = user(&s, "v@example.com", "V").await;
+    let rui = player(&s, &ana, "Rui").await;
+    let rui_s = player(&s, &ana, "Rui S.").await;
+    let vic = player(&s, &ana, "Vic").await;
+    let x = player(&s, &ana, "X").await;
+    let y = player(&s, &ana, "Y").await;
+    let z = player(&s, &ana, "Z").await;
+    let mut tx = s.begin().await.unwrap();
+    for (p, who) in [(&rui, &u), (&rui_s, &u), (&vic, &v)] {
+        padel_score_server::linking::link_in(&mut tx, p, who, 10)
+            .await
+            .unwrap();
+    }
+    tx.commit().await.unwrap();
+    let ev = event_with_teams(&s, &ana, &[]).await;
+    let conflict = |r: Result<_, StoreError>| match r {
+        Err(StoreError::Conflict("player_in_team")) => {}
+        other => panic!("{other:?}"),
+    };
+
+    // One team: two entries of U.
+    conflict(
+        s.add_team(&ana, &ev, [rui.clone(), rui_s.clone()], None, 1)
+            .await,
+    );
+    // Opposing teams: U's other entry is already in this event.
+    let t1 = s
+        .add_team(&ana, &ev, [rui.clone(), x.clone()], None, 1)
+        .await
+        .unwrap();
+    conflict(
+        s.add_team(&ana, &ev, [rui_s.clone(), y.clone()], None, 1)
+            .await,
+    );
+    // Linked to different users, or unlinked: allowed.
+    let t2 = s
+        .add_team(&ana, &ev, [vic.clone(), y.clone()], None, 1)
+        .await
+        .unwrap();
+    // Re-pairing: into U's other entry is refused, its own team excepted.
+    conflict(
+        s.update_team(
+            &ana,
+            &ev,
+            &t2.id,
+            TeamChange {
+                name: None,
+                players: Some([rui_s.clone(), y.clone()]),
+            },
+        )
+        .await,
+    );
+    s.update_team(
+        &ana,
+        &ev,
+        &t1.id,
+        TeamChange {
+            name: None,
+            players: Some([rui.clone(), z.clone()]),
+        },
+    )
+    .await
+    .unwrap();
+    // Another event is a different event.
+    let other = event_with_teams(&s, &ana, &[]).await;
+    s.add_team(&ana, &other, [rui_s.clone(), x.clone()], None, 1)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn preview_counts_events_from_teams_once() {
+    let (s, pool) = setup().await;
+    let ana = user(&s, "ana@example.com", "Ana").await;
+    let rui = player(&s, &ana, "Rui").await;
+    let x = player(&s, &ana, "X").await;
+    // A running event: a team, no placing yet.
+    let running = event_with_teams(&s, &ana, &[[&rui, &x]]).await;
+    sqlx::query("UPDATE competitions SET status = 'running', started_at = 400 WHERE id = ?")
+        .bind(&running)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let p = preview(&pool, &rui).await.unwrap();
+    assert_eq!((p.matches, p.events), (0, 1));
+    assert_eq!((p.first_at, p.last_at), (Some(400), Some(400)));
+
+    // A finished event: its team and its placing are one event.
+    let finished = event_with_teams(&s, &ana, &[[&x, &rui]]).await;
+    sqlx::query(
+        "UPDATE competitions SET status = 'finished', started_at = 100, finished_at = 200 \
+         WHERE id = ?",
+    )
+    .bind(&finished)
+    .execute(&pool)
+    .await
+    .unwrap();
+    placing(&pool, &rui, &finished, 200).await;
+    let p = preview(&pool, &rui).await.unwrap();
+    assert_eq!((p.matches, p.events), (0, 2));
+    assert_eq!((p.first_at, p.last_at), (Some(100), Some(400)));
 }
 
 #[tokio::test]

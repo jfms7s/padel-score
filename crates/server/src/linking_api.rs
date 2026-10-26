@@ -14,6 +14,10 @@
 //! Claims (see [`crate::claims`]), all for a session user:
 //!
 //! - `GET /api/view/{token}/slots` is `{items: [SlotState]}`, or 404 for an unknown token.
+//! - `GET /api/event-view/{token}/slots` is `{items: [EventSlotState]}` (each team's two players,
+//!   `position` 0 and 1), or 404 for an unknown event viewing token.
+//! - A `ClaimTarget` is `{kind: "match_slot", spectator_token, team, position}` or
+//!   `{kind: "event_team_slot", event_view_token, team_id, position}`.
 //! - `POST /api/claims/preview` `ClaimTarget` is the `ClaimPreview`, or 404 `not_found`.
 //! - `POST /api/claims` `ClaimTarget` is 201 `MyClaim` (a new or re-opened claim), 200 (a
 //!   pending one that already existed, or the coordinator's own, linked at once), 404, or 409
@@ -52,12 +56,12 @@ use crate::AppState;
 use crate::accounts::{self, fragment_url};
 use crate::api::{ApiError, ApiJson, ApiPath, now};
 use crate::auth::SessionUser;
-use crate::claims::{Claim, ClaimTarget, MyClaim, SlotState};
-use crate::linked_history::LinkedEntry;
+use crate::claims::{Claim, ClaimTarget, EventSlotState, MyClaim, SlotState};
+use crate::linked_history::{LinkedEntry, LinkedPlacing};
 use crate::linking::{ClaimPreview, MyLink};
 use crate::players_api::{Page, PageQuery, page_of};
-use crate::privacy::{Viewer, Visibility, redact, viewer_of};
-use crate::results::{Placing, Record};
+use crate::privacy::{Viewer, Visibility, redact, redact_placing, viewer_of};
+use crate::results::Record;
 
 /// Where the PWA's link page lives; the code follows in the fragment.
 const LINK_PAGE: &str = "/link-player";
@@ -72,6 +76,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/link-codes/lookup", post(lookup))
         .route("/api/link-codes/accept", post(accept))
         .route("/api/view/{token}/slots", get(slots))
+        .route("/api/event-view/{token}/slots", get(event_slots))
         .route("/api/claims/preview", post(claim_preview))
         .route("/api/claims", get(incoming).post(create_claim))
         .route("/api/claims/{id}/approve", post(approve))
@@ -188,6 +193,19 @@ async fn slots(
     Ok(Json(Items { items }))
 }
 
+async fn event_slots(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath(token): ApiPath<String>,
+) -> Result<Json<Items<EventSlotState>>, ApiError> {
+    let items = state
+        .store
+        .event_slots(&token, &user.user.id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    Ok(Json(Items { items }))
+}
+
 async fn claim_preview(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
@@ -287,7 +305,7 @@ async fn unlink_self(
 struct LinkedHistory {
     display_name: String,
     record: Record,
-    placings: Vec<Placing>,
+    placings: Vec<LinkedPlacing>,
     items: Vec<LinkedEntry>,
     next: Option<String>,
 }
@@ -307,7 +325,13 @@ async fn history_for(
     Ok(LinkedHistory {
         display_name,
         record: state.store.linked_record(subject).await?,
-        placings: state.store.linked_placings(subject).await?,
+        placings: state
+            .store
+            .linked_placings(subject)
+            .await?
+            .into_iter()
+            .map(|p| redact_placing(p, viewer))
+            .collect(),
         items: items.into_iter().map(|e| redact(e, viewer)).collect(),
         next: next.map(|c| c.to_string()),
     })

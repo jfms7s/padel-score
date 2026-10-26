@@ -11,6 +11,10 @@
 // someone picks one. "Keep this phone's score" replaces the server's events so it ends at
 // exactly the score the sheet showed for this phone.
 //
+// Once the coordinator types the result, the match is locked to scoring links: any send answered
+// 409 locked drops every tap still waiting here (they can't apply), takes the server's view and
+// says how many went. It never opens the choice: the coordinator's result is the score.
+//
 // Everything here is kept in the store under `padel-score:queue:{token}` after every change, so
 // a reload loses nothing: a request already out is resent with its client_id.
 
@@ -53,6 +57,8 @@ export type DropReason =
 	| { kind: 'cancelled' }
 	/** More taps queued offline than one request can carry. */
 	| { kind: 'full' }
+	/** The coordinator entered the result: this tap and the `count` waiting with it (all). */
+	| { kind: 'locked'; count: number }
 	| { kind: 'failed'; message: string };
 
 export interface Dropped {
@@ -96,6 +102,8 @@ export type FlushOutcome =
 	| { status: 'applied' }
 	| { status: 'conflict'; conflict: Conflict }
 	| { status: 'rejected'; problem: Problem }
+	/** The coordinator entered the result: the queue was dropped. */
+	| { status: 'locked' }
 	/** It didn't reach the server; it is being retried. */
 	| { status: 'offline' };
 
@@ -336,6 +344,25 @@ function load(storage: StorageLike, key: string): Loaded {
 		// Unreadable: discarded below.
 	}
 	return { kind: 'discarded' };
+}
+
+/**
+ * The taps a stopped queue left in `storage` for `token`, whose match has left this court (its
+ * old scorer token now answers 404, so they can never be sent). Removes them and returns how
+ * many there were: live ones never answered and queued ones. 0 when nothing (or nothing
+ * readable) was stored, or the store can't be read. Never throws.
+ */
+export function takeAbandoned(storage: StorageLike, token: string): number {
+	const key = queueKey(token);
+	const loaded = load(storage, key);
+	if (loaded.kind === 'none') return 0;
+	try {
+		storage.removeItem(key);
+	} catch {
+		// Blocked: nothing to report either way.
+		return 0;
+	}
+	return loaded.kind === 'ok' ? loaded.value.jobs.length + loaded.value.queued.length : 0;
 }
 
 // ---- the queue ---------------------------------------------------------------------------
@@ -700,6 +727,8 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		attempt = 0;
 		online = true;
 		switch (out.status) {
+			case 'locked':
+				return lockedOut(out.view);
 			case 'applied': {
 				const view = out.view;
 				host.onView(view);
@@ -825,6 +854,8 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		attempt = 0;
 		online = true;
 		switch (out.status) {
+			case 'locked':
+				return lockedOut(out.view);
 			case 'applied': {
 				host.onView(out.view);
 				queued.splice(0, o.count);
@@ -852,6 +883,32 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 			case 'rejected':
 				return stuck({ kind: 'rejected', error: out.kind });
 		}
+	}
+
+	/**
+	 * The match is locked (the coordinator typed the result): no tap here can apply. Drop them
+	 * all, live and queued, and report them as one; the server's view is the score.
+	 */
+	function lockedOut(view: MatchView) {
+		const all = [...jobs.map((j) => j.intent), ...queued.map((q) => q.intent)];
+		jobs = [];
+		queued = [];
+		carried = [];
+		base = null;
+		outstanding = null;
+		conflictView = null;
+		problem = null;
+		online = true;
+		mode = 'live';
+		if (retry !== null) {
+			host.clearTimeout(retry);
+			retry = null;
+		}
+		host.onView(view);
+		const first = all[0];
+		if (first) host.onDropped({ intent: first, reason: { kind: 'locked', count: all.length } });
+		changed();
+		resolve({ status: 'locked' });
 	}
 
 	/** The server won't take the queue as it stands. It stays, for the scorer to change or drop. */
@@ -969,6 +1026,11 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 			const done = wait();
 			void pump();
 			return done;
+		},
+		/** A typed final score was answered 409 locked: drop the taps as a locked send does. */
+		locked(view: MatchView) {
+			if (stopped) return;
+			lockedOut(view);
 		},
 		/** A stuck queue: drop the taps. */
 		discard() {

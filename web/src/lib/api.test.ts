@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, createMatch, getScore, getView, postCommands, replace, REQUEST_TIMEOUT_MS, streamUrl } from './api';
+import {
+	ApiError,
+	courtUrl,
+	createMatch,
+	getScore,
+	getView,
+	postCommands,
+	postFinal,
+	putStart,
+	replace,
+	REQUEST_TIMEOUT_MS,
+	streamUrl
+} from './api';
 import type { CommandRequest } from './types';
 import { asView } from './fixtures/load';
 import created from './fixtures/create-response.json';
@@ -211,5 +223,52 @@ describe('api', () => {
 	it('builds the stream URLs', () => {
 		expect(streamUrl('score', 'a b')).toBe('/api/score/a%20b/stream');
 		expect(streamUrl('view', 't')).toBe('/api/view/t/stream');
+	});
+});
+
+describe('typed results and the serve choice', () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const v = asView(view);
+	const FINAL = { client_id: 'f1', base_revision: 3, score: { sets: [{ a: 6, b: 4, tiebreak: null }] } };
+	const START = { first_server: { team: 'b' as const, index: 1 }, other_first_server: 0 };
+
+	it('postFinal sends the typed score and reads every answer', async () => {
+		const calls = serve(200, v);
+		await expect(postFinal('t/1', FINAL)).resolves.toEqual({ status: 'applied', view: v });
+		expect(calls[0]!.url).toBe('/api/score/t%2F1/final');
+		expect(calls[0]!.init?.method).toBe('POST');
+		expect(JSON.parse(calls[0]!.init?.body as string)).toEqual(FINAL);
+		serve(409, { error: 'conflict', view: v });
+		await expect(postFinal('t', FINAL)).resolves.toEqual({ status: 'conflict', view: v });
+		serve(409, { error: 'locked', view: { ...v, locked: true } });
+		await expect(postFinal('t', FINAL)).resolves.toEqual({ status: 'locked', view: { ...v, locked: true } });
+		serve(422, { error: 'invalid_score', reason: 'match_not_finished' });
+		await expect(postFinal('t', FINAL)).resolves.toEqual({ status: 'invalid_score', reason: 'match_not_finished' });
+		serve(503, {});
+		await expect(postFinal('t', FINAL)).rejects.toMatchObject({ code: 'network', retryable: true });
+	});
+
+	it('a locked command is an answer too', async () => {
+		serve(409, { error: 'locked', view: { ...v, locked: true } });
+		await expect(postCommands('t', REQ)).resolves.toEqual({ status: 'locked', view: { ...v, locked: true } });
+	});
+
+	it('putStart sends the start and reads locked and already started', async () => {
+		const calls = serve(200, v);
+		await expect(putStart('t', START)).resolves.toEqual({ status: 'applied', view: v });
+		expect(calls[0]!.url).toBe('/api/score/t/start');
+		expect(calls[0]!.init?.method).toBe('PUT');
+		expect(JSON.parse(calls[0]!.init?.body as string)).toEqual({ start: START });
+		serve(409, { error: 'locked', view: v });
+		await expect(putStart('t', START)).resolves.toEqual({ status: 'locked', view: v });
+		serve(409, { error: 'already_started' });
+		const err = await putStart('t', START).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(ApiError);
+		expect(err).toMatchObject({ status: 409, code: 'already_started' });
+	});
+
+	it('courtUrl', () => {
+		expect(courtUrl('a b')).toBe('/api/court/a%20b');
+		expect(courtUrl('t', '/advance')).toBe('/api/court/t/advance');
 	});
 });

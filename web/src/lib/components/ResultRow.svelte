@@ -1,6 +1,7 @@
 <script lang="ts">
-	// One finished match in a list (history, a player's page): the date, both teams with the
-	// winner in bold and picked players linked to their page, the score, and the final view.
+	// One finished match in a list (history, a player's page): the date, the event and match
+	// label for an event match, both teams with the winner in bold and picked players linked to
+	// their page, the score, and the final view.
 	import { shortDate } from '#lib/auth.ts';
 	import { scoreText } from '#lib/players.ts';
 	import { strings } from '#lib/strings.ts';
@@ -22,6 +23,7 @@
 			<span class="outcome draw">{t.draw}</span>
 		{/if}
 	</div>
+	{#if entry.event}<p class="event">{t.eventMatch(entry.event.name, entry.event.label)}</p>{/if}
 	<div class="teams">
 		{#each TEAMS as team (team)}
 			<p class="team" class:won={entry.winner === team}>
@@ -89,6 +91,13 @@
 	.outcome.draw {
 		background: var(--a-soft);
 		color: var(--ink);
+	}
+	.event {
+		margin: 0;
+		font-size: 14px;
+		font-weight: 650;
+		color: var(--muted);
+		overflow-wrap: anywhere;
 	}
 	.teams {
 		display: flex;

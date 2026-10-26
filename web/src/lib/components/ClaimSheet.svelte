@@ -1,11 +1,12 @@
 <script lang="ts">
-	// "That's me" on a match: what the entry is (name, coordinator, how many matches, no scores),
-	// then "Send claim". The coordinator has to approve before anything is linked.
+	// "That's me" on a match or an event's team: what the entry is (name, coordinator, how many
+	// matches, no scores), then "Send claim". The coordinator has to approve before anything is
+	// linked.
 	import { createClaim, linkMessage, previewClaim, previewText } from '#lib/linking.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { ClaimPreview, SlotState } from '#lib/types.ts';
+	import type { ClaimPreview, ClaimTarget } from '#lib/types.ts';
 
-	let { token, slot, onclose }: { token: string; slot: SlotState; onclose: (sent: boolean) => void } = $props();
+	let { target, onclose }: { target: ClaimTarget; onclose: (sent: boolean) => void } = $props();
 
 	const s = strings.linking.sheet;
 	let dialog: HTMLDialogElement | undefined = $state();
@@ -14,20 +15,13 @@
 	let done = $state<string | null>(null);
 	let busy = $state(false);
 
-	const target = () => ({
-		kind: 'match_slot' as const,
-		spectator_token: token,
-		team: slot.team,
-		position: slot.position
-	});
-
 	$effect(() => {
 		dialog?.showModal();
 	});
 
 	$effect(() => {
 		let live = true;
-		previewClaim(target()).then(
+		previewClaim(target).then(
 			(p) => {
 				if (live) preview = p;
 			},
@@ -45,7 +39,7 @@
 		busy = true;
 		failure = null;
 		try {
-			const claim = await createClaim(target());
+			const claim = await createClaim(target);
 			done = claim.status === 'approved' ? s.linked : s.sent(preview.coordinator_name);
 		} catch (e) {
 			failure = linkMessage(e);

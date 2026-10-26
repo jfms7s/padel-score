@@ -12,8 +12,8 @@
 		void bootSession();
 	});
 
-	// The fence and spectator screens are full-screen and anonymous-friendly: no header there.
-	const bare = $derived(/^\/(s|v)\//.test(page.url.pathname));
+	// The fence, court and spectator screens are full-screen and anonymous-friendly: no header there.
+	const bare = $derived(/^\/(s|v|c|cv)\//.test(page.url.pathname));
 	const onLogin = $derived(page.url.pathname === '/login');
 </script>
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { newClientId } from './ids';
+import { newClientId, stickyClientId } from './ids';
 
 const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -34,5 +34,22 @@ describe('newClientId', () => {
 			getRandomValues: <T extends ArrayBufferView>(a: T) => crypto.getRandomValues(a as never) as T
 		});
 		expect(id).toMatch(V4);
+	});
+});
+
+describe('stickyClientId', () => {
+	it('typed_result_retry_reuses_client_id', () => {
+		let n = 0;
+		const ids = stickyClientId(() => `id-${++n}`);
+		const six = { sets: [{ a: 6, b: 4, tiebreak: null }] };
+		// A retry of the same score (its answer was lost) is the same request.
+		expect(ids.for(six)).toBe('id-1');
+		expect(ids.for({ sets: [{ a: 6, b: 4, tiebreak: null }] })).toBe('id-1');
+		// A changed score is a new request; going back to the first one is new again.
+		expect(ids.for({ sets: [{ a: 6, b: 3, tiebreak: null }] })).toBe('id-2');
+		expect(ids.for(six)).toBe('id-3');
+		// Reopening the sheet starts over.
+		ids.reset();
+		expect(ids.for(six)).toBe('id-4');
 	});
 });

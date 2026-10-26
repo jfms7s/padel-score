@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
-use crate::store::{MAX_NAME_CHARS, Store, StoreError, Teams};
+use padel_scoring::Team;
+
+use crate::store::{MAX_NAME_CHARS, Store, StoreError, Teams, Tx};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Player {
@@ -43,7 +45,7 @@ pub(crate) async fn resolve_slots_in(
     owner: Option<&str>,
     slots: &PlayerSlots,
     teams: &mut Teams,
-) -> Result<Vec<(&'static str, i64, String)>, StoreError> {
+) -> Result<Vec<(Team, u8, String)>, StoreError> {
     if slots.is_empty() {
         return Ok(Vec::new());
     }
@@ -52,9 +54,12 @@ pub(crate) async fn resolve_slots_in(
     };
     let mut picked = Vec::new();
     let mut accounts: Vec<String> = Vec::new();
-    let sides = [("a", &slots.a, &mut teams.a), ("b", &slots.b, &mut teams.b)];
+    let sides = [
+        (Team::A, &slots.a, &mut teams.a),
+        (Team::B, &slots.b, &mut teams.b),
+    ];
     for (team, ids, names) in sides {
-        for (position, (id, name)) in ids.iter().zip(names.iter_mut()).enumerate() {
+        for (position, (id, name)) in (0u8..).zip(ids.iter().zip(names.iter_mut())) {
             let Some(id) = id else { continue };
             let (player, linked) = linked_player_in(conn, owner, id)
                 .await?
@@ -71,10 +76,35 @@ pub(crate) async fn resolve_slots_in(
                 accounts.push(user);
             }
             *name = player.name;
-            picked.push((team, position as i64, player.id));
+            picked.push((team, position, player.id));
         }
     }
     Ok(picked)
+}
+
+/// Insert the `match_players` rows `(team, position, player id)` of a new match. The players
+/// are not checked here: the caller has done that.
+pub async fn insert_match_players_in(
+    tx: &mut Tx<'_>,
+    match_id: &str,
+    rows: &[(Team, u8, &str)],
+) -> Result<(), StoreError> {
+    for (team, position, player_id) in rows {
+        let team = match team {
+            Team::A => "a",
+            Team::B => "b",
+        };
+        sqlx::query(
+            "INSERT INTO match_players (match_id, team, position, player_id) VALUES (?, ?, ?, ?)",
+        )
+        .bind(match_id)
+        .bind(team)
+        .bind(i64::from(*position))
+        .bind(player_id)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }
 
 /// Trim a player name; blank or over 40 chars (not bytes) is `InvalidPlayerName`.
@@ -110,7 +140,7 @@ fn player_from_row(row: &SqliteRow) -> Result<Player, sqlx::Error> {
     })
 }
 
-async fn player_in(
+pub(crate) async fn player_in(
     conn: &mut SqliteConnection,
     owner: &str,
     id: &str,

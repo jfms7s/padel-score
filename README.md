@@ -69,6 +69,17 @@ Environment variables:
 | `PUBLIC_ORIGIN` | unset | The public URL, e.g. `https://padel.example.com`, no trailing slash. The CSRF check compares a request's `Origin` with it. Unset: it compares the `Origin` host with `Host`. |
 | `SETUP_TOKEN` | unset | The setup code for the first admin. Unset: a random one-time code is logged. |
 
+## Events
+
+Signed in, you can also run an event (`/events`): a tournament or a non-stop, with its own teams, courts and results.
+
+- **Teams and courts**: pick two of your players per team (a player is in one team per event), and add courts. Each court has two QR codes: one to score, one to watch.
+- **Court phones** (`/c/{token}`): one phone at each court's fence scores every match on that court. Tap Join, choose who serves, then score as usual; offline taps queue as on any scoring link. When a match ends, its score stays on screen with a "Next match" button. A final score can also be typed (`6-4`, `7-6(5)`).
+- **Coordinator**: create matches, put them on courts or queue them, type any match's result (which then wins over the court phone), give a court a new scoring code, and finish the event by putting the teams in order (ties allowed). Finishing records each player's placing.
+- **Watching** (`/cv/{token}` for one court, `/e/{token}` for the whole event): live scores, results and final positions, with no account and no way to change a score.
+
+Event matches show in history and on player pages as "Sunday cup · Match 1".
+
 ## Watch app
 
 `watch/` is a Wear OS 3+ app (built for a Galaxy Watch) that scores a match from the wrist. Pick a live match, tap a half of the screen to give that side the point, and hold Undo to take one back. It signs in with a code, so no password is typed on the watch.

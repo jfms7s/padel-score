@@ -43,8 +43,10 @@ pub struct ClaimPreview {
 }
 
 /// The entry's name, its coordinator's name and how often it appears. The one place that counts
-/// appearances: finished matches (`match_players` joined to `match_results`) and events
-/// (distinct `placings.event_id`); the dates are the earliest and latest `finished_at` of both.
+/// appearances: finished matches (`match_players` joined to `match_results`) and events (the
+/// distinct events of its `placings` and of the `competition_teams` that name it, so an event
+/// still running counts too). The dates are the earliest and latest of the matches'
+/// `finished_at`, the placings' `finished_at` and those events' `started_at`/`finished_at`.
 /// An unknown entry is `NotFound`.
 pub async fn preview_in(
     conn: &mut SqliteConnection,
@@ -62,11 +64,20 @@ pub async fn preview_in(
         "SELECT \
            (SELECT COUNT(*) FROM match_players mp JOIN match_results r ON r.match_id = mp.match_id \
               WHERE mp.player_id = ?1) AS matches, \
-           (SELECT COUNT(DISTINCT event_id) FROM placings WHERE player_id = ?1) AS events, \
+           (SELECT COUNT(*) FROM ( \
+              SELECT event_id FROM placings WHERE player_id = ?1 \
+              UNION SELECT event_id FROM competition_teams \
+                WHERE player1_id = ?1 OR player2_id = ?1)) AS events, \
            MIN(at) AS first_at, MAX(at) AS last_at \
          FROM (SELECT r.finished_at AS at FROM match_players mp \
                  JOIN match_results r ON r.match_id = mp.match_id WHERE mp.player_id = ?1 \
-               UNION ALL SELECT finished_at FROM placings WHERE player_id = ?1)",
+               UNION ALL SELECT finished_at FROM placings WHERE player_id = ?1 \
+               UNION ALL SELECT c.started_at FROM competitions c \
+                 JOIN competition_teams ct ON ct.event_id = c.id \
+                 WHERE ct.player1_id = ?1 OR ct.player2_id = ?1 \
+               UNION ALL SELECT c.finished_at FROM competitions c \
+                 JOIN competition_teams ct ON ct.event_id = c.id \
+                 WHERE ct.player1_id = ?1 OR ct.player2_id = ?1)",
     )
     .bind(player_id)
     .fetch_one(&mut *conn)
@@ -83,9 +94,9 @@ pub async fn preview_in(
 
 /// Link the entry to `user_id`. Linking it to the same user again is a no-op (the first link
 /// time stays). Refused with `Conflict("player_linked")` when it is linked to someone else, and
-/// with `Conflict("link_overlaps")` when it shares a match or an event with another entry
-/// already linked to `user_id`: one person cannot be two sides of one game. An unknown entry is
-/// `NotFound`.
+/// with `Conflict("link_overlaps")` when it shares a match or an event (a placing, or a team of
+/// the same event) with another entry already linked to `user_id`: one person cannot be two
+/// sides of one game. An unknown entry is `NotFound`.
 pub async fn link_in(
     tx: &mut Tx<'_>,
     player_id: &str,
@@ -115,6 +126,11 @@ pub async fn link_in(
               AND other.player_id <> mine.player_id \
              JOIN players q ON q.id = other.player_id \
            WHERE mine.player_id = ?1 AND q.linked_user_id = ?2 \
+         ) OR EXISTS ( \
+           SELECT 1 FROM competition_teams mine \
+             JOIN competition_teams other ON other.event_id = mine.event_id \
+             JOIN players q ON q.id IN (other.player1_id, other.player2_id) AND q.id <> ?1 \
+           WHERE ?1 IN (mine.player1_id, mine.player2_id) AND q.linked_user_id = ?2 \
          )",
     )
     .bind(player_id)

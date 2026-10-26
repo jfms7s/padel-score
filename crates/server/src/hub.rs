@@ -5,6 +5,11 @@
 //! - Per user: one channel per owner id carrying a bare "something changed" signal, for the
 //!   owned-matches list stream, which re-reads the list on it. A match the user owns was
 //!   created, or a command was applied to it.
+//! - Per event: one channel per event id carrying a bare "something changed" signal, for the
+//!   coordinator's event stream, which re-reads the event on it: a coordinator route changed
+//!   the event, a command was applied to one of its matches, or a court phone came or went.
+//!
+//! [`CourtPhones`] counts the court phones connected to each court, in memory only.
 //!
 //! A channel is created on the first subscribe and dropped as soon as its last
 //! [`Subscription`] goes (and, as a backstop, when a publish finds no receivers), so the maps
@@ -73,6 +78,7 @@ impl<T: Clone> Channels<T> {
 pub struct Hub {
     matches: Channels<Arc<MatchView>>,
     users: Channels<()>,
+    events: Channels<()>,
 }
 
 impl Hub {
@@ -135,6 +141,81 @@ impl Hub {
     /// Whether anyone is watching the user's owned matches.
     pub fn is_user_watched(&self, user_id: &str) -> bool {
         self.users.lock().contains_key(user_id)
+    }
+
+    /// Watch an event. The subscription gets a `()` for every change notified after this call.
+    pub fn subscribe_event(self: &Arc<Self>, event_id: &str) -> Subscription<()> {
+        Subscription {
+            rx: Some(self.events.subscribe(event_id)),
+            hub: Arc::clone(self),
+            key: event_id.to_owned(),
+            channels: |hub| &hub.events,
+        }
+    }
+
+    /// Tell the event's streams that it changed. Nobody watching: skipped.
+    pub fn notify_event(&self, event_id: &str) {
+        self.events.publish(event_id, ());
+    }
+}
+
+/// How many court phones (court streams opened with a court's scorer token) are connected to
+/// each court, for the coordinator's "Phone connected". In memory only: a restart starts at 0,
+/// and the phones' reconnects count again. The lock guards map operations only, never an await.
+#[derive(Debug, Default)]
+pub struct CourtPhones {
+    counts: Mutex<HashMap<String, usize>>,
+}
+
+impl CourtPhones {
+    pub fn new() -> CourtPhones {
+        CourtPhones::default()
+    }
+
+    fn lock(&self) -> MutexGuard<'_, HashMap<String, usize>> {
+        self.counts.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Count one more phone on `court_id` until the returned guard drops. Both the join and the
+    /// drop notify the event, so its coordinator sees the phone come and go.
+    pub fn join(self: &Arc<Self>, hub: &Arc<Hub>, event_id: &str, court_id: &str) -> PhoneGuard {
+        *self.lock().entry(court_id.to_owned()).or_insert(0) += 1;
+        hub.notify_event(event_id);
+        PhoneGuard {
+            phones: Arc::clone(self),
+            hub: Arc::clone(hub),
+            event_id: event_id.to_owned(),
+            court_id: court_id.to_owned(),
+        }
+    }
+
+    /// The phones connected to `court_id` right now.
+    pub fn count(&self, court_id: &str) -> usize {
+        self.lock().get(court_id).copied().unwrap_or(0)
+    }
+}
+
+/// One connected court phone; dropping it takes the phone off the count.
+#[derive(Debug)]
+pub struct PhoneGuard {
+    phones: Arc<CourtPhones>,
+    hub: Arc<Hub>,
+    event_id: String,
+    court_id: String,
+}
+
+impl Drop for PhoneGuard {
+    fn drop(&mut self) {
+        {
+            let mut counts = self.phones.lock();
+            if let Some(n) = counts.get_mut(&self.court_id) {
+                *n = n.saturating_sub(1);
+                if *n == 0 {
+                    counts.remove(&self.court_id);
+                }
+            }
+        }
+        self.hub.notify_event(&self.event_id);
     }
 }
 

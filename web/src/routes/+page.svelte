@@ -64,6 +64,7 @@
 				>{strings.players.title}{#if claimCount > 0}<span class="badge">{strings.linking.claimBadge(claimCount)}</span>{/if}</a
 			>
 			<a href="/history">{strings.history.link}</a>
+			<a href="/events">{strings.events.link}</a>
 			<a class="wide" href="/profile">{strings.linking.profile.link}</a>
 		</nav>
 		<h2>{strings.myMatches}</h2>
@@ -149,7 +150,7 @@
 	}
 	.links {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 8px;
 		margin-top: 8px;
 	}

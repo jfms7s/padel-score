@@ -118,7 +118,9 @@ export const strings = {
 		},
 		undoConflict: 'The score changed, so nothing was undone.',
 		nothingToUndo: 'Nothing to undo.',
-		failed: (message: string) => `Couldn't send that. ${message}`
+		failed: (message: string) => `Couldn't send that. ${message}`,
+		lockedDropped: (n: number) =>
+			`The coordinator entered the result. ${n} queued ${n === 1 ? 'tap' : 'taps'} dropped.`
 	},
 
 	// Taps made offline, and the choice when the server moved meanwhile.
@@ -496,6 +498,10 @@ export const strings = {
 			{ key: 'draws', short: 'D', long: 'Drawn' }
 		],
 		placings: 'Placings',
+		/** "Sunday cup · Match 1", on an event match. */
+		eventMatch: (event: string, label: string) => `${event} · ${label}`,
+		/** "Sunday cup: 3rd–4th of 12, tournament". */
+		placingIn: (event: string, placing: string) => `${event}: ${placing}`,
 		/** "3rd–4th of 12, tournament". */
 		placing: (place: number, to: number, size: number, kind: 'tournament' | 'non_stop') =>
 			`${to > place ? `${ordinal(place)}–${ordinal(to)}` : ordinal(place)} of ${size}, ${kind === 'tournament' ? 'tournament' : 'non-stop'}`,
@@ -503,6 +509,236 @@ export const strings = {
 		noMatches: 'No finished matches with this player yet.',
 		archived: 'Archived. Their record is kept.',
 		backToPlayers: 'Players'
+	},
+
+	// Events: the coordinator's screens, the court phone and the event's viewing page.
+	events: {
+		versus: (a: string, b: string) => `${a} v ${b}`,
+		unknownTeam: 'Unknown team',
+		phoneConnected: (match: string) => `Phone connected, ${match}`,
+		noPhone: 'No phone yet',
+		waitingForMatch: 'Waiting for a match',
+
+		link: 'Events',
+		back: 'Home',
+		title: 'Events',
+		intro: 'Run a tournament or a non-stop: teams, courts with their own phones, and the results.',
+		none: "You haven't made any events yet.",
+		kinds: { tournament: 'Tournament', non_stop: 'Non-stop' },
+		status: { setup: 'Setting up', running: 'Running', finished: 'Finished' },
+		counts: (teams: number, courts: number) =>
+			`${teams === 1 ? '1 team' : `${teams} teams`} · ${courts === 1 ? '1 court' : `${courts} courts`}`,
+		openLabel: (name: string) => `Open ${name}`,
+
+		// The new-event form.
+		newEvent: 'New event',
+		name: 'Name',
+		namePlaceholder: 'Sunday cup',
+		kind: 'Kind',
+		rules: 'Rules',
+		allowDraws: 'Allow draws',
+		drawsOptions: { no: 'No', yes: 'Yes' },
+		create: 'Create event',
+		creating: 'Creating…',
+
+		// The rules line: "Best of 3, super tie-break, golden point", "Timed, golden point, no draws".
+		rulesDeciding: { full_set: 'full deciding set', super_tie_break: 'super tie-break' },
+		timed: 'Timed',
+		drawsAllowed: 'draws allowed',
+		noDraws: 'no draws',
+
+		// The event screen.
+		allEvents: 'Events',
+		loading: 'Loading the event…',
+		streamLost: 'Live updates stopped.',
+		reload: 'Reload',
+		save: 'Save',
+		cancel: 'Cancel',
+		confirm: 'Confirm',
+
+		teams: 'Teams',
+		noTeams: 'No teams yet.',
+		addTeam: 'Add team',
+		teamPlayer: (n: number) => `Player ${n}`,
+		teamName: 'Team name (optional)',
+		pickBoth: 'Pick both players from your list, or add them to it.',
+		samePlayer: 'Pick two different players.',
+		rename: 'Rename',
+		renameLabel: (team: string) => `Rename ${team}`,
+		newTeamName: (team: string) => `New name for ${team}`,
+		newTeamNameHint: 'Leave it empty to show the players’ names.',
+		remove: 'Remove',
+		removeLabel: (team: string) => `Remove ${team}`,
+		noPlayers: 'Add players to your list first, or type a name and add it here.',
+
+		courts: 'Courts',
+		addCourt: 'Add court',
+		scoring: 'Scoring',
+		viewing: 'Viewing',
+		scoringQr: (court: string) => `Scoring QR code for ${court}`,
+		viewingQr: (court: string) => `Viewing QR code for ${court}`,
+		copy: 'Copy link',
+		copied: 'Copied',
+		copyLabel: (place: string, what: string) => `Copy the ${what.toLowerCase()} link for ${place}`,
+		copyFailed: 'Copy the link by hand.',
+		rotate: 'New scoring code',
+		rotateConfirm: 'The old scoring code stops working, and the phone using it must scan the new one.',
+		nextMatch: 'Next match',
+		wholeEvent: 'Whole event',
+		wholeEventHint: 'Everything, for spectators. It can’t change a score.',
+		wholeEventQr: 'Viewing QR code for the whole event',
+		wholeEventPlace: 'the whole event',
+
+		matches: 'Matches',
+		noMatches: 'No matches yet.',
+		newMatch: 'New match',
+		teamA: 'Team A',
+		teamB: 'Team B',
+		court: 'Court',
+		label: 'Label (optional)',
+		pickTeam: 'Choose a team',
+		sameTeam: 'Pick two different teams.',
+		create_match: 'Create match',
+		notOnCourt: 'Not on a court',
+		moveLabel: (match: string) => `Court for ${match}`,
+		matchState: { waiting: 'Waiting', live: 'Live', finished: 'Finished' },
+		enteredByYou: 'Entered by you',
+		enterResult: 'Enter result',
+		enterResultLabel: (match: string) => `Enter the result of ${match}`,
+		view: 'View',
+		viewLabel: (match: string) => `View ${match}`,
+		liveScore: (games: string, point: string) => `${games}, ${point}`,
+		draw: 'Draw',
+
+		start: 'Start event',
+		starting: 'Starting…',
+		startHint: 'Teams can’t change once it starts.',
+		finish: 'Finish event',
+		finishTitle: 'Final positions',
+		finishHint: 'Put the teams in finishing order. Mark teams that share a place as tied.',
+		moveUp: (team: string) => `Move ${team} up`,
+		moveDown: (team: string) => `Move ${team} down`,
+		up: 'Up',
+		down: 'Down',
+		tied: 'Tied',
+		tiedLabel: (a: string, b: string) => `${a} and ${b} share a place`,
+		finishConfirm: 'Save the positions and finish',
+		finishComputedHint: 'The final positions come from the results.',
+		unfinishedWarning: (n: number) =>
+			n === 1
+				? '1 match isn’t finished. Its court phone will stop working.'
+				: `${n} matches aren’t finished. Their court phones will stop working.`,
+		finishing: 'Finishing…',
+		place: (place: number, to: number) => (to > place ? `${ordinal(place)}–${ordinal(to)}` : ordinal(place)),
+
+		// The typed result sheet.
+		sheet: {
+			title: (match: string) => `Result of ${match}`,
+			field: 'Final score',
+			hintSets: 'Like 6-4 3-6 10-7. Write a tie-break set as 7-6(5), with the loser’s points.',
+			hintTimed: 'Games, like 5-3.',
+			placeholderSets: '6-4 3-6 10-7',
+			placeholderTimed: '5-3',
+			overtime: 'Level: who won the overtime game?',
+			overtimeWon: (team: string) => `${team} won it`,
+			winner: (team: string) => `Winner: ${team}`,
+			draw: 'Result: draw',
+			save: 'Save result',
+			saving: 'Saving…',
+			cancel: 'Cancel',
+			conflict: 'The score changed meanwhile. Check it and try again.',
+			locked: 'The coordinator already entered this result.'
+		},
+		parsed: {
+			empty: 'Type the final score.',
+			syntax: 'Write the score as games, like 6-4 or 6-4 3-6 10-7.',
+			needs_tiebreak: 'Add the tie-break loser’s points to a 7-6 set, like 7-6(5).',
+			needs_overtime_winner: 'The games are level: pick who won the overtime game.'
+		},
+		invalidScore: {
+			super_tie_break_needs_multiple_sets: 'A super tie-break needs best of 3. Check the event’s rules.',
+			invalid_player_index: 'The match rules are invalid.',
+			wrong_format: 'That score doesn’t fit this match’s rules.',
+			impossible_set: (set: number) => `Set ${set} can’t end like that.`,
+			missing_tie_break: (set: number) => `Set ${set} needs its tie-break, like 7-6(5).`,
+			match_not_finished: 'Nobody has won yet with that score.',
+			extra_sets: 'There are sets after the match was already won.',
+			draw_not_allowed: 'This match can’t end in a draw.',
+			overtime_winner_when_not_level: 'Only a level score has an overtime game.'
+		},
+
+		errors: {
+			already_started: 'This match has already started.',
+			event_started: 'The event has started, so its teams can’t change.',
+			event_not_running: 'Matches can only be made while the event is running.',
+			event_finished: 'The event is finished.',
+			too_few_teams: 'Add at least two teams first.',
+			no_courts: 'Add a court first.',
+			too_many_teams: 'An event can have at most 64 teams.',
+			too_many_courts: 'An event can have at most 16 courts.',
+			player_in_team: 'One of these players is already in a team.',
+			court_in_use: 'A match is on this court.',
+			match_not_finished: 'The match on this court isn’t finished yet.',
+			match_finished: 'This match is finished.',
+			conflict: 'The score changed meanwhile. Try again.',
+			locked: 'You already entered this result.'
+		},
+		fields: {
+			name: 'Enter a name of 1 to 40 characters.',
+			label: 'Enter a label of 1 to 40 characters.',
+			format: 'Those rules don’t suit this kind of event.',
+			kind: 'Choose a kind of event.',
+			players: 'Pick two different players from your list.',
+			team_a: 'Choose team A.',
+			team_b: 'Choose team B.',
+			court_id: 'Choose a court of this event.',
+			places: 'Every team needs a place, and the places must add up.',
+			settings: 'Check the event’s settings.'
+		}
+	},
+
+	// The court phone (/c/{token}), the court viewer (/cv/{token}) and the event page (/e/{token}).
+	court: {
+		loading: 'Loading the court…',
+		join: (court: string) => `Join ${court}`,
+		joinHint: 'This phone scores the matches on this court. Keep it at the fence.',
+		waiting: 'Waiting for a match',
+		upNext: (match: string) => `Up next: ${match}`,
+		next: (match: string) => `Next: ${match}`,
+		nextMatch: (match: string) => `Next match: ${match}`,
+		waitingForCoordinator: 'Waiting for the coordinator',
+		typeFinal: 'Type the final score',
+		locked: 'Result entered by the coordinator',
+		replaced: 'This court link has been replaced. Scan the new code.',
+		finished: 'This event has finished.',
+		loadFailed: 'Couldn’t load this court. Check the connection and reload.',
+		reload: 'Reload',
+		serveTitle: 'Who serves first?',
+		serveHint: 'Not sure? Spin the racket and tap the winner.',
+		otherServer: 'First to serve for the other pair',
+		startScoring: 'Start scoring',
+		starting: 'Starting…',
+		changeServer: 'Change who serves',
+		startFailed: 'Couldn’t save who serves. Try again.',
+		advanceFailed: 'Couldn’t move to the next match. Try again.',
+		abandoned: (n: number) =>
+			n === 1
+				? "1 tap for the last match wasn't sent: the match left this court."
+				: `${n} taps for the last match weren't sent: the match left this court.`,
+		dismiss: 'Dismiss',
+		matchLabel: (label: string, match: string) => `${label}: ${match}`,
+		// The court viewer.
+		viewerLoading: 'Loading the court…',
+		// The event page.
+		eventLoading: 'Loading the event…',
+		courts: 'Courts',
+		courtIdle: 'No match on court',
+		watch: 'Watch',
+		watchLabel: (court: string) => `Watch ${court}`,
+		matches: 'Matches',
+		noMatches: 'No matches yet.',
+		finalPositions: 'Final positions',
+		eventGone: 'This event link doesn’t work any more.'
 	},
 
 	// Home, signed in.

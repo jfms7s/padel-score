@@ -13,6 +13,8 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use http_body_util::BodyExt;
+use padel_score_server::api::now;
+use padel_score_server::commands::{Authority, FinalRequest, record_final};
 use padel_score_server::{AppState, Config, Store, db, router};
 use padel_scoring::{DecidingSet, DeuceRule, Format, Player, SetRules, SetsFormat, Start, Team};
 use serde_json::{Value, json};
@@ -557,4 +559,240 @@ async fn closing_a_hub_entry_ends_its_stream() {
     state.hub.close(&m.id);
     assert!(!state.hub.is_watched(&m.id));
     while stream.frame().await.is_some() {}
+}
+
+// Typed results, the coordinator lock and choosing the server (phase 6).
+
+async fn put(app: &Router, path: &str, body: &Value) -> (StatusCode, HeaderMap, Value) {
+    send(
+        app,
+        Request::put(path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await
+}
+
+fn typed_body(client_id: &str, base_revision: i64, sets: Value) -> Value {
+    json!({ "client_id": client_id, "base_revision": base_revision, "score": { "sets": sets } })
+}
+
+async fn final_score(app: &Router, scorer: &str, body: &Value) -> (StatusCode, Value) {
+    let (status, _, body) = post(app, &format!("/api/score/{scorer}/final"), body).await;
+    (status, body)
+}
+
+fn start_body(team: &str, index: u8, other: u8) -> Value {
+    json!({ "start": { "first_server": { "team": team, "index": index }, "other_first_server": other } })
+}
+
+/// Lock the match the way the coordinator's typed result does (its route is Task 6's).
+async fn lock(state: &AppState, scorer: &str) -> Value {
+    let m = state.store.by_scorer_token(scorer).await.unwrap().unwrap();
+    let req = FinalRequest {
+        client_id: "coordinator".into(),
+        base_revision: None,
+        score: padel_scoring::FinalScore::Sets(vec![padel_scoring::SetScore {
+            a: 6,
+            b: 3,
+            tiebreak: None,
+        }]),
+    };
+    let outcome = record_final(&state.store, &m, req, Authority::Owner, now())
+        .await
+        .unwrap();
+    let (status, body) = outcome.to_http().unwrap();
+    assert_eq!(status, 200, "{body}");
+    serde_json::from_str(&body).unwrap()
+}
+
+#[tokio::test]
+async fn typed_final_route_applies_and_publishes() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    let mut stream = Stream::open(&app, &format!("/api/view/{}/stream", m.spectator)).await;
+    assert_eq!(stream.state().await["revision"], 0);
+    let body = typed_body("f1", 0, json!([{ "a": 6, "b": 4, "tiebreak": null }]));
+    let (status, view) = final_score(&app, &m.scorer, &body).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(
+        view["score"]["status"],
+        json!({ "finished": { "winner": "a" } })
+    );
+    assert!(view.get("locked").is_none());
+    assert_eq!(stream.state().await, view);
+    // A resend is the same answer.
+    let (status, again) = final_score(&app, &m.scorer, &body).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(again, view);
+    // The phone's base revision is required.
+    let (status, body) = final_score(
+        &app,
+        &m.scorer,
+        &json!({ "client_id": "f2", "score": { "sets": [{ "a": 6, "b": 4, "tiebreak": null }] } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[tokio::test]
+async fn typed_final_stale_revision_is_409_conflict() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    command(
+        &app,
+        &m.scorer,
+        &live("c1", json!([{ "kind": "point", "team": "a" }])),
+    )
+    .await;
+    let body = typed_body("f1", 0, json!([{ "a": 6, "b": 4, "tiebreak": null }]));
+    let (status, body) = final_score(&app, &m.scorer, &body).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"], "conflict");
+    assert_eq!(body["view"]["revision"], 1);
+}
+
+#[tokio::test]
+async fn typed_impossible_score_is_422() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    let body = typed_body("f1", 0, json!([{ "a": 6, "b": 5, "tiebreak": null }]));
+    let (status, body) = final_score(&app, &m.scorer, &body).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body,
+        json!({ "error": "invalid_score", "reason": { "impossible_set": { "index": 0 } } })
+    );
+    let (_, _, view) = get(&app, &format!("/api/score/{}", m.scorer)).await;
+    assert_eq!(view["revision"], 0);
+}
+
+#[tokio::test]
+async fn typed_score_too_long_is_400() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    let body = typed_body("f1", 0, json!([{ "a": 7, "b": 6, "tiebreak": [600, 598] }]));
+    let (status, body) = final_score(&app, &m.scorer, &body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body,
+        json!({ "error": "invalid", "message": "too many commands in one request" })
+    );
+    let (_, _, view) = get(&app, &format!("/api/score/{}", m.scorer)).await;
+    assert_eq!(view["revision"], 0);
+}
+
+#[tokio::test]
+async fn locked_match_refuses_scorer_routes() {
+    let (app, state) = setup().await;
+    let m = create(&app).await;
+    let view = lock(&state, &m.scorer).await;
+    assert_eq!(view["locked"], true);
+    let revision = view["revision"].as_i64().unwrap();
+    let head = view["head_seq"].as_i64().unwrap();
+    let expected = json!({ "error": "locked", "view": view });
+
+    let point = live("p1", json!([{ "kind": "point", "team": "b" }]));
+    assert_eq!(
+        command(&app, &m.scorer, &point).await,
+        (StatusCode::CONFLICT, expected.clone())
+    );
+    let undo = live("u1", json!([{ "kind": "undo", "target_seq": head }]));
+    assert_eq!(
+        command(&app, &m.scorer, &undo).await,
+        (StatusCode::CONFLICT, expected.clone())
+    );
+    let batch = json!({ "client_id": "b1", "batch": true, "base_revision": revision,
+        "commands": [{ "kind": "point", "team": "b" }] });
+    assert_eq!(
+        command(&app, &m.scorer, &batch).await,
+        (StatusCode::CONFLICT, expected.clone())
+    );
+    let replace = json!({ "client_id": "r1", "base_revision": revision, "base_seq": 0,
+        "commands": [{ "kind": "point", "team": "b" }] });
+    let (status, _, body) = post(&app, &format!("/api/score/{}/replace", m.scorer), &replace).await;
+    assert_eq!((status, body), (StatusCode::CONFLICT, expected.clone()));
+    let typed = typed_body(
+        "f1",
+        revision,
+        json!([{ "a": 6, "b": 0, "tiebreak": null }]),
+    );
+    assert_eq!(
+        final_score(&app, &m.scorer, &typed).await,
+        (StatusCode::CONFLICT, expected.clone())
+    );
+    let (status, _, body) = put(
+        &app,
+        &format!("/api/score/{}/start", m.scorer),
+        &start_body("b", 0, 0),
+    )
+    .await;
+    assert_eq!((status, body), (StatusCode::CONFLICT, expected.clone()));
+
+    // Nothing was saved for those client ids: once unlocked they would run.
+    let (stored, _) = state.store.snapshot(&m.id).await.unwrap().unwrap();
+    for client_id in ["p1", "u1", "b1", "r1", "f1"] {
+        assert!(
+            state
+                .store
+                .find_result(&stored.id, client_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    let (_, _, now_view) = get(&app, &format!("/api/score/{}", m.scorer)).await;
+    assert_eq!(now_view, view);
+}
+
+#[tokio::test]
+async fn quick_match_view_has_no_locked_key() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    let (_, _, view) = get(&app, &format!("/api/view/{}", m.spectator)).await;
+    assert!(view.get("locked").is_none(), "{view}");
+    let (_, view) = command(
+        &app,
+        &m.scorer,
+        &live("c1", json!([{ "kind": "point", "team": "a" }])),
+    )
+    .await;
+    assert!(view.get("locked").is_none(), "{view}");
+}
+
+#[tokio::test]
+async fn set_start_only_before_first_point() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    let mut stream = Stream::open(&app, &format!("/api/view/{}/stream", m.spectator)).await;
+    assert_eq!(stream.state().await["revision"], 0);
+    let path = format!("/api/score/{}/start", m.scorer);
+    let (status, _, view) = put(&app, &path, &start_body("b", 1, 1)).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["score"]["server"], json!({ "team": "b", "index": 1 }));
+    assert_eq!(view["start"]["other_first_server"], 1);
+    assert_eq!(view["revision"], 1);
+    assert_eq!(stream.state().await, view);
+
+    let (status, _, body) = put(&app, &path, &start_body("a", 2, 0)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    command(
+        &app,
+        &m.scorer,
+        &live("c1", json!([{ "kind": "point", "team": "a" }])),
+    )
+    .await;
+    let (status, _, body) = put(&app, &path, &start_body("a", 0, 0)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body, json!({ "error": "already_started" }));
+
+    let (status, _, _) = put(
+        &app,
+        &format!("/api/score/{}/start", m.spectator),
+        &start_body("a", 0, 0),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

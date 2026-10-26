@@ -143,7 +143,7 @@ function build(exact: (shape: Shape, optional?: Shape) => Check) {
 		head_seq: int,
 		events: array(exact({ seq: int, event })),
 		score
-	});
+	}, { locked: bool });
 
 	// Accounts. Times are Unix seconds.
 	const me = exact({ id: str, email: str, display_name: str, is_admin: bool });
@@ -163,7 +163,7 @@ function build(exact: (shape: Shape, optional?: Shape) => Check) {
 	const device = exact({ id: str, name: str, prefix: str, created_at: int }, { last_used_at: nullable(int) });
 	const myMatch = exact(
 		{ id: str, label: str, created_at: int, last_activity_at: int, view: matchView },
-		{ scorer_token: str, spectator_token: str }
+		{ scorer_token: str, spectator_token: str, context: str }
 	);
 
 	// Players and history.
@@ -192,15 +192,22 @@ function build(exact: (shape: Shape, optional?: Shape) => Check) {
 		}),
 		spectator_token: str
 	};
-	const historyEntry = exact(historyShape);
-	const playerHistoryEntry = exact({
-		...historyShape,
-		side: team,
-		outcome: oneOf('win', 'loss', 'draw')
-	});
+	const eventKind = oneOf('tournament', 'non_stop');
+	// Event matches only.
+	const historyOptional: Shape = { event: exact({ id: str, name: str, kind: eventKind, label: str }) };
+	const historyEntry = exact(historyShape, historyOptional);
+	const playerHistoryEntry = exact(
+		{
+			...historyShape,
+			side: team,
+			outcome: oneOf('win', 'loss', 'draw')
+		},
+		historyOptional
+	);
 	const placing = exact({
 		event_id: str,
-		event_kind: oneOf('tournament', 'non_stop'),
+		event_name: str,
+		event_kind: eventKind,
 		place: int,
 		place_to: int,
 		field_size: int,

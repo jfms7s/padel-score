@@ -16,6 +16,7 @@ import {
 } from './fence';
 import { initEngineSync, replayLocal } from './engine';
 import { fenceModel } from './view';
+import { strings } from './strings';
 import { asView as v } from './fixtures/load';
 import type { MatchView } from './types';
 import type { StorageLike } from './setup';
@@ -198,5 +199,12 @@ describe('overlayTaps', () => {
 		expect(overlayTaps(view, [{ intent: { kind: 'undo' }, base: r, sent: false }, tap('b', r, false)])).toEqual([
 			'b'
 		]);
+	});
+});
+
+describe('locked note', () => {
+	it('locked_dropped_note_counts_taps', () => {
+		expect(strings.fence.lockedDropped(2)).toBe('The coordinator entered the result. 2 queued taps dropped.');
+		expect(strings.fence.lockedDropped(1)).toBe('The coordinator entered the result. 1 queued tap dropped.');
 	});
 });

@@ -260,3 +260,21 @@ proptest! {
         }
     }
 }
+
+proptest! {
+    /// Any finished match's typed score turns into events that replay to the same score and status.
+    #[test]
+    fn events_for_final_round_trips(
+        (format, events) in prop_oneof![sets_case(), timed_format().prop_flat_map(|f| (Just(f), events()))],
+        start in start(),
+    ) {
+        let events = valid_prefix(&format, &start, &events);
+        let score = replay(&format, &start, &events).unwrap();
+        if let Some(typed) = score.final_score() {
+            let made = events_for_final(&format, &typed).unwrap();
+            let again = replay(&format, &start, &made).unwrap();
+            prop_assert_eq!(again.final_score(), Some(typed));
+            prop_assert_eq!(again.status, score.status);
+        }
+    }
+}

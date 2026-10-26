@@ -7,7 +7,7 @@ mod state;
 mod tiebreak;
 mod types;
 
-pub use final_score::{FinalScore, InvalidScore, validate_final};
+pub use final_score::{FinalScore, InvalidScore, events_for_final, validate_final};
 pub use game::{Game, GameScore, PointCall};
 pub use serve::{ServeSide, serve_order};
 pub use state::{Current, MatchState, Score, SetScore, Status};

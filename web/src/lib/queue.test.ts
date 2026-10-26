@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type CommandOutcome } from './api';
 import { replayLocal } from './engine';
-import { localView, MAX_COMMANDS, mineView, type QueueState } from './queue';
+import { localView, MAX_COMMANDS, mineView, takeAbandoned, type QueueState } from './queue';
 import { asView } from './fixtures/load';
 import {
 	applied,
@@ -10,10 +10,12 @@ import {
 	hang,
 	harness,
 	KEY,
+	locked,
 	MemoryStorage,
 	offline,
 	points,
 	tick,
+	TOKEN,
 	undone
 } from './fixtures/queue-harness';
 import onePoint from './fixtures/view-one-point.json';
@@ -619,6 +621,124 @@ describe('review fixes, round 2', () => {
 		const r = harness([hang], { view: seen, storage });
 		expect(r.queue.discardedOnLoad).toBe(false);
 		expect(r.queue.state()).toMatchObject({ offline: false, pending: [{ sent: true }] });
+	});
+});
+
+describe('locked by the coordinator', () => {
+	// The coordinator typed the result: the server refuses this phone's taps with 409 locked.
+	const lockedView = (from = seen) => ({ ...grow(from, ['b', 'b']), locked: true });
+
+	it('locked_drops_queue_with_note', async () => {
+		const server = lockedView();
+		const h = offlineWith(['a', 'b', 'a'], [locked(server)]);
+		expect(h.storage.getItem(KEY)).not.toBeNull();
+		const out = await h.queue.flush();
+		expect(out).toEqual({ status: 'locked' });
+		expect(h.queue.state()).toMatchObject({
+			pending: [],
+			queued: [],
+			sending: 0,
+			base: null,
+			offline: false,
+			conflict: null,
+			problem: null,
+			unsaved: false
+		});
+		expect(h.storage.getItem(KEY)).toBeNull();
+		expect(h.views).toEqual([server]);
+		expect(h.dropped).toEqual([{ intent: { kind: 'point', team: 'a' }, reason: { kind: 'locked', count: 3 } }]);
+		// Nothing is resent.
+		await tick(60_000);
+		expect(h.post).toHaveBeenCalledTimes(1);
+	});
+
+	it('locked_never_opens_conflict', async () => {
+		// Live: the tap out and the one waiting behind it both go.
+		const server = lockedView();
+		const h = harness([locked(server)], { view: seen });
+		h.queue.point('a');
+		h.queue.point('b');
+		await tick(60_000);
+		expect(h.post).toHaveBeenCalledTimes(1);
+		expect(h.queue.state()).toMatchObject({ pending: [], queued: [], conflict: null, problem: null, unsaved: false });
+		expect(h.dropped).toEqual([{ intent: { kind: 'point', team: 'a' }, reason: { kind: 'locked', count: 2 } }]);
+		expect(h.views).toEqual([server]);
+		expect(h.storage.getItem(KEY)).toBeNull();
+
+		// "Keep this phone's score" answered locked: the choice closes, nothing is retried.
+		const moved = grow(seen, ['b']);
+		const c = offlineWith(['a'], [conflict(moved)], { replace: [locked(lockedView(moved))] });
+		expect((await c.queue.flush()).status).toBe('conflict');
+		await expect(c.queue.keepMine()).resolves.toEqual({ status: 'locked' });
+		expect(c.queue.state()).toMatchObject({ queued: [], conflict: null, resolving: false, unsaved: false });
+		expect(c.dropped).toEqual([{ intent: { kind: 'point', team: 'a' }, reason: { kind: 'locked', count: 1 } }]);
+		expect(c.storage.getItem(KEY)).toBeNull();
+		await tick(60_000);
+		expect(c.replace).toHaveBeenCalledTimes(1);
+	});
+
+	it('a locked answer to a typed final drops the queue the same way', async () => {
+		const server = lockedView();
+		const h = offlineWith(['a', 'b'], []);
+		h.queue.locked(server);
+		expect(h.queue.state()).toMatchObject({ queued: [], offline: false, unsaved: false });
+		expect(h.dropped).toEqual([{ intent: { kind: 'point', team: 'a' }, reason: { kind: 'locked', count: 2 } }]);
+		expect(h.views).toEqual([server]);
+		expect(h.storage.getItem(KEY)).toBeNull();
+		// With nothing queued there is nothing to report.
+		const empty = harness([], { view: seen });
+		empty.queue.locked(server);
+		expect(empty.dropped).toEqual([]);
+		expect(empty.views).toEqual([server]);
+	});
+});
+
+describe('taps left behind by a match that left the court', () => {
+	it('take_abandoned_counts_and_clears_unsent_taps', async () => {
+		// Offline: two taps waiting, then an undo of the last; the match leaves the court.
+		const h = offlineWith(['a', 'b']);
+		h.queue.undo();
+		h.queue.point('a');
+		await tick();
+		h.queue.stop();
+		const n = stored(h.storage).queued.length;
+		expect(n).toBeGreaterThan(0);
+		expect(takeAbandoned(h.storage, TOKEN)).toBe(n);
+		expect(h.storage.getItem(KEY)).toBeNull();
+		// Once taken there is nothing more to report.
+		expect(takeAbandoned(h.storage, TOKEN)).toBe(0);
+	});
+
+	it('take_abandoned_counts_a_live_tap_never_answered', async () => {
+		const h = harness([hang], { view: seen });
+		h.queue.point('a');
+		await tick();
+		h.queue.stop();
+		expect(takeAbandoned(h.storage, TOKEN)).toBe(1);
+		expect(h.storage.getItem(KEY)).toBeNull();
+	});
+
+	it('take_abandoned_is_zero_for_nothing_stored_and_clears_unreadable', () => {
+		const storage = new MemoryStorage();
+		expect(takeAbandoned(storage, TOKEN)).toBe(0);
+		storage.setItem(KEY, '{not json');
+		expect(takeAbandoned(storage, TOKEN)).toBe(0);
+		expect(storage.getItem(KEY)).toBeNull();
+		// Another match's queue is left alone.
+		storage.setItem('padel-score:queue:other', 'x');
+		takeAbandoned(storage, TOKEN);
+		expect(storage.getItem('padel-score:queue:other')).toBe('x');
+		// A store that throws reports nothing rather than crashing.
+		const broken = {
+			getItem: () => {
+				throw new Error('blocked');
+			},
+			setItem: () => {},
+			removeItem: () => {
+				throw new Error('blocked');
+			}
+		};
+		expect(takeAbandoned(broken, TOKEN)).toBe(0);
 	});
 });
 

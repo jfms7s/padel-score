@@ -36,7 +36,9 @@ struct World {
     r: String,
     rui: String,
     rui_c: String,
-    /// Ana's two matches (finished 1000 and 3000) and Bea's (2000).
+    /// Ana's two matches (finished 1000 and 3000) and Bea's quick match (2000). Bea also ran the
+    /// event `ev1`, "Bea's cup", where Rui C. placed 2nd of 8; [`World::bea_event_match`] adds a
+    /// match of it.
     a1: String,
     a2: String,
     b1: String,
@@ -111,6 +113,36 @@ async fn player(state: &AppState, owner: &str, name: &str) -> String {
         .id
 }
 
+/// Bea's finished event `ev1`, "Bea's cup": teams `t1` (Rui C. and Pia B.) and `t2`.
+async fn bea_event(state: &AppState, pool: &SqlitePool, bea_id: &str, rui_c: &str) {
+    let partner = player(state, bea_id, "Pia B.").await;
+    let tom = player(state, bea_id, "Tom B.").await;
+    let una = player(state, bea_id, "Una B.").await;
+    sqlx::query(
+        "INSERT INTO competitions (id, owner_user_id, name, kind, format, status, \
+         spectator_token, created_at, started_at, finished_at) \
+         VALUES ('ev1', ?, 'Bea''s cup', 'tournament', '{}', 'finished', 'ev1-view', 1, 1500, \
+         2500)",
+    )
+    .bind(bea_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    for (id, p1, p2, pos) in [("t1", rui_c, &*partner, 0), ("t2", &*tom, &*una, 1)] {
+        sqlx::query(
+            "INSERT INTO competition_teams (id, event_id, player1_id, player2_id, position) \
+             VALUES (?, 'ev1', ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(p1)
+        .bind(p2)
+        .bind(pos)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
 /// Not yet linked: Rui (Ana) won at 1000 and lost at 3000; Rui C. (Bea) won at 2000.
 async fn world() -> World {
     let (state, pool, app, ana_id, ana) = with_admin().await;
@@ -149,6 +181,7 @@ async fn world() -> World {
         2000,
     )
     .await;
+    bea_event(&state, &pool, &bea_id, &rui_c).await;
     sqlx::query(
         "INSERT INTO placings (player_id, event_id, event_kind, place, place_to, field_size, \
          finished_at) VALUES (?, 'ev1', 'tournament', 2, 2, 8, 2500)",
@@ -176,6 +209,29 @@ async fn world() -> World {
 }
 
 impl World {
+    /// "Match 1" of Bea's event: Rui C.'s team (a) won, finished at 2200.
+    async fn bea_event_match(&self) -> String {
+        let id = finished(
+            &self.state,
+            &self.pool,
+            &self.bea_id,
+            [Some(&self.rui_c), None],
+            [None, None],
+            Some("a"),
+            2200,
+        )
+        .await;
+        sqlx::query(
+            "INSERT INTO competition_matches (match_id, event_id, team_a_id, team_b_id, label, \
+             ordinal) VALUES (?, 'ev1', 't1', 't2', 'Match 1', 1)",
+        )
+        .bind(&id)
+        .execute(&self.pool)
+        .await
+        .unwrap();
+        id
+    }
+
     async fn get(&self, who: &str, path: &str) -> Res {
         send(
             &self.app,
@@ -597,4 +653,58 @@ async fn privacy_routes_need_session() {
         let res = send(&w.app, support::as_device(&token, m.clone(), p, None)).await;
         assert_eq!(res.status, StatusCode::FORBIDDEN, "{m} {p}");
     }
+}
+
+#[tokio::test]
+async fn event_context_follows_the_viewer() {
+    let w = world().await;
+    let ev_match = w.bea_event_match().await;
+    w.link_both().await;
+    let full_event = json!({ "id": "ev1", "name": "Bea's cup", "kind": "tournament",
+                             "label": "Match 1" });
+
+    // The player sees it all: the event match's event and the placing's event name. Bea's
+    // quick match b1 and Ana's matches have no event.
+    let res = w.get(&w.r, "/api/me/results").await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(ids(&res), [&w.a2, &ev_match, &w.b1, &w.a1]);
+    assert_eq!(res.body["items"][1]["event"], full_event);
+    for i in [0, 2, 3] {
+        assert!(res.body["items"][i].get("event").is_none());
+    }
+    assert_eq!(res.body["placings"][0]["event_name"], "Bea's cup");
+
+    // Bea, the event's coordinator, sees it all too.
+    let path = format!("/api/players/{}/linked-history", w.rui_c);
+    let res = w.get(&w.bea, &path).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.body["items"][1]["event"], full_event);
+    assert_eq!(res.body["placings"][0]["event_name"], "Bea's cup");
+
+    // Ana sees only the kind of Bea's event, and no event name on the placing.
+    let path = format!("/api/players/{}/linked-history", w.rui);
+    let res = w.get(&w.ana, &path).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.body["items"][1]["redacted"], true);
+    assert_eq!(
+        res.body["items"][1]["event"],
+        json!({ "kind": "tournament" })
+    );
+    // Bea's quick match is redacted too, with no event at all.
+    assert_eq!(res.body["items"][2]["redacted"], true);
+    assert!(res.body["items"][2].get("event").is_none());
+    let placing = res.body["placings"][0].as_object().unwrap();
+    assert!(!placing.contains_key("event_name"), "event_name leaked");
+    assert_eq!(placing["event_kind"], "tournament");
+    assert_eq!(placing["place"], 2);
+
+    // A public profile: the kind only, everywhere.
+    let token = w.profile_token().await;
+    let res = w.profile(&token).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(
+        res.body["items"][1]["event"],
+        json!({ "kind": "tournament" })
+    );
+    assert!(res.body["placings"][0].get("event_name").is_none());
 }

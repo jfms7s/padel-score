@@ -6,15 +6,16 @@
 )]
 
 use padel_score_server::commands::{
-    Command, CommandOutcome, CommandRequest, MAX_COMMANDS, MatchView, ReplaceRequest,
-    apply_command, replace_from, view_of,
+    Authority, Command, CommandOutcome, CommandRequest, FinalRequest, MAX_COMMANDS, MatchView,
+    ReplaceRequest, apply_command, record_final, replace_from, set_start, view_of,
 };
 use padel_score_server::db;
 use padel_score_server::store::{EventState, NewMatch, Store, StoredEvent, StoredMatch, Teams};
 use padel_scoring::{
-    Current, DecidingSet, DeuceRule, ErrorKind, Event, Format, Player, PointCall, SetRules,
-    SetsFormat, Start, Team,
+    Current, DecidingSet, DeuceRule, ErrorKind, Event, FinalScore, Format, Player, PointCall,
+    SetRules, SetScore, SetsFormat, Start, Status, Team,
 };
+use sqlx::SqlitePool;
 
 const NOW: i64 = 1_000;
 
@@ -95,7 +96,9 @@ fn conflict(o: CommandOutcome) -> MatchView {
 }
 
 async fn run(s: &Store, m: &StoredMatch, req: CommandRequest) -> CommandOutcome {
-    apply_command(s, m, req, NOW + 1).await.unwrap()
+    apply_command(s, m, req, NOW + 1, Authority::Scorer)
+        .await
+        .unwrap()
 }
 
 async fn revision(s: &Store, m: &StoredMatch) -> i64 {
@@ -299,6 +302,7 @@ async fn replace_marks_server_tail_and_appends_mine() {
                 commands: vec![point(Team::B), point(Team::B)],
             },
             NOW + 2,
+            Authority::Scorer,
         )
         .await
         .unwrap(),
@@ -371,6 +375,7 @@ async fn conflict_is_not_saved_so_replace_can_follow() {
                 commands: vec![point(Team::B)],
             },
             NOW + 2,
+            Authority::Scorer,
         )
         .await
         .unwrap(),
@@ -430,11 +435,23 @@ async fn replace_rejects_stale_revision() {
         base_seq,
         commands: vec![point(Team::B)],
     };
-    let v = conflict(replace_from(&s, &m, req("r1", 1, 0), NOW).await.unwrap());
+    let v = conflict(
+        replace_from(&s, &m, req("r1", 1, 0), NOW, Authority::Scorer)
+            .await
+            .unwrap(),
+    );
     assert_eq!(v.revision, 2);
     // base_seq beyond head_seq, or negative, is a conflict too.
-    conflict(replace_from(&s, &m, req("r2", 2, 3), NOW).await.unwrap());
-    conflict(replace_from(&s, &m, req("r3", 2, -1), NOW).await.unwrap());
+    conflict(
+        replace_from(&s, &m, req("r2", 2, 3), NOW, Authority::Scorer)
+            .await
+            .unwrap(),
+    );
+    conflict(
+        replace_from(&s, &m, req("r3", 2, -1), NOW, Authority::Scorer)
+            .await
+            .unwrap(),
+    );
     let events = s.events(&m.id).await.unwrap();
     assert!(events.iter().all(|e| e.state == EventState::Effective));
     assert_eq!(events.len(), 2);
@@ -494,4 +511,385 @@ fn command_wire_shape() {
     )
     .unwrap();
     assert_eq!(req.commands, vec![point(Team::B)]);
+}
+
+// Typed results, the coordinator lock and choosing the server (phase 6).
+
+const OWNER: &str = "user-ana";
+
+async fn store_and_pool() -> (Store, SqlitePool) {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    (Store::new(pool.clone()), pool)
+}
+
+/// Like `new_match`, but owned: the results projection only follows owned matches.
+async fn owned_match(s: &Store) -> StoredMatch {
+    let m = new_match(s).await;
+    s.create_match(
+        NewMatch {
+            format: m.format,
+            start: m.start,
+            teams: m.teams,
+            owner_user_id: Some(OWNER.into()),
+            players: Default::default(),
+        },
+        NOW,
+    )
+    .await
+    .unwrap()
+}
+
+fn six_three() -> FinalScore {
+    FinalScore::Sets(vec![SetScore {
+        a: 6,
+        b: 3,
+        tiebreak: None,
+    }])
+}
+
+fn final_req(client_id: &str, base_revision: Option<i64>, score: FinalScore) -> FinalRequest {
+    FinalRequest {
+        client_id: client_id.into(),
+        base_revision,
+        score,
+    }
+}
+
+async fn typed(
+    s: &Store,
+    m: &StoredMatch,
+    req: FinalRequest,
+    authority: Authority,
+) -> CommandOutcome {
+    record_final(s, m, req, authority, NOW + 2).await.unwrap()
+}
+
+fn locked(o: CommandOutcome) -> MatchView {
+    match o {
+        CommandOutcome::Locked(v) => v,
+        other => panic!("expected Locked, got {other:?}"),
+    }
+}
+
+async fn winners(pool: &SqlitePool, match_id: &str) -> Vec<Option<String>> {
+    sqlx::query_scalar("SELECT winner FROM match_results WHERE match_id = ?")
+        .bind(match_id)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+fn states(events: &[StoredEvent]) -> Vec<EventState> {
+    events.iter().map(|e| e.state).collect()
+}
+
+#[tokio::test]
+async fn typed_final_replaces_log_and_records_result() {
+    let (s, pool) = store_and_pool().await;
+    let m = owned_match(&s).await;
+    applied(run(&s, &m, live("c1", vec![point(Team::B); 3])).await);
+    let v = applied(
+        typed(
+            &s,
+            &m,
+            final_req("f1", Some(1), six_three()),
+            Authority::Scorer,
+        )
+        .await,
+    );
+    assert_eq!(
+        v.score.status,
+        Status::Finished {
+            winner: Some(Team::A)
+        }
+    );
+    assert_eq!(
+        v.score.sets,
+        vec![SetScore {
+            a: 6,
+            b: 3,
+            tiebreak: None
+        }]
+    );
+    assert!(!v.locked);
+    assert_eq!(v.revision, 2);
+    // 9 games of 4 points each, appended after the three tapped points.
+    assert_eq!(v.events.len(), 36);
+    assert_eq!(v.events[0].seq, 4);
+    let events = s.events(&m.id).await.unwrap();
+    assert_eq!(states(&events[..3]), vec![EventState::Replaced; 3]);
+    assert!(
+        events[3..]
+            .iter()
+            .all(|e| e.state == EventState::Effective && e.client_id == "f1")
+    );
+    assert_eq!(winners(&pool, &m.id).await, vec![Some("a".to_owned())]);
+}
+
+#[tokio::test]
+async fn typed_final_is_idempotent() {
+    let s = store().await;
+    let m = new_match(&s).await;
+    let first = applied(
+        typed(
+            &s,
+            &m,
+            final_req("f1", Some(0), six_three()),
+            Authority::Scorer,
+        )
+        .await,
+    );
+    match typed(
+        &s,
+        &m,
+        final_req("f1", Some(0), six_three()),
+        Authority::Scorer,
+    )
+    .await
+    {
+        CommandOutcome::Replayed { status, body } => {
+            assert_eq!(status, 200);
+            assert_eq!(serde_json::from_str::<MatchView>(&body).unwrap(), first);
+        }
+        other => panic!("expected Replayed, got {other:?}"),
+    }
+    assert_eq!(s.events(&m.id).await.unwrap().len(), 36);
+    assert_eq!(revision(&s, &m).await, 1);
+}
+
+#[tokio::test]
+async fn typed_final_stale_base_revision_conflicts() {
+    let s = store().await;
+    let m = new_match(&s).await;
+    applied(run(&s, &m, live("c1", vec![point(Team::A)])).await);
+    let v = conflict(
+        typed(
+            &s,
+            &m,
+            final_req("f1", Some(0), six_three()),
+            Authority::Scorer,
+        )
+        .await,
+    );
+    assert_eq!(v.revision, 1);
+    assert_eq!(seqs(&v), vec![1]);
+    assert_eq!(
+        states(&s.events(&m.id).await.unwrap()),
+        vec![EventState::Effective]
+    );
+    assert_eq!(revision(&s, &m).await, 1);
+    assert!(s.find_result(&m.id, "f1").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn typed_impossible_score_is_an_invalid_score_error() {
+    let s = store().await;
+    let m = new_match(&s).await;
+    let bad = FinalScore::Sets(vec![SetScore {
+        a: 6,
+        b: 5,
+        tiebreak: None,
+    }]);
+    let err = record_final(
+        &s,
+        &m,
+        final_req("f1", Some(0), bad),
+        Authority::Scorer,
+        NOW,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        padel_score_server::store::StoreError::InvalidScore(
+            padel_scoring::InvalidScore::ImpossibleSet { index: 0 }
+        )
+    ));
+    assert_eq!(revision(&s, &m).await, 0);
+}
+
+#[tokio::test]
+async fn typed_score_too_long_is_invalid() {
+    let s = store().await;
+    let m = new_match(&s).await;
+    let long = FinalScore::Sets(vec![SetScore {
+        a: 7,
+        b: 6,
+        tiebreak: Some((600, 598)),
+    }]);
+    assert!(matches!(
+        typed(&s, &m, final_req("f1", Some(0), long), Authority::Scorer).await,
+        CommandOutcome::Invalid("too many commands in one request")
+    ));
+    assert!(s.events(&m.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn coordinator_final_locks() {
+    let s = store().await;
+    let m = new_match(&s).await;
+    applied(run(&s, &m, live("c1", vec![point(Team::B)])).await);
+    // The coordinator's result wins whatever the revision.
+    let v = applied(typed(&s, &m, final_req("f1", None, six_three()), Authority::Owner).await);
+    assert!(v.locked);
+    let json = serde_json::to_value(&v).unwrap();
+    assert_eq!(json["locked"], serde_json::json!(true));
+    let (stored, _) = s.snapshot(&m.id).await.unwrap().unwrap();
+    assert_eq!(stored.result_locked_at, Some(NOW + 2));
+}
+
+#[tokio::test]
+async fn locked_match_refuses_scorer_commands() {
+    let s = store().await;
+    let m = new_match(&s).await;
+    let v = applied(typed(&s, &m, final_req("f1", None, six_three()), Authority::Owner).await);
+    let head = v.head_seq;
+
+    let seen = locked(run(&s, &m, live("p1", vec![point(Team::B)])).await);
+    assert_eq!(seen, v);
+    locked(run(&s, &m, live("u1", vec![undo(head)])).await);
+    locked(run(&s, &m, batch("b1", v.revision, vec![point(Team::B)])).await);
+    locked(
+        replace_from(
+            &s,
+            &m,
+            ReplaceRequest {
+                client_id: "r1".into(),
+                base_revision: v.revision,
+                base_seq: 0,
+                commands: vec![point(Team::B)],
+            },
+            NOW + 3,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
+    );
+    locked(
+        typed(
+            &s,
+            &m,
+            final_req("f2", Some(v.revision), six_three()),
+            Authority::Scorer,
+        )
+        .await,
+    );
+    let start = Start {
+        first_server: Player {
+            team: Team::B,
+            index: 1,
+        },
+        other_first_server: 1,
+    };
+    assert!(matches!(
+        set_start(&s, &m, start, Authority::Scorer, NOW + 3).await,
+        Err(padel_score_server::store::StoreError::Conflict("locked"))
+    ));
+    for client_id in ["p1", "u1", "b1", "r1", "f2"] {
+        assert!(s.find_result(&m.id, client_id).await.unwrap().is_none());
+    }
+    assert_eq!(revision(&s, &m).await, v.revision);
+    assert_eq!(s.events(&m.id).await.unwrap().len(), 36);
+}
+
+#[tokio::test]
+async fn owner_commands_ignore_lock() {
+    let s = store().await;
+    let m = new_match(&s).await;
+    let v = applied(typed(&s, &m, final_req("f1", None, six_three()), Authority::Owner).await);
+    let after = applied(
+        apply_command(
+            &s,
+            &m,
+            live("u1", vec![undo(v.head_seq)]),
+            NOW + 3,
+            Authority::Owner,
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(after.score.status, Status::InProgress);
+    // The lock stays until the coordinator types another result.
+    assert!(after.locked);
+}
+
+#[tokio::test]
+async fn set_start_changes_the_server_before_the_first_point() {
+    let s = store().await;
+    let m = new_match(&s).await;
+    let start = Start {
+        first_server: Player {
+            team: Team::B,
+            index: 1,
+        },
+        other_first_server: 1,
+    };
+    let v = set_start(&s, &m, start, Authority::Scorer, NOW + 1)
+        .await
+        .unwrap();
+    assert_eq!(v.start, start);
+    assert_eq!(v.score.server, start.first_server);
+    assert_eq!(v.revision, 1);
+    let bad = Start {
+        first_server: Player {
+            team: Team::A,
+            index: 2,
+        },
+        other_first_server: 0,
+    };
+    assert!(matches!(
+        set_start(&s, &m, bad, Authority::Scorer, NOW + 1).await,
+        Err(padel_score_server::store::StoreError::InvalidRules(_))
+    ));
+    applied(run(&s, &m, live("c1", vec![point(Team::A)])).await);
+    assert!(matches!(
+        set_start(&s, &m, start, Authority::Owner, NOW + 2).await,
+        Err(padel_score_server::store::StoreError::Conflict(
+            "already_started"
+        ))
+    ));
+    // An undone point still counts as started: the log has a row.
+    applied(run(&s, &m, live("c2", vec![undo(1)])).await);
+    assert!(matches!(
+        set_start(&s, &m, start, Authority::Scorer, NOW + 2).await,
+        Err(padel_score_server::store::StoreError::Conflict(
+            "already_started"
+        ))
+    ));
+}
+
+#[tokio::test]
+async fn undo_after_typed_final_unfinishes() {
+    let (s, pool) = store_and_pool().await;
+    let m = owned_match(&s).await;
+    let v = applied(
+        typed(
+            &s,
+            &m,
+            final_req("f1", Some(0), six_three()),
+            Authority::Scorer,
+        )
+        .await,
+    );
+    assert_eq!(winners(&pool, &m.id).await.len(), 1);
+    let after = applied(run(&s, &m, live("u1", vec![undo(v.head_seq)])).await);
+    assert_eq!(after.score.status, Status::InProgress);
+    assert!(winners(&pool, &m.id).await.is_empty());
+}
+
+#[test]
+fn final_request_wire_shape() {
+    let req: FinalRequest = serde_json::from_str(
+        r#"{"client_id":"f","base_revision":3,"score":{"sets":[{"a":6,"b":4,"tiebreak":null}]}}"#,
+    )
+    .unwrap();
+    assert_eq!(req.base_revision, Some(3));
+    assert_eq!(
+        req.score,
+        FinalScore::Sets(vec![SetScore {
+            a: 6,
+            b: 4,
+            tiebreak: None
+        }])
+    );
 }

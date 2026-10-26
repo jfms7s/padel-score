@@ -12,3 +12,13 @@ export function safeStorage(): StorageLike {
 		return nothing;
 	}
 }
+
+/** `sessionStorage` (this browser tab only), or a store that remembers nothing, as above. */
+export function safeSessionStorage(): StorageLike {
+	try {
+		const s = globalThis.sessionStorage;
+		return s ?? nothing;
+	} catch {
+		return nothing;
+	}
+}
