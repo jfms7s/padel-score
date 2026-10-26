@@ -10,9 +10,9 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.NavHostController
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import io.github.jfms7s.padelscore.auth.TokenStore
 import io.github.jfms7s.padelscore.haptics.Haptics
 import io.github.jfms7s.padelscore.net.ApiResult
@@ -26,6 +26,10 @@ import io.github.jfms7s.padelscore.net.StreamItem
 import io.github.jfms7s.padelscore.net.TokenPoll
 import io.github.jfms7s.padelscore.score.FakeHaptics
 import io.github.jfms7s.padelscore.score.fixtureView
+import io.github.jfms7s.padelscore.settings.FakeSettingsStore
+import io.github.jfms7s.padelscore.settings.ServerSettings
+import io.github.jfms7s.padelscore.settings.SettingsModel
+import io.github.jfms7s.padelscore.settings.testDefaults
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,8 +37,6 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
-import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -88,8 +90,9 @@ private class FakeContainer(
     override val tokens: FakeTokens,
     private val list: Flow<StreamItem<List<MyMatch>>> = emptyFlow(),
     private val match: Flow<StreamItem<MatchView>> = emptyFlow(),
+    override val settingsStore: FakeSettingsStore = FakeSettingsStore(),
+    override val settings: ServerSettings = testDefaults,
 ) : AppContainer {
-    override val serverUrl: HttpUrl = "https://example.test".toHttpUrl()
     override val haptics: Haptics = FakeHaptics()
     override val deviceName: String = "Test watch"
     var matchStreams = 0
@@ -99,6 +102,12 @@ private class FakeContainer(
         matchStreams++
         return match
     }
+
+    /** The containers built after a settings change; they share the token store, as on the watch. */
+    val reloads = mutableListOf<FakeContainer>()
+
+    override suspend fun reload(): AppContainer =
+        FakeContainer(api, tokens, list, match, settingsStore, settingsStore.read()).also { reloads += it }
 }
 
 @RunWith(AndroidJUnit4::class)
@@ -114,9 +123,8 @@ class WatchAppTest {
 
     private fun launch(container: AppContainer) {
         compose.setContent {
-            nav = rememberSwipeDismissableNavController()
             back = checkNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
-            WatchApp(container, nav)
+            WatchApp(container) { nav = it }
         }
         compose.waitForIdle()
     }
@@ -242,5 +250,63 @@ class WatchAppTest {
         compose.onNodeWithText("Back to matches").performClick()
         compose.waitForIdle()
         assertEquals("matches", nav.currentDestination?.route)
+    }
+
+    @Test
+    fun new_server_clears_token_and_restarts_on_sign_in() {
+        val tokens = FakeTokens("tok")
+        val container = FakeContainer(FakeApi(oneMatch), tokens)
+        launch(container)
+        compose.onNodeWithText("Server settings").performClick()
+        compose.onNodeWithText("example.test").assertExists()
+
+        submit { it.submitServer("padel.other.test") }
+
+        compose.onNodeWithText("New code").assertExists()
+        assertEquals(1, tokens.clears)
+        assertNull(runBlocking { tokens.read() })
+        val rebuilt = container.reloads.single()
+        assertEquals("https://padel.other.test/", rebuilt.serverUrl.toString())
+        assertEquals("signin", nav.currentDestination?.route)
+        assertNull(nav.previousBackStackEntry) // a fresh graph, nothing to go back to
+    }
+
+    @Test
+    fun new_addresses_keep_the_sign_in() {
+        val tokens = FakeTokens("tok")
+        val container = FakeContainer(FakeApi(oneMatch), tokens)
+        launch(container)
+        compose.onNodeWithText("Server settings").performClick()
+
+        submit { it.submitAddresses("10.1.2.3, 10.1.2.4") }
+
+        compose.onNodeWithText("Ana / Rui v João / Marta").assertExists()
+        assertEquals(0, tokens.clears)
+        assertEquals("tok", runBlocking { tokens.read() })
+        val rebuilt = container.reloads.single()
+        assertEquals(listOf("10.1.2.3", "10.1.2.4"), rebuilt.settings.fallback.map { it.hostAddress })
+        assertEquals("matches", nav.currentDestination?.route)
+        assertNull(nav.previousBackStackEntry)
+    }
+
+    @Test
+    fun settings_from_sign_in_and_back() {
+        launch(FakeContainer(FakeApi(oneMatch), FakeTokens(null)))
+        compose.onNodeWithText("Server settings").performClick()
+        compose.onNodeWithText("LAN addresses").assertExists()
+
+        compose.runOnUiThread { back.onBackPressed() }
+        compose.waitForIdle()
+        assertEquals("signin", nav.currentDestination?.route)
+    }
+
+    /** What the keyboard would hand back, given straight to the settings screen's model. */
+    private fun submit(action: (SettingsModel) -> Unit) {
+        compose.waitForIdle()
+        val entry = checkNotNull(nav.currentBackStackEntry)
+        assertEquals("settings", entry.destination.route)
+        val model = ViewModelProvider.create(entry)[SettingsModel::class]
+        compose.runOnUiThread { action(model) }
+        compose.waitForIdle()
     }
 }

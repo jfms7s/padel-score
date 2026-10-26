@@ -19,16 +19,21 @@ import io.github.jfms7s.padelscore.net.PadelApi
 import io.github.jfms7s.padelscore.net.StreamItem
 import io.github.jfms7s.padelscore.net.WireJson
 import io.github.jfms7s.padelscore.net.sseFlow
+import io.github.jfms7s.padelscore.settings.DataStoreSettingsStore
+import io.github.jfms7s.padelscore.settings.ServerSettings
+import io.github.jfms7s.padelscore.settings.SettingsStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
-import java.net.InetAddress
 import java.time.Duration
 
 /** What the screens need; [WatchApp] takes it so tests can hand in fakes. */
 interface AppContainer {
-    val serverUrl: HttpUrl
+    /** The settings this container was built with. */
+    val settings: ServerSettings
+    val serverUrl: HttpUrl get() = settings.serverUrl
+    val settingsStore: SettingsStore
     val api: PadelApi
     val tokens: TokenStore
     val haptics: Haptics
@@ -39,6 +44,9 @@ interface AppContainer {
 
     /** Cold: each collection opens its own connection. */
     fun matchStream(matchId: String): Flow<StreamItem<MatchView>>
+
+    /** A new container on the stored settings, which the app switches to after they change. */
+    suspend fun reload(): AppContainer
 }
 
 // DataStore allows one active instance per file, so the delegate keeps it process-wide.
@@ -48,17 +56,30 @@ private val Context.authDataStore by preferencesDataStore(
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
 )
 
-/** Manual dependency injection: one instance per process, built by [PadelApp]. */
+private val Context.settingsDataStore by preferencesDataStore(
+    name = "server_settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
+
+/** The process-wide store of the owner's server settings, on top of the build's [defaults]. */
+fun settingsStoreOf(context: Context, defaults: ServerSettings): SettingsStore =
+    DataStoreSettingsStore(context.applicationContext.settingsDataStore, defaults)
+
+/**
+ * Manual dependency injection, built by [PadelApp]: one instance per process until the server
+ * settings change, then [reload] (via [PadelApp.reload]) replaces it.
+ */
 class DefaultAppContainer(
     context: Context,
-    override val serverUrl: HttpUrl,
-    serverFallback: List<InetAddress> = emptyList(),
+    override val settings: ServerSettings,
+    override val settingsStore: SettingsStore,
+    private val reloader: suspend () -> AppContainer,
 ) : AppContainer {
     private val appContext: Context = context.applicationContext
 
     // The stream client below is derived from this one, so it shares the LAN fallback.
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .dns(LanFallbackDns(serverUrl.host, serverFallback))
+        .dns(LanFallbackDns(settings.serverUrl.host, settings.fallback))
         .connectTimeout(Duration.ofSeconds(5))
         .callTimeout(Duration.ofSeconds(8))
         .retryOnConnectionFailure(false)
@@ -85,4 +106,6 @@ class DefaultAppContainer(
 
     override fun matchStream(matchId: String): Flow<StreamItem<MatchView>> =
         sseFlow(streamHttp, { api.matchStreamRequest(matchId) }, "state", { WireJson.decodeFromString(MatchView.serializer(), it) })
+
+    override suspend fun reload(): AppContainer = reloader()
 }

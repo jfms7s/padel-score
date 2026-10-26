@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -27,6 +30,8 @@ import io.github.jfms7s.padelscore.matches.MatchListModel
 import io.github.jfms7s.padelscore.matches.MatchListScreen
 import io.github.jfms7s.padelscore.score.ScoreModel
 import io.github.jfms7s.padelscore.score.ScoreScreen
+import io.github.jfms7s.padelscore.settings.SettingsModel
+import io.github.jfms7s.padelscore.settings.SettingsScreen
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.IOException
@@ -35,12 +40,35 @@ private const val SIGN_IN = "signin"
 private const val MATCHES = "matches"
 private const val SCORE = "score/{id}"
 
-@Composable
-fun WatchApp(container: AppContainer) = WatchApp(container, rememberSwipeDismissableNavController())
+private const val SETTINGS = "settings"
 
-/** [nav] is a seam for tests, which check the back stack after a sign-out. */
 @Composable
-internal fun WatchApp(container: AppContainer, nav: NavHostController) {
+fun WatchApp(container: AppContainer) = WatchApp(container) {}
+
+/**
+ * [onNav] is a seam for tests, which check the back stack. It is called again with a new controller
+ * whenever the server settings change: the whole graph restarts on the rebuilt container.
+ */
+@Composable
+internal fun WatchApp(container: AppContainer, onNav: (NavHostController) -> Unit) {
+    var current by remember(container) { mutableStateOf(container) }
+    val scope = rememberCoroutineScope()
+    key(current) {
+        val nav = rememberSwipeDismissableNavController()
+        SideEffect { onNav(nav) }
+        WatchRoot(current, nav, onSettingsApplied = {
+            scope.launch {
+                val next = current.reload()
+                // Pop everything first so the old screens' models (and their streams) are cleared now.
+                nav.popBackStack(nav.graph.id, inclusive = true)
+                current = next
+            }
+        })
+    }
+}
+
+@Composable
+private fun WatchRoot(container: AppContainer, nav: NavHostController, onSettingsApplied: () -> Unit) {
     // signedIn only knows a token blob exists; a blob that no longer decrypts is cleared on the
     // first read, the first call then answers Unauthorized, and the sign-out below takes over.
     val start by produceState<String?>(null, container) {
@@ -51,21 +79,29 @@ internal fun WatchApp(container: AppContainer, nav: NavHostController) {
         }
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        start?.let { WatchNavHost(container, nav, it) }
+        start?.let { WatchNavHost(container, nav, it, onSettingsApplied) }
     }
 }
 
 @Composable
-private fun WatchNavHost(container: AppContainer, nav: NavHostController, start: String) {
+private fun WatchNavHost(
+    container: AppContainer,
+    nav: NavHostController,
+    start: String,
+    onSettingsApplied: () -> Unit,
+) {
     val signOut = rememberSignOut(container, nav)
+    val openSettings = { nav.navigate(SETTINGS) { launchSingleTop = true } }
     SwipeDismissableNavHost(navController = nav, startDestination = start) {
         composable(SIGN_IN) {
             val model = viewModel {
                 SignInModel(container.api, container.tokens, container.serverUrl, container.deviceName)
             }
-            SignInScreen(model, onSignedIn = {
-                nav.navigate(MATCHES) { popUpTo(SIGN_IN) { inclusive = true } }
-            })
+            SignInScreen(
+                model,
+                onSignedIn = { nav.navigate(MATCHES) { popUpTo(SIGN_IN) { inclusive = true } } },
+                onSettings = openSettings,
+            )
         }
         composable(MATCHES) {
             val title = stringResource(R.string.quick_match)
@@ -77,6 +113,7 @@ private fun WatchNavHost(container: AppContainer, nav: NavHostController, start:
             MatchListScreen(
                 model,
                 onPick = { id -> nav.navigate("score/${Uri.encode(id)}") },
+                onSettings = openSettings,
                 onSignOut = signOut,
             )
         }
@@ -90,6 +127,10 @@ private fun WatchNavHost(container: AppContainer, nav: NavHostController, start:
                 if (unauthorized) signOut()
             }
             ScoreScreen(model, onDone = { nav.popBackStack(MATCHES, inclusive = false) })
+        }
+        composable(SETTINGS) {
+            val model = viewModel { SettingsModel(container.settingsStore, container.tokens, container.settings) }
+            SettingsScreen(model, onApplied = onSettingsApplied)
         }
     }
 }

@@ -33,14 +33,19 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import io.github.jfms7s.padelscore.R
 
 @Composable
-fun MatchListScreen(model: MatchListModel, onPick: (String) -> Unit, onSignOut: () -> Unit) {
+fun MatchListScreen(
+    model: MatchListModel,
+    onPick: (String) -> Unit,
+    onSignOut: () -> Unit,
+    onSettings: () -> Unit,
+) {
     // Started only while visible: the score screen on top, or the screen going off, closes the list stream.
     LifecycleStartEffect(model) {
         model.startStream()
         onStopOrDispose { model.stopStream() }
     }
     val state by model.state.collectAsState()
-    MatchListContent(state, onPick, onRetry = model::refresh, onSignOut = onSignOut)
+    MatchListContent(state, onPick, onRetry = model::refresh, onSettings = onSettings, onSignOut = onSignOut)
 }
 
 private val MinTarget = 48.dp
@@ -50,6 +55,7 @@ internal fun MatchListContent(
     state: ListState,
     onPick: (String) -> Unit,
     onRetry: () -> Unit,
+    onSettings: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     var confirming by rememberSaveable { mutableStateOf(false) }
@@ -71,6 +77,7 @@ internal fun MatchListContent(
                         }
                     }
                 }
+                item { RowButton(stringResource(R.string.settings_title), onClick = onSettings) }
                 item { RowButton(stringResource(R.string.sign_out), onClick = { confirming = true }) }
             }
         }

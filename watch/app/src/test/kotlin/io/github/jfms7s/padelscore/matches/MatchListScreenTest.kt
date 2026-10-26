@@ -47,7 +47,7 @@ class MatchListScreenTest {
 
     @Test
     fun empty_list_shows_hint() {
-        compose.setContent { MatchListScreen(modelOf(emptyList()), onPick = {}, onSignOut = {}) }
+        compose.setContent { MatchListScreen(modelOf(emptyList()), onPick = {}, onSettings = {}, onSignOut = {}) }
         compose.onNodeWithText("No live matches. Start one on your phone.").assertExists()
     }
 
@@ -55,7 +55,7 @@ class MatchListScreenTest {
     fun tapping_row_picks_its_id() {
         val model = modelOf(listOf(MyMatch("m1", "Ana / Rui v João / Marta")))
         var picked: String? = null
-        compose.setContent { MatchListScreen(model, onPick = { picked = it }, onSignOut = {}) }
+        compose.setContent { MatchListScreen(model, onPick = { picked = it }, onSettings = {}, onSignOut = {}) }
         compose.onNodeWithText("Quick match").assertHeightIsAtLeast(48.dp)
         compose.onNodeWithText("Ana / Rui v João / Marta").performClick()
         assertEquals("m1", picked)
@@ -64,7 +64,7 @@ class MatchListScreenTest {
     @Test
     fun sign_out_needs_confirm() {
         var signedOut = 0
-        compose.setContent { MatchListScreen(modelOf(emptyList()), onPick = {}, onSignOut = { signedOut++ }) }
+        compose.setContent { MatchListScreen(modelOf(emptyList()), onPick = {}, onSettings = {}, onSignOut = { signedOut++ }) }
         compose.onNodeWithText("Sign out").assertHeightIsAtLeast(48.dp).performClick()
         assertEquals(0, signedOut)
         compose.onNodeWithText("Signing out only forgets this watch", substring = true).assertExists()
@@ -75,7 +75,7 @@ class MatchListScreenTest {
     @Test
     fun cancel_keeps_the_sign_in() {
         var signedOut = 0
-        compose.setContent { MatchListScreen(modelOf(emptyList()), onPick = {}, onSignOut = { signedOut++ }) }
+        compose.setContent { MatchListScreen(modelOf(emptyList()), onPick = {}, onSettings = {}, onSignOut = { signedOut++ }) }
         compose.onNodeWithText("Sign out").performClick()
         compose.onNodeWithText("Cancel").performClick()
         assertEquals(0, signedOut)
