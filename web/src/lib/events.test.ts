@@ -24,6 +24,7 @@ import {
 	parseTypedScore,
 	placesFromOrder,
 	postEventResult,
+	resultRefusalText,
 	rulesText,
 	teamText,
 	unfinishedCount,
@@ -339,6 +340,15 @@ describe('coordinator screens', () => {
 		);
 		expect(eventMessage(new ApiError(0, 'network', 'x'))).toBe(strings.networkError);
 		expect(eventMessage(new Error('boom'))).toBe(strings.networkError);
+	});
+
+	it('result_refusal_text', () => {
+		const reason = { impossible_set: { index: 0 } } as const;
+		expect(resultRefusalText(new ApiError(422, 'invalid_score', 'x', false, { reason }))).toBe(invalidScoreText(reason));
+		expect(resultRefusalText(new ApiError(409, 'conflict', 'x'))).toBe(strings.events.sheet.conflict);
+		expect(resultRefusalText(new ApiError(409, 'locked', 'x'))).toBe(strings.events.sheet.locked);
+		expect(resultRefusalText(new ApiError(409, 'no_courts', 'x'))).toBe(eventMessage(new ApiError(409, 'no_courts', 'x')));
+		expect(resultRefusalText(new Error('boom'))).toBe(strings.networkError);
 	});
 
 	it('finish_warns_about_unfinished_matches', () => {

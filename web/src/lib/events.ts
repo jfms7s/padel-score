@@ -417,6 +417,16 @@ export function eventMessage(e: unknown): string {
 	return authMessage(e);
 }
 
+/** Why a typed result was refused, as the result sheet and the match list's field say it. */
+export function resultRefusalText(e: unknown): string {
+	if (e instanceof ApiError) {
+		if (e.code === 'invalid_score' && e.reason !== undefined) return invalidScoreText(e.reason);
+		if (e.code === 'conflict') return strings.events.sheet.conflict;
+		if (e.code === 'locked') return strings.events.sheet.locked;
+	}
+	return eventMessage(e);
+}
+
 // ---- stream frames -----------------------------------------------------------------------
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;

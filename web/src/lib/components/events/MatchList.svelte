@@ -4,8 +4,9 @@
 	court select and the View link.
 
 	At 700 px and wider a row's click or `/` opens a result field in the row: Enter saves and
-	moves on to the next unfinished match, Esc closes it, ↑/↓ move between rows. On a phone a
-	tap opens the typed-score sheet under the row instead.
+	moves on to the next unfinished match, Esc closes it, ↑/↓ move between rows. A level timed
+	score asks who won the overtime game with two buttons under the field. On a phone a tap
+	opens the typed-score sheet under the row instead.
 
 	`onsave` throws to refuse; the refusal shows in place. Its client id stays the same while
 	the same score is sent again from one open field or sheet, so a retry is replayed.
@@ -14,11 +15,20 @@
 	import { tick } from 'svelte';
 	import TypedScoreSheet from '#lib/components/TypedScoreSheet.svelte';
 	import { groupMatches, moveRow, nextUnfinished } from '#lib/desk.ts';
-	import { eventMessage, liveScoreText, matchText, matchViewPath, parsedErrorText, parseTypedScore } from '#lib/events.ts';
+	import {
+		liveScoreText,
+		matchText,
+		matchViewPath,
+		parsedErrorText,
+		parseTypedScore,
+		resultRefusalText,
+		teamText,
+		withOvertimeWinner
+	} from '#lib/events.ts';
 	import { stickyClientId } from '#lib/ids.ts';
 	import { scoreText } from '#lib/players.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { EventTeam, EventViewCourt, EventViewMatch, Format, Teams, TypedScore } from '#lib/types.ts';
+	import type { EventTeam, EventViewCourt, EventViewMatch, Format, Team, Teams, TypedScore } from '#lib/types.ts';
 
 	let {
 		matches,
@@ -72,6 +82,8 @@
 	let text = $state('');
 	let failure = $state<string | null>(null);
 	let saving = $state(false);
+	/** A level timed score waiting for the overtime game's winner. */
+	let overtime = $state<TypedScore | null>(null);
 	let field = $state<HTMLInputElement | null>(null);
 	const rowButtons: Record<string, HTMLButtonElement | null> = {};
 	const ids = stickyClientId();
@@ -89,6 +101,11 @@
 		return { kind: 'wait', text: courtName(m.court_id) ?? t.nextFree };
 	}
 
+	const teamName = (tid: string) => {
+		const tm = teams.find((x) => x.id === tid);
+		return tm ? teamText(tm) : te.unknownTeam;
+	};
+
 	/** The players' names as the sheet shows them. */
 	function teamsOf(m: M): Teams {
 		const names = (tid: string): [string, string] => {
@@ -103,6 +120,7 @@
 			ids.reset();
 			text = '';
 			failure = null;
+			overtime = null;
 		}
 		openId = mid;
 		// Clicking the open row again puts the cursor back.
@@ -113,31 +131,49 @@
 		const mid = openId;
 		openId = null;
 		failure = null;
+		overtime = null;
 		if (!focusRow || mid === null) return;
 		await tick();
 		rowButtons[mid]?.focus();
 	}
 
-	async function save(m: M) {
-		if (saving || busy || !onsave) return;
+	function save(m: M) {
 		const parsed = parseTypedScore(text, format);
-		if ('error' in parsed) {
-			failure = parsedErrorText(parsed.error);
+		if ('ok' in parsed) return commit(m, parsed.ok);
+		if (parsed.error === 'needs_overtime_winner') {
+			// The picker under the field finishes the score.
+			overtime = parsed.score;
+			failure = null;
 			return;
 		}
+		failure = parsedErrorText(parsed.error);
+	}
+
+	function pickOvertime(m: M, team: Team) {
+		if (overtime !== null) void commit(m, withOvertimeWinner(overtime, team));
+	}
+
+	async function commit(m: M, score: TypedScore) {
+		if (saving || busy || !onsave) return;
 		// The order before the save: the saved row may move to the finished group.
 		const order = rowIds;
 		const left = new Set(unfinished);
 		left.delete(m.id);
 		saving = true;
 		failure = null;
+		let refused: string | null = null;
 		try {
-			await onsave(m, parsed.ok, ids.for(parsed.ok));
+			await onsave(m, score, ids.for(score));
 		} catch (e) {
-			failure = eventMessage(e);
-			return;
+			refused = resultRefusalText(e);
 		} finally {
 			saving = false;
+		}
+		// Closed (Esc) or moved to another row meanwhile: leave it as the user left it.
+		if (openId !== m.id) return;
+		if (refused !== null) {
+			failure = refused;
+			return;
 		}
 		const next = nextUnfinished(order, left, m.id, true);
 		if (next === null) await close(true);
@@ -147,11 +183,18 @@
 	function fieldKey(e: KeyboardEvent, m: M) {
 		if (e.key === 'Enter') {
 			e.preventDefault();
-			void save(m);
+			save(m);
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			void close(true);
 		}
+	}
+
+	/** Esc on the overtime buttons closes them with the field; Enter stays a click. */
+	function pickerKey(e: KeyboardEvent) {
+		if (e.key !== 'Escape') return;
+		e.preventDefault();
+		void close(true);
 	}
 
 	function rowKey(e: KeyboardEvent, mid: string) {
@@ -235,7 +278,7 @@
 									class="result"
 									bind:this={field}
 									bind:value={text}
-									oninput={() => (failure = null)}
+									oninput={() => ((failure = null), (overtime = null))}
 									onkeydown={(e) => fieldKey(e, m)}
 									aria-label={t.typeResult(m.label)}
 									aria-describedby={failure ? `${uid}-failure` : undefined}
@@ -248,6 +291,16 @@
 									maxlength="60"
 								/>
 							</div>
+							{#if overtime !== null}
+								<div class="overtime" role="group" aria-labelledby="{uid}-ot">
+									<p id="{uid}-ot">{te.sheet.overtime}</p>
+									{#each [['a', m.team_a], ['b', m.team_b]] as const as [team, tid] (team)}
+										<button type="button" class={team} disabled={saving || busy} onclick={() => pickOvertime(m, team)} onkeydown={pickerKey}>
+											{te.sheet.overtimeWon(teamName(tid))}
+										</button>
+									{/each}
+								</div>
+							{/if}
 							{#if failure}<p class="error" id="{uid}-failure" role="alert">{failure}</p>{/if}
 						{:else if isOpen}
 							<TypedScoreSheet
@@ -360,7 +413,7 @@
 		height: 8px;
 		border-radius: 50%;
 		background: var(--ball);
-		box-shadow: 0 0 0 2px rgba(217, 234, 42, 0.3);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--ball) 30%, transparent);
 	}
 	.chip.done {
 		background: transparent;
@@ -408,6 +461,34 @@
 		font-size: 15px;
 		font-weight: 700;
 		font-feature-settings: 'tnum';
+	}
+	.overtime {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+		padding: 0 6px;
+	}
+	.overtime p {
+		flex-basis: 100%;
+		margin: 0;
+		font-weight: 650;
+	}
+	.overtime button {
+		min-height: 40px;
+		padding: 0 12px;
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		background: var(--panel);
+		color: var(--ink);
+		font-weight: 650;
+		overflow-wrap: anywhere;
+	}
+	.overtime button.a {
+		border-color: var(--a);
+	}
+	.overtime button.b {
+		border-color: var(--b);
 	}
 	.error {
 		margin: 0 6px;
