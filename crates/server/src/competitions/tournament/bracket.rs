@@ -10,10 +10,6 @@
 //! loser `place_from + 1`. A draw is played when `place_from == 1`, or full placement is on,
 //! or it is the 3rd-place draw `(3, 2)`.
 
-// Nothing outside this module uses the bracket until the store (phase 7, task 2) does; test
-// builds still flag any item the tests leave unused. Remove once `store.rs` calls in.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};

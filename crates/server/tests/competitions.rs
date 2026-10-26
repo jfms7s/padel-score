@@ -74,7 +74,7 @@ async fn create_and_list_newest_first() {
     let first = s.create_competition(A, new_event("One"), 10).await.unwrap();
     let second = s.create_competition(A, new_event("Two"), 20).await.unwrap();
     assert_eq!(first.status, Status::Setup);
-    assert_eq!(first.settings, json!({}));
+    assert_eq!(first.settings, json!({ "full_placement": false }));
     assert!(!first.spectator_token.is_empty());
     assert_ne!(first.spectator_token, second.spectator_token);
     let listed = s.competitions(A).await.unwrap();
@@ -109,7 +109,7 @@ async fn kind_format_mismatch_is_refused() {
 }
 
 #[tokio::test]
-async fn settings_must_be_empty_in_phase_6() {
+async fn tournament_settings_are_normalized() {
     let (s, _) = setup().await;
     let mut new = new_event("T");
     new.settings = Some(json!({"x": 1}));
@@ -122,7 +122,7 @@ async fn settings_must_be_empty_in_phase_6() {
     ok.settings = Some(json!({}));
     assert_eq!(
         s.create_competition(A, ok, 1).await.unwrap().settings,
-        json!({})
+        json!({ "full_placement": false })
     );
 }
 
@@ -687,11 +687,19 @@ const FOUR: [[&str; 2]; 4] = [
     ["Tiago", "Luis"],
 ];
 
-/// A running event of four teams with one court.
-async fn running_event(s: &Store) -> (Competition, Vec<String>) {
-    let (ev, teams) = event_of(s, A, &FOUR).await;
+/// A running event of four teams with one court. The status is set directly, not through
+/// `start_competition`, so the tournament's draw makes no matches: these tests are about the
+/// shared event code, with matches made by hand.
+async fn running_event(s: &Store, pool: &SqlitePool) -> (Competition, Vec<String>) {
+    let (mut ev, teams) = event_of(s, A, &FOUR).await;
     s.add_court(A, &ev.id, None).await.unwrap();
-    let ev = s.start_competition(A, &ev.id, 20).await.unwrap();
+    sqlx::query("UPDATE competitions SET status = 'running', started_at = 20 WHERE id = ?")
+        .bind(&ev.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    ev.status = Status::Running;
+    ev.started_at = Some(20);
     (ev, teams)
 }
 
@@ -704,7 +712,7 @@ fn one_set() -> Format {
 }
 
 async fn one_set_event(s: &Store, pool: &SqlitePool) -> (Competition, Vec<String>) {
-    let (ev, teams) = running_event(s).await;
+    let (ev, teams) = running_event(s, pool).await;
     sqlx::query("UPDATE competitions SET format = ? WHERE id = ?")
         .bind(serde_json::to_string(&one_set()).unwrap())
         .bind(&ev.id)
@@ -723,7 +731,7 @@ async fn start_needs_teams_and_courts() {
         matches!(err, StoreError::Conflict("too_few_teams")),
         "{err:?}"
     );
-    let (ev, _) = event_of(&s, A, &[["Eva", "Ines"], ["Tiago", "Luis"]]).await;
+    let (ev, _) = event_of(&s, A, &FOUR).await;
     let err = s.start_competition(A, &ev.id, 20).await.unwrap_err();
     assert!(matches!(err, StoreError::Conflict("no_courts")), "{err:?}");
     s.add_court(A, &ev.id, None).await.unwrap();
@@ -736,8 +744,8 @@ async fn start_needs_teams_and_courts() {
 
 #[tokio::test]
 async fn start_only_from_setup() {
-    let (s, _) = setup().await;
-    let (ev, _) = running_event(&s).await;
+    let (s, pool) = setup().await;
+    let (ev, _) = running_event(&s, &pool).await;
     let err = s.start_competition(A, &ev.id, 30).await.unwrap_err();
     assert!(
         matches!(err, StoreError::Conflict("event_started")),
@@ -757,7 +765,7 @@ fn four_places(spec: [(u32, u32); 4], teams: &[String]) -> Vec<Place> {
 #[tokio::test]
 async fn finish_writes_two_placings_per_team() {
     let (s, pool) = setup().await;
-    let (ev, teams) = running_event(&s).await;
+    let (ev, teams) = running_event(&s, &pool).await;
     let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
     let (done, rotated) = s
         .finish_competition(A, &ev.id, Some(given.clone()), 90)
@@ -788,7 +796,7 @@ async fn finish_writes_two_placings_per_team() {
 #[tokio::test]
 async fn finish_shared_place() {
     let (s, pool) = setup().await;
-    let (ev, teams) = running_event(&s).await;
+    let (ev, teams) = running_event(&s, &pool).await;
     let given = four_places([(1, 1), (2, 2), (3, 4), (3, 4)], &teams);
     s.finish_competition(A, &ev.id, Some(given), 90)
         .await
@@ -809,8 +817,8 @@ async fn finish_shared_place() {
 
 #[tokio::test]
 async fn finish_without_places_is_422() {
-    let (s, _) = setup().await;
-    let (ev, teams) = running_event(&s).await;
+    let (s, pool) = setup().await;
+    let (ev, teams) = running_event(&s, &pool).await;
     let err = s.finish_competition(A, &ev.id, None, 90).await.unwrap_err();
     assert!(matches!(err, StoreError::InvalidField("places")), "{err:?}");
     let bad = four_places([(1, 1), (2, 2), (3, 3), (3, 3)], &teams);
@@ -956,8 +964,8 @@ async fn event_match_in_history_has_event_context() {
 
 #[tokio::test]
 async fn placings_are_owner_filtered() {
-    let (s, _) = setup().await;
-    let (ev, teams) = running_event(&s).await;
+    let (s, pool) = setup().await;
+    let (ev, teams) = running_event(&s, &pool).await;
     let given = four_places([(1, 1), (2, 2), (3, 3), (4, 4)], &teams);
     s.finish_competition(A, &ev.id, Some(given), 90)
         .await

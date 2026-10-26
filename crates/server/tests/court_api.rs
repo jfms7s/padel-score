@@ -57,8 +57,22 @@ struct Event {
     first: String,
 }
 
+/// Starting a tournament draws its bracket and puts matches on the courts. These tests are about
+/// courts and hand-made event matches, so remove the drawn matches (their courts go free).
+async fn clear_draw(pool: &sqlx::SqlitePool) {
+    sqlx::query("DELETE FROM matches WHERE id IN (SELECT match_id FROM bracket_matches)")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 /// A running "Sunday cup" with four teams, two courts and one match current on court 1.
-async fn running_event(state: &AppState, app: &Router, raw: &str) -> Event {
+async fn running_event(
+    state: &AppState,
+    pool: &sqlx::SqlitePool,
+    app: &Router,
+    raw: &str,
+) -> Event {
     let res = call(
         state,
         app,
@@ -127,6 +141,7 @@ async fn running_event(state: &AppState, app: &Router, raw: &str) -> Event {
     )
     .await)
     .await;
+    clear_draw(pool).await;
     let first = create_match(state, app, raw, &id, &teams[0], &teams[1], &courts[0]).await;
     Event {
         id,
@@ -224,8 +239,8 @@ async fn open(app: &Router, path: &str) -> Sse {
 
 #[tokio::test]
 async fn court_state_scorer_gets_scorer_token_viewer_does_not() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &raw).await;
     let second = create_match(
         &state,
         &app,
@@ -273,8 +288,8 @@ async fn court_state_scorer_gets_scorer_token_viewer_does_not() {
 
 #[tokio::test]
 async fn phones_count_follows_scorer_streams() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &raw).await;
     let d = detail(&state, &app, &raw, &ev.id).await;
     let (scorer, viewer) = court_tokens(&d, &ev.courts[0]);
     assert_eq!(court_in(&d, &ev.courts[0])["phones"], json!(0));
@@ -308,8 +323,8 @@ async fn phones_count_follows_scorer_streams() {
 
 #[tokio::test]
 async fn court_stream_follows_advance() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &raw).await;
     let second = create_match(
         &state,
         &app,
@@ -368,8 +383,8 @@ async fn court_stream_follows_advance() {
 
 #[tokio::test]
 async fn advance_by_viewer_is_403() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &raw).await;
     let d = detail(&state, &app, &raw, &ev.id).await;
     let (scorer, viewer) = court_tokens(&d, &ev.courts[0]);
     finish_match(
@@ -395,8 +410,8 @@ async fn advance_by_viewer_is_403() {
 
 #[tokio::test]
 async fn advance_unfinished_is_409() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &raw).await;
     let d = detail(&state, &app, &raw, &ev.id).await;
     let (scorer, _) = court_tokens(&d, &ev.courts[0]);
     let res = anon(
@@ -412,8 +427,8 @@ async fn advance_unfinished_is_409() {
 
 #[tokio::test]
 async fn rotated_court_token_is_404_and_stream_ends() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &raw).await;
     let d = detail(&state, &app, &raw, &ev.id).await;
     let (scorer, viewer) = court_tokens(&d, &ev.courts[0]);
     let mut phone = open(&app, &format!("/api/court/{scorer}/stream")).await;
@@ -448,8 +463,8 @@ async fn rotated_court_token_is_404_and_stream_ends() {
 
 #[tokio::test]
 async fn finished_event_court_scorer_is_410_viewer_ok() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &raw).await;
     let d = detail(&state, &app, &raw, &ev.id).await;
     let (scorer, viewer) = court_tokens(&d, &ev.courts[0]);
     let mut phone = open(&app, &format!("/api/court/{scorer}/stream")).await;
@@ -509,8 +524,8 @@ fn strings<'a>(v: &'a Value, out: &mut Vec<&'a str>) {
 
 #[tokio::test]
 async fn event_view_has_no_scorer_tokens() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &raw).await;
     create_match(
         &state,
         &app,
@@ -600,8 +615,8 @@ async fn event_view_has_no_scorer_tokens() {
 
 #[tokio::test]
 async fn assign_reaches_waiting_court_phone() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let ev = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &raw).await;
     let d = detail(&state, &app, &raw, &ev.id).await;
     let (scorer, _) = court_tokens(&d, &ev.courts[1]);
     let mut phone = open(&app, &format!("/api/court/{scorer}/stream")).await;

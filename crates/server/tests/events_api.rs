@@ -76,10 +76,20 @@ async fn create_event(state: &AppState, app: &Router, raw: &str, name: &str) -> 
     res.body["event"]["id"].as_str().unwrap().to_owned()
 }
 
+/// Starting a tournament draws its bracket and puts matches on the courts. These tests are about
+/// courts and hand-made event matches, so remove the drawn matches (their courts go free).
+async fn clear_draw(pool: &sqlx::SqlitePool) {
+    sqlx::query("DELETE FROM matches WHERE id IN (SELECT match_id FROM bracket_matches)")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 /// A "Sunday cup" of the session `raw` with four teams and two courts, started, and one match
 /// created on court 1: (event id, team ids, court ids, match id).
 async fn running_event(
     state: &AppState,
+    pool: &sqlx::SqlitePool,
     app: &Router,
     raw: &str,
 ) -> (String, Vec<String>, Vec<String>, String) {
@@ -133,6 +143,7 @@ async fn running_event(
         None,
     )
     .await;
+    clear_draw(pool).await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
     assert_eq!(res.body["event"]["status"], json!("running"));
     let res = call(
@@ -214,8 +225,8 @@ async fn events_need_session() {
 
 #[tokio::test]
 async fn create_event_round_trip() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let (id, teams, courts, match_id) = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let (id, teams, courts, match_id) = running_event(&state, &pool, &app, &raw).await;
     let d = detail(&state, &app, &raw, &id).await;
     assert_eq!(d["event"]["name"], json!("Sunday cup"));
     assert_eq!(d["event"]["team_count"], json!(4));
@@ -500,9 +511,9 @@ async fn team_and_court_edits() {
 
 #[tokio::test]
 async fn other_users_event_is_404() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
     let (_b, braw) = invited_user(&state, &app, &raw, "b@x.test", "Rui").await;
-    let (id, teams, courts, match_id) = running_event(&state, &app, &raw).await;
+    let (id, teams, courts, match_id) = running_event(&state, &pool, &app, &raw).await;
     let bp = [
         player(&state, &app, &braw, "Eva").await,
         player(&state, &app, &braw, "Inês").await,
@@ -663,8 +674,8 @@ async fn cross_site_post_is_refused() {
 
 #[tokio::test]
 async fn coordinator_result_locks_and_shows() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let (id, _teams, courts, match_id) = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let (id, _teams, courts, match_id) = running_event(&state, &pool, &app, &raw).await;
     let path = format!("/api/events/{id}/matches/{match_id}/result");
     let body =
         json!({ "client_id": "r1", "score": { "sets": [{ "a": 6, "b": 2, "tiebreak": null }] } });
@@ -723,8 +734,8 @@ async fn coordinator_result_locks_and_shows() {
 
 #[tokio::test]
 async fn advance_unfinished_is_409() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let (id, _teams, courts, _match_id) = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let (id, _teams, courts, _match_id) = running_event(&state, &pool, &app, &raw).await;
     let res = call(
         &state,
         &app,
@@ -751,8 +762,8 @@ async fn advance_unfinished_is_409() {
 
 #[tokio::test]
 async fn event_stream_updates_on_court_point() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let (id, _teams, _courts, match_id) = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let (id, _teams, _courts, match_id) = running_event(&state, &pool, &app, &raw).await;
     let d = detail(&state, &app, &raw, &id).await;
     let scorer = match_in(&d, &match_id)["scorer_token"]
         .as_str()
@@ -832,8 +843,8 @@ async fn event_stream_ends_when_deleted() {
 
 #[tokio::test]
 async fn rotate_ends_old_fence_stream() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let (id, _teams, courts, match_id) = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let (id, _teams, courts, match_id) = running_event(&state, &pool, &app, &raw).await;
     let d = detail(&state, &app, &raw, &id).await;
     let old = match_in(&d, &match_id)["scorer_token"]
         .as_str()
@@ -870,7 +881,7 @@ async fn rotate_ends_old_fence_stream() {
 #[tokio::test]
 async fn finish_via_api_writes_placings() {
     let (state, pool, app, _admin, raw) = with_admin().await;
-    let (id, teams, courts, match_id) = running_event(&state, &app, &raw).await;
+    let (id, teams, courts, match_id) = running_event(&state, &pool, &app, &raw).await;
     let path = format!("/api/events/{id}/finish");
     let bad = call(
         &state,
@@ -927,8 +938,8 @@ async fn finish_via_api_writes_placings() {
 
 #[tokio::test]
 async fn delete_started_event_is_409() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let (id, _teams, _courts, _match_id) = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let (id, _teams, _courts, _match_id) = running_event(&state, &pool, &app, &raw).await;
     let res = call(
         &state,
         &app,
@@ -955,8 +966,8 @@ async fn delete_started_event_is_409() {
 
 #[tokio::test]
 async fn live_list_has_court_context() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let (_id, _teams, _courts, match_id) = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let (_id, _teams, _courts, match_id) = running_event(&state, &pool, &app, &raw).await;
     let res = call(&state, &app, &raw, Method::GET, "/api/me/matches", None).await;
     assert_eq!(res.status, StatusCode::OK);
     let item = res
@@ -1018,8 +1029,8 @@ async fn court_phones_count_and_notify() {
 
 #[tokio::test]
 async fn detail_shows_phones() {
-    let (state, _pool, app, _admin, raw) = with_admin().await;
-    let (id, _teams, courts, _match_id) = running_event(&state, &app, &raw).await;
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    let (id, _teams, courts, _match_id) = running_event(&state, &pool, &app, &raw).await;
     let guard = state.court_phones.join(&state.hub, &id, &courts[0]);
     let d = detail(&state, &app, &raw, &id).await;
     assert_eq!(court_in(&d, &courts[0])["phones"], json!(1));
