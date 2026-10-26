@@ -207,6 +207,49 @@ export function teamCountHint(n: number): string | null {
 	return t.teamCountHint(n, down, up);
 }
 
+/** The lines of a held node's warning card; `replay` is null when Replay isn't on offer. */
+export interface HeldText {
+	warning: string;
+	replay: string | null;
+	keep: string;
+	finishedNote: string | null;
+}
+
+/**
+ * What a held node tells the coordinator: the warning, the Replay and Keep lines. After Finish
+ * no match can be made, so only Keep is offered.
+ */
+export function heldText(_d: TournamentData, node: BracketNode, finished: boolean): HeldText {
+	const discards = node.replay_discards ?? [];
+	return {
+		warning: t.heldWarning(node.label, discards[0] ?? null),
+		replay: finished || discards.length === 0 ? null : t.replayDiscards(discards),
+		keep: t.keepNote(node.label),
+		finishedNote: finished ? t.heldFinished : null
+	};
+}
+
+/** Why the bracket can't be finished: matches to play, or a held result; null when it can. */
+export function finishBlocker(d: TournamentData): 'unfinished' | 'decision' | null {
+	if (d.nodes.some((n) => n.held)) return 'decision';
+	return d.places === null ? 'unfinished' : null;
+}
+
+type CourtFree = Pick<CourtOut, 'id' | 'name' | 'current' | 'queue'>;
+
+/** Some court is free (nothing live or queued) while some bracket match shows "Next free court". */
+export function canFillCourts(
+	d: TournamentData,
+	matches: readonly MatchWhere[],
+	courts: readonly CourtFree[]
+): boolean {
+	const free = courts.some((c) => {
+		const cur = c.current === null ? undefined : matches.find((m) => m.id === c.current);
+		return c.queue.length === 0 && (cur === undefined || cur.state === 'finished');
+	});
+	return free && d.nodes.some((n) => whereText(n, matches, courts)?.text === t.nextFreeCourt);
+}
+
 // ---- the coordinator's calls -------------------------------------------------------------
 
 const signedIn = { signedIn: true } as const;
