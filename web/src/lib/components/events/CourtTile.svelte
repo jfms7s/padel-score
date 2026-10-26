@@ -56,7 +56,7 @@
 						{#if s.sets !== null}{t.sets}<b>{s.sets}</b> · {/if}{t.games}<b>{s.games}</b>
 					</span>
 					{#if tile.server === team}
-						<span class="ball"><span class="visually-hidden">{t.serving(s.names)}</span></span>
+						<span class="ball"><span class="visually-hidden">{t.serving(tile.serverName)}</span></span>
 					{/if}
 				</div>
 			{/each}

@@ -49,18 +49,19 @@
 			onclick={onpoint ? () => onpoint(t) : undefined}
 		>
 			<span class="box-line" aria-hidden="true"></span>
-			<span class="team">{team.name}</span>
+			<span class="team">
+				{team.name}
+				{#if team.serving && model.servingPlayerName}
+					<span class="server">{f.playerServing(model.servingPlayerName)}</span>
+				{/if}
+			</span>
 			<span class="pts num" aria-hidden={team.points === ''}>{team.points}</span>
 			<span class="tally">
 				{f.games} <b>{team.games}</b>
 				{#if !timed}{f.sets} <b>{team.setsWon}</b>{/if}
 			</span>
 			{#if ball && ball.team === t}
-				<span
-					class="ball"
-					style:top={ballTop(t, ball.side)}
-					title={f.ballTitle(model.servingPlayerName ?? '', ball.side)}
-				></span>
+				<span class="ball" style:top={ballTop(t, ball.side)}></span>
 			{/if}
 		</svelte:element>
 		{#if t === 'a'}<div class="net" aria-hidden="true"></div>{/if}
@@ -161,6 +162,12 @@
 		text-align: left;
 		line-height: 1.2;
 		overflow-wrap: anywhere;
+	}
+	/* The serving player's name, under the team's and as large, a little bolder. */
+	.server {
+		display: block;
+		margin-top: 0.15em;
+		font-weight: 750;
 	}
 	.b .team {
 		left: auto;

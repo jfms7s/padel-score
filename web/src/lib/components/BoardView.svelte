@@ -73,6 +73,9 @@
 				<span class="team-name">{team.name}</span>
 				{#if team.serving && model.serveSide}<small>{f.servingFrom[model.serveSide]}</small>{/if}
 			</div>
+			{#if team.serving && model.servingPlayerName}
+				<p class="server">{f.playerServing(model.servingPlayerName)}</p>
+			{/if}
 			<div class="nums" style:--cols={columns.length}>
 				{#each columns as col (col.label)}
 					<div class="col">
@@ -173,6 +176,14 @@
 		color: var(--muted);
 		font-size: clamp(13px, 1.8vh, 18px);
 		text-align: right;
+	}
+	/* The serving player's name, under the team's and as large, lined up with the name. */
+	.server {
+		margin: 2px 0 0 22px;
+		font-weight: 750;
+		font-size: clamp(18px, 2.6vh, 26px);
+		line-height: 1.2;
+		overflow-wrap: anywhere;
 	}
 	.serve {
 		width: 14px;

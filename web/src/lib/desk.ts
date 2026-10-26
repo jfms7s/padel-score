@@ -91,7 +91,7 @@ export type TileSide = { names: string; point: string; games: number; sets: numb
 export type FinishedSide = TileSide & { setGames: number[] };
 
 export type CourtTileData =
-	| { state: 'live'; label: string; a: TileSide; b: TileSide; server: Team }
+	| { state: 'live'; label: string; a: TileSide; b: TileSide; server: Team; serverName: string }
 	| {
 			state: 'finished';
 			label: string;
@@ -140,7 +140,10 @@ export function courtTile(
 			games: s.games[i],
 			sets: timed ? null : s.sets_won[i]
 		});
-		return { state: 'live', label: m.label, a: side(0), b: side(1), server: s.server.team };
+		const serving = teams.find((x) => x.id === (s.server.team === 'a' ? m.team_a : m.team_b));
+		// The serving player, or their team's name if the player can't be found.
+		const serverName = serving?.players[s.server.index]?.name ?? names[s.server.team === 'a' ? 0 : 1];
+		return { state: 'live', label: m.label, a: side(0), b: side(1), server: s.server.team, serverName };
 	}
 	if (m.state === 'finished' && m.result) {
 		const r = m.result;

@@ -3,7 +3,8 @@ import { courtTile, deskTabs, groupMatches, isJumpKey, moveRow, nextUnfinished, 
 import type { EventMatch, EventTeam, FinalScore, Score } from './types';
 
 function team(id: string, name: string): EventTeam {
-	return { id, name, custom_name: null, players: [{ name: 'x' }, { name: 'y' }] } as unknown as EventTeam;
+	const [p0, p1] = name.split(' / ');
+	return { id, name, custom_name: null, players: [{ name: p0 }, { name: p1 }] } as unknown as EventTeam;
 }
 
 const teams = [team('t1', 'Ana / Marta'), team('t2', 'Rui / Joao')];
@@ -141,9 +142,16 @@ describe('courtTile', () => {
 		expect(t).toMatchObject({
 			state: 'live',
 			server: 'a',
+			serverName: 'Ana',
 			a: { point: '40', games: 4, sets: 1, names: 'Ana / Marta' },
 			b: { point: '30', games: 3, sets: 0 }
 		});
+	});
+
+	it('names the serving player', () => {
+		const s = liveScore([1, 0], 'none');
+		const m = match('m1', { state: 'live', live: { ...s, server: { team: 'b', index: 1 } } });
+		expect(courtTile({ current: 'm1', queue: [] }, [m], teams)).toMatchObject({ server: 'b', serverName: 'Joao' });
 	});
 
 	it('shows tie-break points and timed games', () => {

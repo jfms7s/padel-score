@@ -1,5 +1,6 @@
 // The fence screen's view model: everything the scoreboard shows, worked out from a MatchView.
 
+import { slotName } from './setup';
 import { strings } from './strings';
 import type { DeuceRule, Format, MatchView, PointCall, ServeSide, SetScore, Team } from './types';
 
@@ -51,7 +52,10 @@ export interface FenceModel {
 	b: TeamModel;
 	/** Null once the match is over: nobody serves. */
 	serveSide: ServeSide | null;
-	/** Null once the match is over. */
+	/**
+	 * The player serving the next point, by name. Null once the match is over, and for a quick
+	 * match started without names (the name is still its slot's "Player N").
+	 */
 	servingPlayerName: string | null;
 	/** Shown on the net when the next point decides the game. */
 	callout: typeof strings.goldenPoint | typeof strings.starPoint | null;
@@ -92,7 +96,7 @@ export function fenceModel(view: MatchView): FenceModel {
 		a: team('a'),
 		b: team('b'),
 		serveSide: finished ? null : score.side,
-		servingPlayerName: finished ? null : (teams[score.server.team][score.server.index] ?? null),
+		servingPlayerName: finished ? null : enteredName(view),
 		callout: game?.deciding_point ? decidingCallout(deuce) : null,
 		changeEnds: score.change_ends,
 		inTieBreak: tieBreak !== null,
@@ -100,6 +104,12 @@ export function fenceModel(view: MatchView): FenceModel {
 		finished: finished ? { winner: finished.winner } : null,
 		rulesLine: rulesLine(view, tieBreak !== null, tieBreak?.super_tiebreak ?? false, !!finished)
 	};
+}
+
+function enteredName({ teams, score }: MatchView): string | null {
+	const { team, index } = score.server;
+	const name = teams[team][index];
+	return name === undefined || name === slotName(team, index) ? null : name;
 }
 
 /** The index of the set played as a super tie-break, if the format has one: the deciding set. */

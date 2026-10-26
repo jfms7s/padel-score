@@ -97,10 +97,7 @@ export const strings = {
 			left: 'serving from the left',
 			receiver_chooses: 'receiver picks the side'
 		},
-		ballTitle: (player: string, side: 'right' | 'left' | 'centre') =>
-			side === 'centre'
-				? `${player} serves, the receiver picks the side`
-				: `${player} serves from the ${side}, behind the baseline`,
+		playerServing: (player: string) => `${player} serving`,
 		wins: (team: string) => `${team} win`,
 		draw: 'Draw',
 		newMatch: 'New match',
@@ -920,7 +917,7 @@ export const strings = {
 		phones: (n: number) => (n === 1 ? '1 phone' : `${n} phones`),
 		games: 'Games',
 		sets: 'Sets',
-		serving: (names: string) => `${names} serving`,
+		serving: (player: string) => `${player} serving`,
 		// The match list.
 		onCourt: 'On court',
 		waiting: 'Waiting',
