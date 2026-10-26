@@ -835,6 +835,78 @@ async fn finished_court_gets_next_match() {
     );
 }
 
+/// Whether the bracket match is on a court.
+async fn on_court(pool: &SqlitePool, p: &Row6) -> bool {
+    court_of(pool, p.5.as_ref().unwrap()).await.is_some()
+}
+
+#[tokio::test]
+async fn final_waits_for_every_other_match() {
+    let (s, pool) = setup().await;
+    let (ev, _) = event(&s, full(), 8, 2).await;
+    let ev = start(&s, &ev).await.unwrap();
+    for n in 1..=4 {
+        let q = qf(&pool, &ev, n).await;
+        finish(&s, &q, Team::A).await;
+    }
+    // Both semi-finals finish while the placement semis are unplayed: the final is made but
+    // the 5th/7th-place matches do not exist yet, so it stays off the courts.
+    for p in [pos(1, 4, 0), pos(1, 4, 1)] {
+        let m = node(&pool, &ev, p).await.5.unwrap();
+        finish(&s, &m, Team::A).await;
+    }
+    let f = node(&pool, &ev, FINAL).await;
+    assert!(f.5.is_some(), "the final is made");
+    assert!(
+        !on_court(&pool, &f).await,
+        "the final waits: placement semis unplayed"
+    );
+    assert!(node(&pool, &ev, pos(5, 2, 0)).await.5.is_none());
+    // Play the rest, oldest first, keeping the final off its court until every other bracket
+    // match is on a court or finished.
+    loop {
+        fill(&s, &ev).await;
+        let all = rows(&pool, &ev).await;
+        let mut others_placed = true;
+        for r in all.iter().filter(|r| (r.0, r.1) != (1, 2)) {
+            match &r.5 {
+                None => others_placed = false,
+                Some(m) => {
+                    let done: i64 =
+                        sqlx::query_scalar("SELECT COUNT(*) FROM match_results WHERE match_id = ?")
+                            .bind(m)
+                            .fetch_one(&pool)
+                            .await
+                            .unwrap();
+                    if done == 0 && court_of(&pool, m).await.is_none() {
+                        others_placed = false;
+                    }
+                }
+            }
+        }
+        let f = node(&pool, &ev, FINAL).await;
+        if !others_placed {
+            assert!(
+                !on_court(&pool, &f).await,
+                "the final went onto a court early"
+            );
+        }
+        let next = unfinished(&pool, &ev)
+            .await
+            .into_iter()
+            .find(|m| Some(m) != f.5.as_ref());
+        match next {
+            Some(m) => finish(&s, &m, Team::A).await,
+            None => break,
+        }
+    }
+    let f = node(&pool, &ev, FINAL).await;
+    assert!(
+        on_court(&pool, &f).await,
+        "the final goes onto a free court at the end"
+    );
+}
+
 #[tokio::test]
 async fn two_courts_finish_together() {
     let (s, pool) = setup().await;
