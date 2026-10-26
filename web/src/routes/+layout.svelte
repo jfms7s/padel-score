@@ -29,24 +29,24 @@
 {/if}
 
 <div class:has-rail={railed}>
-{#if !bare}
-	<header class:railed class="page-wide">
-		{#if page.url.pathname === '/'}
-			<span></span>
-		{:else}
-			<a class="home" href="/">{strings.appName}</a>
-		{/if}
-		<nav aria-label={strings.auth.header}>
-			{#if $session.status === 'signed_in'}
-				<a href="/account">{$session.me.display_name}</a>
-			{:else if $session.status === 'signed_out' && !onLogin}
-				<a href="/login">{strings.auth.signIn}</a>
+	{#if !bare}
+		<header class:railed class="page-wide">
+			{#if page.url.pathname === '/'}
+				<span></span>
+			{:else}
+				<a class="home" href="/">{strings.appName}</a>
 			{/if}
-		</nav>
-	</header>
-{/if}
+			<nav aria-label={strings.auth.header}>
+				{#if $session.status === 'signed_in'}
+					<a href="/account">{$session.me.display_name}</a>
+				{:else if $session.status === 'signed_out' && !onLogin}
+					<a href="/login">{strings.auth.signIn}</a>
+				{/if}
+			</nav>
+		</header>
+	{/if}
 
-{@render children()}
+	{@render children()}
 </div>
 
 <style>
