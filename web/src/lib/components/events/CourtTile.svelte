@@ -26,6 +26,7 @@
 	const t = strings.desk;
 	const tile = $derived(courtTile(court, matches, teams));
 	const sides = $derived(tile.state === 'idle' ? [] : ([['a', tile.a], ['b', tile.b]] as const));
+	const watchHref = $derived(`/cv/${encodeURIComponent(court.spectator_token)}`);
 	const phones = $derived('phones' in court ? court.phones : null);
 </script>
 
@@ -62,17 +63,16 @@
 		{/if}
 	</div>
 
-	{#if tile.state === 'finished'}
-		{#if tile.nextLabel !== null || onnext}
-			<div class="foot next">
-				<span class="grow">{tile.nextLabel !== null ? t.next(tile.nextLabel) : ''}</span>
-				{#if onnext}<button class="nextbtn" type="button" disabled={busy} onclick={onnext}>{t.nextMatch}</button>{/if}
-			</div>
-		{/if}
+	{#if tile.state === 'finished' && (tile.nextLabel !== null || onnext)}
+		<div class="foot next">
+			<span class="grow">{tile.nextLabel !== null ? t.next(tile.nextLabel) : ''}</span>
+			<a class="watch" href={watchHref} aria-label={strings.court.watchLabel(court.name)}>{t.watch}</a>
+			{#if onnext}<button class="nextbtn" type="button" disabled={busy} onclick={onnext}>{t.nextMatch}</button>{/if}
+		</div>
 	{:else}
 		<div class="foot">
-			{#if phones !== null}<span class="grow">{t.phones(phones)}</span>{:else}<span class="grow"></span>{/if}
-			<a class="watch" href="/cv/{encodeURIComponent(court.spectator_token)}" aria-label={strings.court.watchLabel(court.name)}>{t.watch}</a>
+			<span class="grow">{phones !== null ? t.phones(phones) : ''}</span>
+			<a class="watch" href={watchHref} aria-label={strings.court.watchLabel(court.name)}>{t.watch}</a>
 		</div>
 	{/if}
 </article>
@@ -232,6 +232,7 @@
 		background: var(--ball);
 		box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35);
 	}
+	/* Offsets differ from the mockup's 44%/72%, which put the ball on the Sets/Games line at phone width. */
 	.a .ball {
 		left: 58%;
 		top: 52%;
@@ -295,6 +296,16 @@
 		background: #0b2236;
 		color: #fff;
 		font-weight: 700;
+	}
+	.foot.next .watch {
+		border-color: #0b2236;
+		color: #0b2236;
+	}
+	@media (max-width: 699px) {
+		.watch,
+		.nextbtn {
+			min-height: var(--tap);
+		}
 	}
 	.nextbtn:disabled {
 		opacity: 0.6;
