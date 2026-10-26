@@ -45,8 +45,9 @@ jobs:
 
       # Signs the APK with the owner's key, once the secrets below are set, so each CI build installs
       # over the last one and keeps the watch's sign-in. Runs only on pushes to main and tags, never on
-      # pull requests, so a fork PR never sees the secrets; without them the build uses the runner's
-      # debug key. The secrets reach only the assemble step, through its env.
+      # pull requests, so a fork PR never sees the secrets; without them the build is a debug APK
+      # with the runner's debug key. With the key loaded the build is the non-debuggable release APK.
+      # The secrets reach only the assemble steps, through their env.
       #
       # Owner setup, once:
       #   keytool -genkeypair -v -keystore padel-watch.jks -alias padel-watch \
@@ -78,8 +79,20 @@ jobs:
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$keystore"
           echo "keystore=$keystore" >> "$GITHUB_OUTPUT"
 
-      # Without a decoded keystore every WATCH_* value is empty and Gradle falls back to the debug key.
-      - name: Build the APK
+      # With the key decoded, build the signed release APK. Without it every WATCH_* value is empty and
+      # the release APK would be unsigned and uninstallable, so build the debug APK instead.
+      - name: Build the release APK
+        if: steps.signing.outputs.keystore != ''
+        run: ./gradlew --no-daemon :app:assembleRelease
+        working-directory: watch
+        env:
+          WATCH_KEYSTORE_PATH: ${{ steps.signing.outputs.keystore }}
+          WATCH_KEYSTORE_PASSWORD: ${{ steps.signing.outputs.keystore && secrets.WATCH_KEYSTORE_PASSWORD || '' }}
+          WATCH_KEY_ALIAS: ${{ steps.signing.outputs.keystore && secrets.WATCH_KEY_ALIAS || '' }}
+          WATCH_KEY_PASSWORD: ${{ steps.signing.outputs.keystore && secrets.WATCH_KEY_PASSWORD || '' }}
+
+      - name: Build the debug APK
+        if: steps.signing.outputs.keystore == ''
         run: ./gradlew --no-daemon :app:assembleDebug
         working-directory: watch
         env:
@@ -92,7 +105,15 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/padel-watch.jks"
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - if: steps.signing.outputs.keystore != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: padel-score-watch-release-${{ github.sha }}
+          path: watch/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
+          if-no-files-found: error
+      - if: steps.signing.outputs.keystore == ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: padel-score-watch-debug-${{ github.sha }}
           path: watch/app/build/outputs/apk/debug/app-debug.apk

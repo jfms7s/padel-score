@@ -235,9 +235,9 @@ export function replacePlan(
 		if (k === 0) return { base_seq: server[0]!.seq, commands: [{ kind: 'undo', target_seq: server[0]!.seq }] };
 		k -= 1;
 	}
-	const commands = wanted.slice(k).map((e): Command =>
-		e.event === 'time_up' ? { kind: 'time_up' } : { kind: 'point', team: e.event.point }
-	);
+	const commands = wanted
+		.slice(k)
+		.map((e): Command => (e.event === 'time_up' ? { kind: 'time_up' } : { kind: 'point', team: e.event.point }));
 	return { base_seq: k === 0 ? 0 : wanted[k - 1]!.seq, commands };
 }
 
@@ -288,16 +288,19 @@ type Check = (v: unknown) => boolean;
 const obj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const int: Check = (v) => Number.isInteger(v) && (v as number) >= 0;
 const str: Check = (v) => typeof v === 'string';
-const arr = (c: Check): Check => (v) => Array.isArray(v) && v.every(c);
-const nul = (c: Check): Check => (v) => v === null || c(v);
+const arr =
+	(c: Check): Check =>
+	(v) =>
+		Array.isArray(v) && v.every(c);
+const nul =
+	(c: Check): Check =>
+	(v) =>
+		v === null || c(v);
 const team: Check = (v) => v === 'a' || v === 'b';
 const intent: Check = (v) =>
 	obj(v) && ((v.kind === 'point' && team(v.team)) || (v.kind === 'undo' && Object.keys(v).length === 1));
 const command: Check = (v) =>
-	obj(v) &&
-	((v.kind === 'point' && team(v.team)) ||
-		v.kind === 'time_up' ||
-		(v.kind === 'undo' && int(v.target_seq)));
+	obj(v) && ((v.kind === 'point' && team(v.team)) || v.kind === 'time_up' || (v.kind === 'undo' && int(v.target_seq)));
 const request: Check = (v) =>
 	obj(v) &&
 	str(v.client_id) &&
@@ -661,15 +664,13 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 				// (viewArrived) rather than drop it as having nothing to undo.
 				if (job.req === null && job.intent.kind === 'undo' && job.target === null && !host.view()) return;
 				await sendLive(job);
-			}
-			else if (outstanding?.kind === 'replace') await sendOutstanding();
+			} else if (outstanding?.kind === 'replace') await sendOutstanding();
 			else if (mode === 'offline' && online && !outstanding && queued.length === 0 && carried.length > 0) {
 				// No view to ask against yet: nothing changes, so stop here rather than pump again
 				// (that would recurse without end). viewArrived() comes back once there is one.
 				if (!host.view()) return;
 				askAboutCarried();
-			}
-			else if (mode === 'offline' && online && (outstanding !== null || (base !== null && queued.length > 0))) {
+			} else if (mode === 'offline' && online && (outstanding !== null || (base !== null && queued.length > 0))) {
 				buildBatch();
 				await sendOutstanding();
 			} else return;
@@ -838,7 +839,10 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		if (!o) return;
 		let out: CommandOutcome;
 		try {
-			out = o.kind === 'batch' ? await api.post(token, o.req as CommandRequest) : await api.replace(token, o.req as ReplaceRequest);
+			out =
+				o.kind === 'batch'
+					? await api.post(token, o.req as CommandRequest)
+					: await api.replace(token, o.req as ReplaceRequest);
 		} catch (e) {
 			if (stopped) return;
 			if (e instanceof ApiError && e.retryable) {

@@ -18,7 +18,9 @@ use axum::http::{Method, StatusCode, header};
 use padel_score_server::AppState;
 use padel_scoring::{DecidingSet, DeuceRule, Format, SetRules, SetsFormat};
 use serde_json::{Value, json};
-use support::{Res, Sse, as_device, as_session, device_token, invited_user, req, send, with_admin};
+use support::{
+    Res, Sse, as_device, as_session, device_token, invited_user, ps, qf, req, send, sf, with_admin,
+};
 
 fn one_set() -> Value {
     serde_json::to_value(Format::Sets(SetRules {
@@ -161,9 +163,7 @@ fn scorer(d: &Value, match_id: &str) -> String {
 }
 
 fn quarter_final_ids(d: &Value) -> Vec<String> {
-    (1..=4)
-        .map(|i| match_id(d, &format!("Quarter-final {i}")))
-        .collect()
+    (1..=4).map(|i| match_id(d, &qf(i))).collect()
 }
 
 static CLIENT: AtomicU64 = AtomicU64::new(0);
@@ -209,14 +209,11 @@ async fn point(app: &Router, scorer_token: &str) {
 async fn held(state: &AppState, app: &Router, raw: &str) -> String {
     let id = running(state, app, raw, true).await;
     let d = detail(state, app, raw, &id).await;
-    let (q1, q2) = (
-        match_id(&d, "Quarter-final 1"),
-        match_id(&d, "Quarter-final 2"),
-    );
+    let (q1, q2) = (match_id(&d, &qf(1)), match_id(&d, &qf(2)));
     typed(state, app, raw, &id, &q1, 6, 0).await;
     typed(state, app, raw, &id, &q2, 6, 0).await;
     let d = detail(state, app, raw, &id).await;
-    let sf1 = match_id(&d, "Semi-final 1");
+    let sf1 = match_id(&d, &sf(1));
     point(app, &scorer(&d, &sf1)).await;
     typed(state, app, raw, &id, &q1, 2, 6).await;
     id
@@ -249,7 +246,7 @@ async fn tournament_routes_need_session() {
     let (state, _pool, app, admin, raw) = with_admin().await;
     let id = running(&state, &app, &raw, false).await;
     let d = detail(&state, &app, &raw, &id).await;
-    let m = match_id(&d, "Quarter-final 1");
+    let m = match_id(&d, &qf(1));
     let token = device_token(&state.store, &admin).await;
     for (path, body) in route_paths(&id, &m) {
         let anon = send(&app, req(Method::POST, &path, body.clone(), &[])).await;
@@ -264,7 +261,7 @@ async fn other_users_tournament_is_404() {
     let (state, _pool, app, _admin, raw) = with_admin().await;
     let id = running(&state, &app, &raw, false).await;
     let d = detail(&state, &app, &raw, &id).await;
-    let m = match_id(&d, "Quarter-final 1");
+    let m = match_id(&d, &qf(1));
     let (_b, braw) = invited_user(&state, &app, &raw, "b@x.test", "Rui").await;
     for (path, body) in route_paths(&id, &m) {
         let res = post(&state, &app, &braw, &path, body).await;
@@ -317,7 +314,7 @@ async fn detail_has_bracket() {
         assert_eq!(n["held"], json!(false), "{n}");
         assert!(n.get("replay_discards").is_none(), "{n}");
         let label = n["label"].as_str().unwrap();
-        if label.starts_with("Quarter-final") {
+        if (1..=4).any(|i| label == qf(i)) {
             assert!(n["match_id"].is_string(), "{n}");
             assert_eq!(n["from"], json!([null, null]), "{n}");
             assert!(
@@ -330,17 +327,17 @@ async fn detail_has_bracket() {
         }
     }
     assert_eq!(
-        node(&d, "Semi-final 1")["from"],
+        node(&d, &sf(1))["from"],
         json!([
             { "winner_of": { "place_from": 1, "size": 8, "idx": 0 } },
             { "winner_of": { "place_from": 1, "size": 8, "idx": 1 } },
         ])
     );
     assert_eq!(
-        node(&d, "Placement semi 1 (5th–8th)")["from"][1],
+        node(&d, &ps(1))["from"][1],
         json!({ "loser_of": { "place_from": 1, "size": 8, "idx": 1 } })
     );
-    assert_eq!(nodes(&d)[0]["label"], json!("Quarter-final 1"));
+    assert_eq!(nodes(&d)[0]["label"], json!(&qf(1)));
 }
 
 #[tokio::test]
@@ -348,7 +345,7 @@ async fn spectator_bracket_has_no_tokens_or_coordinator_fields() {
     let (state, _pool, app, _admin, raw) = with_admin().await;
     let id = held(&state, &app, &raw).await;
     let d = detail(&state, &app, &raw, &id).await;
-    assert!(node(&d, "Quarter-final 1")["replay_discards"].is_array());
+    assert!(node(&d, &qf(1))["replay_discards"].is_array());
     let mut secrets = Vec::new();
     for c in d["courts"].as_array().unwrap() {
         secrets.push(c["scorer_token"].as_str().unwrap().to_owned());
@@ -450,7 +447,7 @@ async fn redraw_closes_old_streams() {
     let (state, _pool, app, _admin, raw) = with_admin().await;
     let id = running(&state, &app, &raw, false).await;
     let d = detail(&state, &app, &raw, &id).await;
-    let old = scorer(&d, &match_id(&d, "Quarter-final 1"));
+    let old = scorer(&d, &match_id(&d, &qf(1)));
     let mut fence = Sse::open(
         &app,
         req(Method::GET, &format!("/api/score/{old}/stream"), None, &[]),
@@ -474,13 +471,10 @@ async fn held_detail_lists_discards() {
     let (state, _pool, app, _admin, raw) = with_admin().await;
     let id = held(&state, &app, &raw).await;
     let d = detail(&state, &app, &raw, &id).await;
-    let q1 = node(&d, "Quarter-final 1");
+    let q1 = node(&d, &qf(1));
     assert_eq!(q1["held"], json!(true));
-    assert_eq!(
-        q1["replay_discards"],
-        json!(["Semi-final 1", "Placement semi 1 (5th–8th)"])
-    );
-    assert!(node(&d, "Quarter-final 2").get("replay_discards").is_none());
+    assert_eq!(q1["replay_discards"], json!([&sf(1), &ps(1)]));
+    assert!(node(&d, &qf(2)).get("replay_discards").is_none());
     assert_eq!(d["kind_data"]["can_redraw"], json!(false));
 }
 
@@ -489,10 +483,7 @@ async fn decision_keep_clears_hold() {
     let (state, _pool, app, _admin, raw) = with_admin().await;
     let id = held(&state, &app, &raw).await;
     let d = detail(&state, &app, &raw, &id).await;
-    let (q1, sf1) = (
-        match_id(&d, "Quarter-final 1"),
-        match_id(&d, "Semi-final 1"),
-    );
+    let (q1, sf1) = (match_id(&d, &qf(1)), match_id(&d, &sf(1)));
     let res = post(
         &state,
         &app,
@@ -502,8 +493,8 @@ async fn decision_keep_clears_hold() {
     )
     .await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
-    assert_eq!(node(&res.body, "Quarter-final 1")["held"], json!(false));
-    assert_eq!(match_id(&res.body, "Semi-final 1"), sf1, "kept as played");
+    assert_eq!(node(&res.body, &qf(1))["held"], json!(false));
+    assert_eq!(match_id(&res.body, &sf(1)), sf1, "kept as played");
 }
 
 #[tokio::test]
@@ -511,7 +502,7 @@ async fn decision_without_hold_is_409() {
     let (state, _pool, app, _admin, raw) = with_admin().await;
     let id = held(&state, &app, &raw).await;
     let d = detail(&state, &app, &raw, &id).await;
-    let q2 = match_id(&d, "Quarter-final 2");
+    let q2 = match_id(&d, &qf(2));
     for choice in ["keep", "replay"] {
         let res = post(
             &state,
@@ -531,7 +522,7 @@ async fn decision_bad_choice_is_422() {
     let (state, _pool, app, _admin, raw) = with_admin().await;
     let id = held(&state, &app, &raw).await;
     let d = detail(&state, &app, &raw, &id).await;
-    let q1 = match_id(&d, "Quarter-final 1");
+    let q1 = match_id(&d, &qf(1));
     for body in [
         json!({ "choice": "maybe" }),
         json!({}),
@@ -545,7 +536,7 @@ async fn decision_bad_choice_is_422() {
         );
     }
     let d = detail(&state, &app, &raw, &id).await;
-    assert_eq!(node(&d, "Quarter-final 1")["held"], json!(true));
+    assert_eq!(node(&d, &qf(1))["held"], json!(true));
 }
 
 #[tokio::test]
@@ -553,9 +544,9 @@ async fn decision_replay_closes_old_streams() {
     let (state, _pool, app, _admin, raw) = with_admin().await;
     let id = held(&state, &app, &raw).await;
     let d = detail(&state, &app, &raw, &id).await;
-    let q1 = match_id(&d, "Quarter-final 1");
-    let corrected_winner = node(&d, "Quarter-final 1")["teams"][1].clone();
-    let old_sf1 = match_id(&d, "Semi-final 1");
+    let q1 = match_id(&d, &qf(1));
+    let corrected_winner = node(&d, &qf(1))["teams"][1].clone();
+    let old_sf1 = match_id(&d, &sf(1));
     let old_token = scorer(&d, &old_sf1);
     let mut fence = Sse::open(
         &app,
@@ -589,14 +580,14 @@ async fn decision_replay_closes_old_streams() {
     )
     .await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
-    let sf1 = node(&res.body, "Semi-final 1");
+    let sf1 = node(&res.body, &sf(1));
     assert_ne!(sf1["match_id"], json!(old_sf1));
     assert!(sf1["match_id"].is_string());
     assert_eq!(sf1["teams"][0], corrected_winner);
-    assert_eq!(node(&res.body, "Quarter-final 1")["held"], json!(false));
+    assert_eq!(node(&res.body, &qf(1))["held"], json!(false));
     assert!(fence.ends_within(Duration::from_secs(2)).await);
     let frame = events.next("event").await;
-    assert_eq!(node(&frame, "Quarter-final 1")["held"], json!(false));
+    assert_eq!(node(&frame, &qf(1))["held"], json!(false));
 }
 
 #[tokio::test]
@@ -604,7 +595,7 @@ async fn fill_courts_after_court_added() {
     let (state, _pool, app, _admin, raw) = with_admin().await;
     let id = running(&state, &app, &raw, false).await;
     let d = detail(&state, &app, &raw, &id).await;
-    let q3 = match_id(&d, "Quarter-final 3");
+    let q3 = match_id(&d, &qf(3));
     assert_eq!(match_in(&d, &q3)["court_id"], Value::Null);
     let third = add_court(&state, &app, &raw, &id).await;
     let res = post(
@@ -617,7 +608,7 @@ async fn fill_courts_after_court_added() {
     .await;
     assert_eq!(res.status, StatusCode::OK, "{}", res.body);
     assert_eq!(match_in(&res.body, &q3)["court_id"], json!(third));
-    let q4 = match_id(&res.body, "Quarter-final 4");
+    let q4 = match_id(&res.body, &qf(4));
     assert_eq!(match_in(&res.body, &q4)["court_id"], Value::Null);
 }
 

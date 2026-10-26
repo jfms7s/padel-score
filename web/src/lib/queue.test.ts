@@ -109,7 +109,10 @@ describe('offline queue', () => {
 	it('the online event flushes too, and taps made during a flush go in the next batch', async () => {
 		let release!: (o: CommandOutcome) => void;
 		const first = grow(seen, ['a'], 1);
-		const h = offlineWith(['a'], [() => new Promise<CommandOutcome>((r) => (release = r)), applied(grow(first, ['b']))]);
+		const h = offlineWith(
+			['a'],
+			[() => new Promise<CommandOutcome>((r) => (release = r)), applied(grow(first, ['b']))]
+		);
 		h.queue.reconnect();
 		await tick();
 		h.queue.point('b');
@@ -348,7 +351,9 @@ describe('offline queue', () => {
 		await tick();
 		h.queue.stop();
 		const r = harness([applied(grow(seen, ['a']))], { view: null, storage, idsFrom: 50 });
-		expect(r.queue.state().pending).toEqual([{ intent: { kind: 'point', team: 'a' }, base: seen.revision, sent: true }]);
+		expect(r.queue.state().pending).toEqual([
+			{ intent: { kind: 'point', team: 'a' }, base: seen.revision, sent: true }
+		]);
 		await tick();
 		expect(r.sent).toEqual(h.sent);
 		expect(r.queue.state().pending).toEqual([]);
@@ -392,11 +397,14 @@ describe('offline queue', () => {
 	});
 
 	it('a batch the server refuses outright keeps the taps', async () => {
-		const h = offlineWith(['a'], [
-			async () => {
-				throw new ApiError(400, 'invalid', 'bad');
-			}
-		]);
+		const h = offlineWith(
+			['a'],
+			[
+				async () => {
+					throw new ApiError(400, 'invalid', 'bad');
+				}
+			]
+		);
 		await h.queue.flush();
 		expect(h.queue.state()).toMatchObject({ queued: [{ kind: 'point' }], problem: { kind: 'failed', message: 'bad' } });
 	});
@@ -781,4 +789,3 @@ describe('local views', () => {
 		expect(localView(seen, state({ queued: [{ kind: 'point', team: 'a' }] }), boom)).toBe(seen);
 	});
 });
-

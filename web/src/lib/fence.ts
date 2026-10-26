@@ -52,9 +52,7 @@ export function changeEndsLine(model: FenceModel): string {
 		return ga > gb ? c.tookSet(a.name, set - 1, ga, gb) : c.tookSet(b.name, set - 1, gb, ga);
 	}
 	if (a.games === b.games) return c.levelInSet(a.games, b.games, set);
-	return a.games > b.games
-		? c.leadInSet(a.name, a.games, b.games, set)
-		: c.leadInSet(b.name, b.games, a.games, set);
+	return a.games > b.games ? c.leadInSet(a.name, a.games, b.games, set) : c.leadInSet(b.name, b.games, a.games, set);
 }
 
 /** The finished sets as "7–6 (5), 6–3": games, a tie-break loser's points, a super tie-break's points. */

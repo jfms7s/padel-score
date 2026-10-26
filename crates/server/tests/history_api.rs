@@ -180,6 +180,57 @@ async fn blank_name_is_422_invalid_player() {
     assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+async fn patch_player(
+    state: &padel_score_server::AppState,
+    app: &axum::Router,
+    raw: &str,
+    path: &str,
+    body: serde_json::Value,
+) -> Res {
+    send(app, as_session(state, raw, Method::PATCH, path, Some(body))).await
+}
+
+#[tokio::test]
+async fn patch_with_blank_or_long_name_is_422_invalid_player() {
+    let (state, _pool, app, _id, raw) = with_admin().await;
+    let made = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::POST,
+            "/api/players",
+            Some(json!({"name": "Rui"})),
+        ),
+    )
+    .await;
+    let path = format!("/api/players/{}", made.body["id"].as_str().unwrap());
+    for name in [String::new(), "   ".to_owned(), "x".repeat(41)] {
+        let res = patch_player(&state, &app, &raw, &path, json!({ "name": name })).await;
+        assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{name:?}");
+        assert_eq!(res.body, json!({"error": "invalid_player"}), "{name:?}");
+    }
+    // The longest allowed name still goes through, and the failures changed nothing.
+    let res = patch_player(&state, &app, &raw, &path, json!({"name": "x".repeat(40)})).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.body["name"], "x".repeat(40));
+}
+
+#[tokio::test]
+async fn patch_unknown_player_is_404() {
+    let (state, _pool, app, _id, raw) = with_admin().await;
+    let res = patch_player(
+        &state,
+        &app,
+        &raw,
+        "/api/players/no-such-player",
+        json!({"name": "Rui"}),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    assert_eq!(res.body, json!({"error": "not_found"}));
+}
+
 #[tokio::test]
 async fn other_users_player_is_404() {
     let (state, _pool, app, _id, raw_a) = with_admin().await;

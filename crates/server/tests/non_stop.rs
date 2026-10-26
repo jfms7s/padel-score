@@ -181,6 +181,105 @@ async fn random_order_still_meets_everyone() {
     );
 }
 
+/// The started event's matches as `(team a, team b)` positions in the entered team list.
+async fn listed_pairs(
+    pool: &SqlitePool,
+    ev: &Competition,
+    teams: &[String],
+) -> Vec<(usize, usize)> {
+    let at = |id: &String| teams.iter().position(|t| t == id).unwrap();
+    matches_of(pool, ev)
+        .await
+        .iter()
+        .map(|m| (at(&m.team_a_id), at(&m.team_b_id)))
+        .collect()
+}
+
+#[tokio::test]
+async fn listed_order_follows_the_entered_teams() {
+    for settings in [None, Some(json!({"order": "listed"}))] {
+        let (s, pool) = setup().await;
+        let (ev, teams, _) = event_with(&s, settings, 4, 1).await;
+        s.start_competition(A, &ev.id, NOW).await.unwrap();
+        // Circle method on the entered order: team 0 is side A in rounds 1 and 3, side B in 2.
+        assert_eq!(
+            listed_pairs(&pool, &ev, &teams).await,
+            [(0, 3), (1, 2), (2, 0), (3, 1), (0, 1), (2, 3)]
+        );
+    }
+}
+
+#[tokio::test]
+async fn random_order_reshuffles_the_teams_but_keeps_the_shape() {
+    let listed: Vec<(usize, usize)> = {
+        let (s, pool) = setup().await;
+        let (ev, teams, _) = event_with(&s, Some(json!({"order": "listed"})), 8, 2).await;
+        s.start_competition(A, &ev.id, NOW).await.unwrap();
+        listed_pairs(&pool, &ev, &teams).await
+    };
+    // Each unseeded shuffle keeps the entered order with chance 1/40320; all 4 doing so is ~1e-18.
+    let mut differed = false;
+    for _ in 0..4 {
+        let (s, pool) = setup().await;
+        let (ev, teams, _) = event_with(&s, Some(json!({"order": "random"})), 8, 2).await;
+        s.start_competition(A, &ev.id, NOW).await.unwrap();
+        let random = listed_pairs(&pool, &ev, &teams).await;
+        // Same shape either way: each round holds every team once.
+        for round in random.chunks(4) {
+            let mut seen: Vec<usize> = round.iter().flat_map(|&(a, b)| [a, b]).collect();
+            seen.sort_unstable();
+            assert_eq!(seen, (0..8).collect::<Vec<_>>());
+        }
+        differed |= random != listed;
+    }
+    assert!(differed, "random order never differed from listed");
+}
+
+#[tokio::test]
+async fn uneven_last_wave_runs_one_match_on_the_first_court() {
+    let (s, pool) = setup().await;
+    let (ev, _, courts) = event_with(&s, None, 6, 2).await;
+    s.start_competition(A, &ev.id, NOW).await.unwrap();
+    let ms = matches_of(&pool, &ev).await;
+    assert_eq!(ms.len(), 15);
+    let rows = sqlx::query(
+        "SELECT slot, round, wave FROM non_stop_slots WHERE event_id = ? ORDER BY slot",
+    )
+    .bind(&ev.id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    // 3 matches a round on 2 courts: a wave of two, then a wave of one.
+    let slots: Vec<(i64, i64, i64)> = rows
+        .iter()
+        .map(|r| (r.get("slot"), r.get("round"), r.get("wave")))
+        .collect();
+    let expected: Vec<(i64, i64, i64)> = (0..10).map(|i| (i + 1, i / 2 + 1, i % 2 + 1)).collect();
+    assert_eq!(slots, expected);
+    let per_slot: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT n.slot, c.label, c.court_id FROM non_stop_matches n \
+         JOIN competition_matches c ON c.match_id = n.match_id WHERE n.event_id = ? \
+         ORDER BY c.ordinal",
+    )
+    .bind(&ev.id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(per_slot.len(), 15);
+    let expected_slots = [1, 1, 2, 3, 3, 4, 5, 5, 6, 7, 7, 8, 9, 9, 10];
+    for (i, (slot, label, court)) in per_slot.iter().enumerate() {
+        let (round, k) = (i / 3 + 1, i % 3 + 1);
+        assert_eq!(label, &format!("Round {round}, match {k}"));
+        assert_eq!(*slot, expected_slots[i], "{label}");
+        let court_idx = (k - 1) % 2;
+        assert_eq!(
+            court.as_deref(),
+            Some(courts[court_idx].as_str()),
+            "{label}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn odd_team_count_cannot_start() {
     let (s, pool) = setup().await;

@@ -76,6 +76,8 @@ jobs:
         working-directory: web
       - run: npm run check
         working-directory: web
+      - run: npm run format:check
+        working-directory: web
       # eng-metrics-lab: the test run itself writes the lcov, so the tests run once. The flags
       # ride after '--' so local `npm test` is unchanged.
       - name: Test with coverage (eng-metrics-lab)

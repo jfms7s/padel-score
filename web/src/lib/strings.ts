@@ -63,10 +63,8 @@ export const strings = {
 		leadInSet: (name: string, hi: number, lo: number, set: number) =>
 			`Change ends. ${name} lead ${hi}–${lo} in set ${set}.`,
 		levelInSet: (a: number, b: number, set: number) => `Change ends. ${a}–${b} in set ${set}.`,
-		tookSet: (name: string, set: number, hi: number, lo: number) =>
-			`Change ends. ${name} took set ${set} ${hi}–${lo}.`,
-		tieBreakLead: (name: string, hi: number, lo: number) =>
-			`Change ends. ${name} lead ${hi}–${lo} in the tie-break.`,
+		tookSet: (name: string, set: number, hi: number, lo: number) => `Change ends. ${name} took set ${set} ${hi}–${lo}.`,
+		tieBreakLead: (name: string, hi: number, lo: number) => `Change ends. ${name} lead ${hi}–${lo} in the tie-break.`,
 		tieBreakLevel: (a: number, b: number) => `Change ends. ${a}–${b} in the tie-break.`,
 		lead: (name: string, hi: number, lo: number) => `Change ends. ${name} lead ${hi}–${lo}.`,
 		level: (a: number, b: number) => `Change ends. ${a}–${b}.`
@@ -119,8 +117,7 @@ export const strings = {
 		undoConflict: 'The score changed, so nothing was undone.',
 		nothingToUndo: 'Nothing to undo.',
 		failed: (message: string) => `Couldn't send that. ${message}`,
-		lockedDropped: (n: number) =>
-			`The coordinator entered the result. ${n} queued ${n === 1 ? 'tap' : 'taps'} dropped.`
+		lockedDropped: (n: number) => `The coordinator entered the result. ${n} queued ${n === 1 ? 'tap' : 'taps'} dropped.`
 	},
 
 	// Taps made offline, and the choice when the server moved meanwhile.
@@ -308,8 +305,7 @@ export const strings = {
 			last_admin: "You can't disable the last admin.",
 			device_code_used: 'This code was already used.',
 			not_found: 'Not found.',
-			tooMany: (mins: number) =>
-				`Too many attempts. Try again in ${mins === 1 ? '1 minute' : `${mins} minutes`}.`,
+			tooMany: (mins: number) => `Too many attempts. Try again in ${mins === 1 ? '1 minute' : `${mins} minutes`}.`,
 			field: {
 				email: 'Enter a valid email address.',
 				display_name: 'Enter a name of 1 to 40 characters.',
@@ -434,9 +430,15 @@ export const strings = {
 			linkedEntries: 'Linked entries',
 			linkedEntry: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
 			unlinkLabel: (name: string, coordinator: string) => `Unlink ${name} from ${coordinator}’s players`,
-			unlinkConfirm: (name: string) => `Unlink ${name}? Their matches stay in that coordinator’s history, and leave yours.`,
+			unlinkConfirm: (name: string) =>
+				`Unlink ${name}? Their matches stay in that coordinator’s history, and leave yours.`,
 			claimsTitle: 'My claims',
-			claimStatus: { pending: 'Waiting for approval', approved: 'Approved', declined: 'Declined', withdrawn: 'Withdrawn' },
+			claimStatus: {
+				pending: 'Waiting for approval',
+				approved: 'Approved',
+				declined: 'Declined',
+				withdrawn: 'Withdrawn'
+			},
 			claimLine: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
 			withdraw: 'Withdraw',
 			withdrawLabel: (name: string) => `Withdraw your claim on ${name}`,
@@ -814,7 +816,7 @@ export const strings = {
 		finishedBlocker: {
 			unfinished: 'Some matches aren’t finished yet.',
 			decision: 'A result needs your decision first.'
-		},
+		}
 	},
 
 	// Non-stop events (phase 8).
@@ -825,11 +827,12 @@ export const strings = {
 		orderOptions: { listed: 'As listed', random: 'Random draw' },
 		roundOf: (r: number, rounds: number) => `Round ${r} of ${rounds}`,
 		waveOf: (w: number, waves: number) => `Wave ${w} of ${waves}`,
-		/** "Round 3 of 7, court 2"; with waves, "Round 3 of 7, wave 2, court 2". A name "Court 2" reads as "court 2". */
-		courtLine: (court: number | string, r: number, rounds: number, wave = 1, waves = 1) =>
-			`Round ${r} of ${rounds}, ${waves > 1 ? `wave ${wave}, ` : ''}court ${String(court).replace(/^court\s+/i, '')}`,
+		/** "Round 3 of 7, Court 2"; with waves, "Round 3 of 7, wave 2, Court 2". The court's name is shown as given. */
+		courtLine: (courtName: string, r: number, rounds: number, wave = 1, waves = 1) =>
+			`Round ${r} of ${rounds}, ${waves > 1 ? `wave ${wave}, ` : ''}${courtName}`,
 		waitingForClock: 'Waiting for the clock',
 		paused: 'Paused',
+		pausedBeforeGo: 'Paused · Waiting for the clock',
 		timeUp: 'Time’s up',
 		overtime: 'Overtime: the next game wins',
 		start: (slotText: string) => `Start ${slotText}`,

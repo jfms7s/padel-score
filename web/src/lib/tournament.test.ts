@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { strings } from './strings';
+import labelRows from './fixtures/tournament-labels.json';
 import {
 	bracketSections,
 	canFillCourts,
@@ -15,18 +16,21 @@ import {
 } from './tournament';
 import type { CourtOut, EventMatch, EventTeam, FinalScore, Score } from './types';
 
-// ---- fixtures: the JSON the server writes (crates/server .../tournament/store.rs) --------
+// ---- fixtures: the JSON the server writes (crates/server .../tournament/store.rs). ---
 
 type P = [number, number]; // [place_from, size]
 const pos = (place_from: number, size: number, idx: number) => ({ place_from, size, idx });
-const ordinal = (n: number) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
+
+/** Every label the server writes (Layout::label), checked against Rust by tournament.rs. */
+const LABELS = new Map<string, string>(
+	(labelRows as { place_from: number; size: number; idx: number; label: string }[]).map((r) => [
+		`${r.place_from},${r.size},${r.idx}`,
+		r.label
+	])
+);
 
 function labelOf([from, size]: P, idx: number): string {
-	const i = idx + 1;
-	if (from === 1) return size === 2 ? 'Final' : size === 4 ? `Semi-final ${i}` : size === 8 ? `Quarter-final ${i}` : `Round of ${size}, match ${i}`;
-	if (size <= 2) return `${ordinal(from)} place`;
-	const round = size === 4 ? 'semi' : size === 8 ? 'QF' : 'R16';
-	return `Placement ${round} ${i} (${ordinal(from)}–${ordinal(from + size - 1)})`;
+	return LABELS.get(`${from},${size},${idx}`)!;
 }
 
 /** The draws of `teams` in Layout::positions order (size descending, place_from, idx). */
@@ -55,7 +59,11 @@ function tournament(teams: number, full: boolean): TournamentData {
 }
 
 const sizes = (d: TournamentData) =>
-	bracketSections(d).map((s) => ({ kind: s.kind, title: s.title, cols: s.columns.map((c) => [c.title, c.nodes.length]) }));
+	bracketSections(d).map((s) => ({
+		kind: s.kind,
+		title: s.title,
+		cols: s.columns.map((c) => [c.title, c.nodes.length])
+	}));
 
 describe('bracketSections', () => {
 	it('sections_for_eight_full', () => {
@@ -136,10 +144,7 @@ function eight(): TournamentData {
 	const by = (label: string) => d.nodes.find((n) => n.label === label)!;
 	by('Quarter-final 1').teams = ['t1', 't2'];
 	by('Quarter-final 2').teams = ['t3', null];
-	by('Semi-final 1').from = [
-		{ winner_of: pos(1, 8, 0) },
-		{ winner_of: pos(1, 8, 1) }
-	];
+	by('Semi-final 1').from = [{ winner_of: pos(1, 8, 0) }, { winner_of: pos(1, 8, 1) }];
 	by('Semi-final 2').from = [{ winner_of: pos(1, 8, 2) }, { winner_of: pos(1, 8, 3) }];
 	by('Placement semi 1 (5th–8th)').from = [{ loser_of: pos(1, 8, 0) }, { loser_of: pos(1, 8, 1) }];
 	return d;
@@ -160,7 +165,10 @@ describe('slotText', () => {
 			known: false
 		});
 		// Loser of a match whose teams are both known.
-		expect(slotText(d, by('Placement semi 1 (5th–8th)'), 0, teams)).toEqual({ text: 'Leo / Sara or Duarte / Rita', known: false });
+		expect(slotText(d, by('Placement semi 1 (5th–8th)'), 0, teams)).toEqual({
+			text: 'Leo / Sara or Duarte / Rita',
+			known: false
+		});
 		// No team and no source: not drawn yet.
 		expect(slotText(d, by('Quarter-final 4'), 0, teams)).toEqual({ text: strings.tournament.toBeDrawn, known: false });
 	});
@@ -214,7 +222,18 @@ describe('sideScore', () => {
 		// A timed result has no sets: the games.
 		expect(sideScore(match({ result: result([], [5, 3]) }), 'b')).toBe('3');
 		// Live: the sets so far, else the games.
-		expect(sideScore(match({ state: 'live', live: score([[6, 3], [2, 1]]) }), 'a')).toBe('6 2');
+		expect(
+			sideScore(
+				match({
+					state: 'live',
+					live: score([
+						[6, 3],
+						[2, 1]
+					])
+				}),
+				'a'
+			)
+		).toBe('6 2');
 		expect(sideScore(match({ state: 'live', live: score([], [4, 2]) }), 'b')).toBe('2');
 		expect(sideScore(match({}), 'a')).toBe('');
 	});
@@ -223,17 +242,10 @@ describe('sideScore', () => {
 describe('teamCountHint', () => {
 	it('team_count_hint', () => {
 		for (const n of [4, 8, 16, 32]) expect(teamCountHint(n)).toBeNull();
-		const six = teamCountHint(6)!;
-		expect(six).toContain('4');
-		expect(six).toContain('8');
-		expect(six).toBe('6 teams don’t make a bracket: add 2 teams to make 8, or remove 2 teams to make 4.');
-		const three = teamCountHint(3)!;
-		expect(three).toContain('4');
-		expect(three).not.toContain('remove');
-		const forty = teamCountHint(40)!;
-		expect(forty).toContain('32');
-		expect(forty).not.toContain('add');
-		expect(teamCountHint(7)).toContain('add 1 team to');
+		expect(teamCountHint(6)).toBe('6 teams don’t make a bracket: add 2 teams to make 8, or remove 2 teams to make 4.');
+		expect(teamCountHint(3)).toBe('3 teams don’t make a bracket: add 1 team to make 4.');
+		expect(teamCountHint(40)).toBe('40 teams don’t make a bracket: remove 8 teams to make 32.');
+		expect(teamCountHint(7)).toBe('7 teams don’t make a bracket: add 1 team to make 8, or remove 3 teams to make 4.');
 	});
 });
 
@@ -291,15 +303,19 @@ describe('heldText', () => {
 			{ id: 'm2', state: 'live' as const }
 		];
 		expect(heldText(d, n, false, matches).warning).toBe('Quarter-final 1’s result changed after Semi-final 1 started.');
-		expect(heldText(d, n, false, [{ id: 'm1', state: 'waiting' }]).warning).toContain('a later match');
+		expect(heldText(d, n, false, [{ id: 'm1', state: 'waiting' }]).warning).toBe(
+			'Quarter-final 1’s result changed after a later match started.'
+		);
 	});
 
 	it('held_text_for_one_match_and_none', () => {
 		const d = tournament(8, true);
-		expect(heldText(d, held(['Final']), false).replay).toBe('Replay 1 match: Final. Started matches lose their scores.');
+		expect(heldText(d, held(['Final']), false).replay).toBe(
+			'Replay 1 match: Final. Started matches lose their scores.'
+		);
 		const none = heldText(d, held(undefined), false);
 		expect(none.replay).toBeNull();
-		expect(none.warning).toContain('a later match');
+		expect(none.warning).toBe('Quarter-final 1’s result changed after a later match started.');
 	});
 
 	it('held_after_finish_offers_only_keep', () => {
@@ -345,7 +361,11 @@ describe('final held back', () => {
 		expect(whereText(fin, ms, courtsOf, d)?.text).toBe('After the other matches');
 		const all = [
 			...ms,
-			...others.slice(1).map((n, i) => ({ id: n.match_id!, court_id: null, state: i === 0 ? ('waiting' as const) : ('finished' as const) }))
+			...others.slice(1).map((n, i) => ({
+				id: n.match_id!,
+				court_id: null,
+				state: i === 0 ? ('waiting' as const) : ('finished' as const)
+			}))
 		];
 		expect(whereText(fin, all, courtsOf, d)?.text).toBe('After the other matches');
 		expect(canFillCourts(d, all, courtsOf)).toBe(true); // the waiting other match can go
@@ -366,7 +386,13 @@ describe('canFillCourts', () => {
 
 	it('fill_courts_offered', () => {
 		expect(canFillCourts(d, m('waiting', null), [court(null)])).toBe(true);
-		expect(canFillCourts(d, m('waiting', null), [court('x', [])].map((c) => ({ ...c, current: 'm1' })))).toBe(false);
+		expect(
+			canFillCourts(
+				d,
+				m('waiting', null),
+				[court('x', [])].map((c) => ({ ...c, current: 'm1' }))
+			)
+		).toBe(false);
 		expect(canFillCourts(d, m('waiting', 'c1'), [court(null, ['m1'])])).toBe(false);
 		expect(canFillCourts(d, m('waiting', null), [])).toBe(false);
 	});

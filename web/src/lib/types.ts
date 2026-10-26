@@ -123,10 +123,7 @@ export interface MatchView {
 }
 
 /** Internally tagged on `kind`. */
-export type Command =
-	| { kind: 'point'; team: Team }
-	| { kind: 'time_up' }
-	| { kind: 'undo'; target_seq: number };
+export type Command = { kind: 'point'; team: Team } | { kind: 'time_up' } | { kind: 'undo'; target_seq: number };
 
 export interface CommandRequest {
 	client_id: string;
@@ -167,12 +164,7 @@ export type ApiErrorBody =
 	| { error: 'invalid'; message: string }
 	| { error: 'invalid_match'; message: string }
 	| {
-			error:
-				| 'not_found'
-				| 'bad_request'
-				| 'method_not_allowed'
-				| 'payload_too_large'
-				| 'internal';
+			error: 'not_found' | 'bad_request' | 'method_not_allowed' | 'payload_too_large' | 'internal';
 	  }
 	| { error: 'validation'; field: string }
 	| { error: 'too_many_requests'; retry_after_secs: number }
@@ -434,9 +426,7 @@ export type EventErrorCode =
  * tie-break points; a deciding super tie-break is `1-0` or `0-1` with its points in `tiebreak`.
  * `a` and `b` of a timed score are the regulation games; `overtime_winner` only when level.
  */
-export type TypedScore =
-	| { sets: SetScore[] }
-	| { timed: { a: number; b: number; overtime_winner: Team | null } };
+export type TypedScore = { sets: SetScore[] } | { timed: { a: number; b: number; overtime_winner: Team | null } };
 
 /** Why the engine refuses a typed score. Unit variants are strings, the others one-key objects. */
 export type InvalidScore =

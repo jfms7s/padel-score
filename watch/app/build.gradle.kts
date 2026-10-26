@@ -5,7 +5,8 @@ plugins {
 }
 
 // CI signs with the owner's key from GitHub secrets so each build installs over the last
-// (and keeps the sign-in). Without all four variables, builds use the machine's debug key.
+// (and keeps the sign-in). Without all four variables, debug builds use the machine's debug key and a release build is
+// unsigned (CI builds release only when the key is loaded).
 val ciSigningEnv = listOf("WATCH_KEYSTORE_PATH", "WATCH_KEYSTORE_PASSWORD", "WATCH_KEY_ALIAS", "WATCH_KEY_PASSWORD")
     .associateWith { providers.environmentVariable(it).orNull?.takeIf(String::isNotEmpty) }
 val hasCiSigning = ciSigningEnv.values.all { it != null }
@@ -36,6 +37,14 @@ android {
 
     buildTypes {
         debug {
+            if (hasCiSigning) signingConfig = signingConfigs.getByName("ci")
+        }
+        // CI ships this on main and tags once the key is loaded. Without the key it is unsigned and
+        // can't be installed, so CI falls back to the debug build.
+        release {
+            isDebuggable = false
+            // No R8 in this build: shrinking needs keep rules for serialization and OkHttp first.
+            isMinifyEnabled = false
             if (hasCiSigning) signingConfig = signingConfigs.getByName("ci")
         }
     }

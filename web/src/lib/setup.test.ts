@@ -72,12 +72,8 @@ describe('setup', () => {
 		expect(toCreateRequest(s).format).toEqual({
 			sets: { deuce: 'golden_point', sets: 'one', deciding: 'full_set' }
 		});
-		expect(setSets(named({ sets: 'best_of_3', deciding: 'super_tie_break' }), 'one').deciding).toBe(
-			'full_set'
-		);
-		expect(setSets(named({ deciding: 'super_tie_break' }), 'best_of_3').deciding).toBe(
-			'super_tie_break'
-		);
+		expect(setSets(named({ sets: 'best_of_3', deciding: 'super_tie_break' }), 'one').deciding).toBe('full_set');
+		expect(setSets(named({ deciding: 'super_tie_break' }), 'best_of_3').deciding).toBe('super_tie_break');
 	});
 
 	it('corrupt saved setup falls back to default', () => {
@@ -148,12 +144,7 @@ describe('setup', () => {
 
 	it('serve choices fall back to Player 1 to 4 placeholders and follow the first server', () => {
 		const blank = defaultSetup();
-		expect(serveChoices(blank).first.map((c) => c.label)).toEqual([
-			'Player 1',
-			'Player 2',
-			'Player 3',
-			'Player 4'
-		]);
+		expect(serveChoices(blank).first.map((c) => c.label)).toEqual(['Player 1', 'Player 2', 'Player 3', 'Player 4']);
 		expect(serveChoices(blank).other.map((c) => c.label)).toEqual(['Player 3', 'Player 4']);
 		const s = named({ firstServer: { team: 'b', index: 0 } });
 		expect(serveChoices(s).other.map((c) => c.label)).toEqual(['Ana', 'Rui']);
@@ -174,7 +165,9 @@ describe('recent matches', () => {
 
 	it('survives corrupt or unavailable storage', () => {
 		expect(listRecent(fakeStorage({ [RECENT_KEY]: '{x' }))).toEqual([]);
-		expect(listRecent(fakeStorage({ [RECENT_KEY]: '[{"bad":1},{"scorer_token":"a","label":"l","created_at":1}]' }))).toHaveLength(1);
+		expect(
+			listRecent(fakeStorage({ [RECENT_KEY]: '[{"bad":1},{"scorer_token":"a","label":"l","created_at":1}]' }))
+		).toHaveLength(1);
 		expect(listRecent(throwing)).toEqual([]);
 		expect(() => addRecent(throwing, { scorer_token: 'a', label: 'l', created_at: 1 })).not.toThrow();
 	});

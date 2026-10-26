@@ -91,7 +91,9 @@ describe('live sending', () => {
 		const h = harness([async () => ({ status: 'rejected', kind: 'match_over', index: 0 })]);
 		h.sender.point('a');
 		await tick();
-		expect(h.dropped).toEqual([{ intent: { kind: 'point', team: 'a' }, reason: { kind: 'rejected', error: 'match_over' } }]);
+		expect(h.dropped).toEqual([
+			{ intent: { kind: 'point', team: 'a' }, reason: { kind: 'rejected', error: 'match_over' } }
+		]);
 		expect(h.sender.state().pending).toEqual([]);
 	});
 
@@ -349,7 +351,9 @@ describe('overlay base', () => {
 		release({ status: 'applied', view: after });
 		await tick();
 		expect(h.sent[1]?.base_revision).toBe(newer.revision);
-		expect(h.sender.state().pending).toEqual([{ intent: { kind: 'point', team: 'b' }, base: newer.revision, sent: true }]);
+		expect(h.sender.state().pending).toEqual([
+			{ intent: { kind: 'point', team: 'b' }, base: newer.revision, sent: true }
+		]);
 		// So the echo of B (one revision past the request's base) hides the overlay.
 		expect(overlayTaps(grow(newer, ['b']), h.sender.state().pending)).toEqual([]);
 		expect(overlayTaps(newer, h.sender.state().pending)).toEqual(['b']);

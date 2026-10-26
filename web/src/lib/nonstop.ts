@@ -323,12 +323,7 @@ function beepNow(clock: Clock, serverNow: number, eventId: string): { kind: Beep
 }
 
 /** The beeps due now: one at 3, 2 and 1 s left of the count-in, `go` at 0, each once. */
-export function beepsDue(
-	clock: Clock,
-	serverNow: number,
-	played: ReadonlySet<string>,
-	eventId: string
-): Beep[] {
+export function beepsDue(clock: Clock, serverNow: number, played: ReadonlySet<string>, eventId: string): Beep[] {
 	const due = beepNow(clock, serverNow, eventId);
 	return due !== null && !played.has(due.key) ? [due.kind] : [];
 }
@@ -347,12 +342,7 @@ const hornKey = (clock: Clock, eventId: string) => `${eventId}:${clock.slot}`;
  * stays quiet), or when a frame turns the slot `done` while `remaining` (the last local value)
  * still had time on it (End now).
  */
-export function shouldHorn(
-	clock: Clock,
-	remaining: number,
-	played: ReadonlySet<string>,
-	eventId: string
-): boolean {
+export function shouldHorn(clock: Clock, remaining: number, played: ReadonlySet<string>, eventId: string): boolean {
 	if (played.has(hornKey(clock, eventId))) return false;
 	if (clock.state === 'done') return remaining > 0;
 	return clock.state === 'running' && remaining <= 0 && remaining > -LATE_MS;

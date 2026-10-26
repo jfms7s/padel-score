@@ -52,15 +52,24 @@ describe('previewText', () => {
 	});
 
 	it('preview_text_same_month', () => {
-		const p = preview({ matches: 1, events: 0, first_at: at('2026-03-02T12:00:00Z'), last_at: at('2026-03-20T12:00:00Z') });
+		const p = preview({
+			matches: 1,
+			events: 0,
+			first_at: at('2026-03-02T12:00:00Z'),
+			last_at: at('2026-03-20T12:00:00Z')
+		});
 		expect(previewText(p)).toBe('1 match · Mar 2026');
-		expect(previewText(preview({ matches: 3, events: 1 , first_at: at('2026-03-02T12:00:00Z'), last_at: at('2026-03-20T12:00:00Z') }))).toBe(
-			'3 matches · 1 event · Mar 2026'
-		);
+		expect(
+			previewText(
+				preview({ matches: 3, events: 1, first_at: at('2026-03-02T12:00:00Z'), last_at: at('2026-03-20T12:00:00Z') })
+			)
+		).toBe('3 matches · 1 event · Mar 2026');
 	});
 
 	it('preview_text_nothing_yet', () => {
-		expect(previewText(preview({ matches: 0, events: 0, first_at: null, last_at: null }))).toBe('No finished matches yet');
+		expect(previewText(preview({ matches: 0, events: 0, first_at: null, last_at: null }))).toBe(
+			'No finished matches yet'
+		);
 	});
 });
 

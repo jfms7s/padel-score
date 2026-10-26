@@ -149,8 +149,24 @@ describe('court helpers', () => {
 
 describe('matchResultText', () => {
 	const teams: EventTeam[] = [
-		{ id: 't1', name: 'Ana / Marta', custom_name: null, players: [{ id: 'p1', name: 'Ana' }, { id: 'p2', name: 'Marta' }] },
-		{ id: 't2', name: 'Rui / João', custom_name: null, players: [{ id: 'p3', name: 'Rui' }, { id: 'p4', name: 'João' }] }
+		{
+			id: 't1',
+			name: 'Ana / Marta',
+			custom_name: null,
+			players: [
+				{ id: 'p1', name: 'Ana' },
+				{ id: 'p2', name: 'Marta' }
+			]
+		},
+		{
+			id: 't2',
+			name: 'Rui / João',
+			custom_name: null,
+			players: [
+				{ id: 'p3', name: 'Rui' },
+				{ id: 'p4', name: 'João' }
+			]
+		}
 	];
 	const base: EventViewMatch = {
 		id: 'm1',
@@ -169,9 +185,19 @@ describe('matchResultText', () => {
 
 	it('event_match_result_text', () => {
 		expect(matchResultText(base, teams)).toBeNull();
-		const result = { sets: [{ a: 6, b: 4, tiebreak: null }], games: [6, 4] as [number, number], regulation_games: [6, 4] as [number, number], overtime: false, timed: false };
-		expect(matchResultText({ ...base, state: 'finished', winner: 'a', result }, teams)).toBe('6-4 · Winner: Ana / Marta');
-		expect(matchResultText({ ...base, state: 'finished', winner: 'b', result }, teams)).toBe('6-4 · Winner: Rui / João');
+		const result = {
+			sets: [{ a: 6, b: 4, tiebreak: null }],
+			games: [6, 4] as [number, number],
+			regulation_games: [6, 4] as [number, number],
+			overtime: false,
+			timed: false
+		};
+		expect(matchResultText({ ...base, state: 'finished', winner: 'a', result }, teams)).toBe(
+			'6-4 · Winner: Ana / Marta'
+		);
+		expect(matchResultText({ ...base, state: 'finished', winner: 'b', result }, teams)).toBe(
+			'6-4 · Winner: Rui / João'
+		);
 		const live = onePoint.score;
 		expect(matchResultText({ ...base, state: 'live', live }, teams)).toMatch(/^0-0, 15-0$/);
 	});

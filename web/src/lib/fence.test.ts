@@ -39,7 +39,12 @@ const withRevision = (view: MatchView, revision: number): MatchView => ({ ...vie
 
 function fakeStorage(init: Record<string, string> = {}): StorageLike & { data: Record<string, string> } {
 	const data = { ...init };
-	return { data, getItem: (k) => data[k] ?? null, setItem: (k, val) => void (data[k] = val), removeItem: (k) => void delete data[k] };
+	return {
+		data,
+		getItem: (k) => data[k] ?? null,
+		setItem: (k, val) => void (data[k] = val),
+		removeItem: (k) => void delete data[k]
+	};
 }
 
 describe('latestView', () => {
@@ -113,7 +118,13 @@ describe('setsSummary', () => {
 		const tb = v(finished);
 		const won: MatchView = {
 			...tb,
-			score: { ...tb.score, sets: [{ a: 6, b: 7, tiebreak: [5, 7] }, { a: 6, b: 2, tiebreak: null }] }
+			score: {
+				...tb.score,
+				sets: [
+					{ a: 6, b: 7, tiebreak: [5, 7] },
+					{ a: 6, b: 2, tiebreak: null }
+				]
+			}
 		};
 		expect(setsSummary(fenceModel(won))).toBe('6–7 (5), 6–2');
 	});
@@ -196,9 +207,7 @@ describe('overlayTaps', () => {
 	});
 
 	it('ignores undos', () => {
-		expect(overlayTaps(view, [{ intent: { kind: 'undo' }, base: r, sent: false }, tap('b', r, false)])).toEqual([
-			'b'
-		]);
+		expect(overlayTaps(view, [{ intent: { kind: 'undo' }, base: r, sent: false }, tap('b', r, false)])).toEqual(['b']);
 	});
 });
 

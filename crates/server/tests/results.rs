@@ -380,6 +380,108 @@ async fn backfill_fills_old_finished_matches() {
     assert_eq!(count_rows(&pool).await, 1);
 }
 
+/// Drop every result row, as if the matches had finished before `match_results` existed.
+async fn forget_results(pool: &SqlitePool) {
+    sqlx::query("DELETE FROM match_results")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn backfill_revisits_only_matches_that_moved() {
+    let (s, pool) = setup().await;
+    let done = new_match(&s, one_set(), Some(OWNER)).await;
+    finish(&s, &done, Team::B, NOW + 5).await;
+    forget_results(&pool).await;
+    assert_eq!(results::backfill(&s).await.unwrap(), 1);
+
+    // Nothing moved since: the match is not replayed, so a row removed behind its back stays gone.
+    forget_results(&pool).await;
+    assert_eq!(results::backfill(&s).await.unwrap(), 0);
+    assert_eq!(count_rows(&pool).await, 0);
+}
+
+#[tokio::test]
+async fn backfill_picks_up_a_match_that_finishes_after_a_run() {
+    let (s, pool) = setup().await;
+    let m = new_match(&s, one_set(), Some(OWNER)).await;
+    applied(
+        apply_command(
+            &s,
+            &m,
+            live("c1", points(Team::A, 3)),
+            NOW + 1,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
+    );
+    // Unfinished: checked, no row.
+    assert_eq!(results::backfill(&s).await.unwrap(), 0);
+
+    applied(
+        apply_command(
+            &s,
+            &m,
+            live("c2", points(Team::A, 21)),
+            NOW + 5,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
+    );
+    forget_results(&pool).await;
+    assert_eq!(results::backfill(&s).await.unwrap(), 1);
+    assert_eq!(result_rows(&pool, &m.id).await[0].finished_at, NOW + 5);
+}
+
+#[tokio::test]
+async fn backfill_follows_a_retracted_result() {
+    let (s, pool) = setup().await;
+    let m = new_match(&s, one_set(), Some(OWNER)).await;
+    let v = finish(&s, &m, Team::A, NOW + 5).await;
+    forget_results(&pool).await;
+    assert_eq!(results::backfill(&s).await.unwrap(), 1);
+
+    // Undo retracts the row and moves the revision; backfill looks again and adds nothing back.
+    applied(
+        apply_command(
+            &s,
+            &m,
+            live(
+                "undo",
+                vec![Command::Undo {
+                    target_seq: v.head_seq,
+                }],
+            ),
+            NOW + 6,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(count_rows(&pool).await, 0);
+    assert_eq!(results::backfill(&s).await.unwrap(), 0);
+    assert_eq!(count_rows(&pool).await, 0);
+
+    // Finished again, the row is rebuilt by the command; a backfill leaves it alone.
+    applied(
+        apply_command(
+            &s,
+            &m,
+            live("again", points(Team::A, 1)),
+            NOW + 7,
+            Authority::Scorer,
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(count_rows(&pool).await, 1);
+    assert_eq!(results::backfill(&s).await.unwrap(), 0);
+    assert_eq!(count_rows(&pool).await, 1);
+}
+
 // ---- history and records ----
 
 use padel_score_server::players::{PlayerChange, PlayerSlots};
@@ -797,4 +899,41 @@ async fn placings_are_returned() {
     assert_eq!(placings[0].field_size, 12);
     assert_eq!(placings[0].finished_at, NOW + 50);
     assert_eq!(placings[1].event_id, "ev-old");
+}
+
+#[tokio::test]
+async fn placings_exclude_other_coordinators_events() {
+    let (s, pool) = setup().await;
+    let ana = player(&s, OWNER, "Ana").await;
+    for (event, owner, at) in [("ev-mine", OWNER, NOW), ("ev-theirs", "user-rui", NOW + 50)] {
+        sqlx::query(
+            "INSERT INTO competitions (id, owner_user_id, name, kind, format, spectator_token, \
+             created_at) VALUES (?, ?, ?, 'tournament', '{}', ?, 1)",
+        )
+        .bind(event)
+        .bind(owner)
+        .bind(format!("Event {event}"))
+        .bind(format!("tok-{event}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO placings (player_id, event_id, event_kind, place, place_to, field_size, \
+             finished_at) VALUES (?, ?, 'tournament', 1, 1, 8, ?)",
+        )
+        .bind(&ana)
+        .bind(event)
+        .bind(at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let ids: Vec<String> = s
+        .placings(OWNER, &ana)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| p.event_id)
+        .collect();
+    assert_eq!(ids, ["ev-mine"]);
 }
