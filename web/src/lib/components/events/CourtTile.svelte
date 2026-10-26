@@ -1,7 +1,7 @@
 <!--
 	A court seen from above: the live score as two halves around a net, the serve ball in the
 	server's half. Ready (a match on court that hasn't started): the halves with the names only.
-	Finished: faded halves and a bar with the next match. Idle: a quiet panel.
+	Finished: dimmed halves with the sets and games, and a bar with the next match. Idle: a quiet panel.
 -->
 <script lang="ts">
 	import { courtTile } from '#lib/desk.ts';
@@ -26,7 +26,6 @@
 
 	const t = strings.desk;
 	const tile = $derived(courtTile(court, matches, teams));
-	const sides = $derived(tile.state === 'live' || tile.state === 'finished' ? ([['a', tile.a], ['b', tile.b]] as const) : []);
 	const watchHref = $derived(`/cv/${encodeURIComponent(court.spectator_token)}`);
 	const phones = $derived('phones' in court ? court.phones : null);
 </script>
@@ -47,25 +46,34 @@
 			<div class="s a"><span class="who">{tile.a}</span></div>
 			<div class="net" aria-hidden="true"></div>
 			<div class="s b"><span class="who">{tile.b}</span></div>
-		{:else}
-			{#each sides as [team, s], i (team)}
+		{:else if tile.state === 'live'}
+			{#each [['a', tile.a], ['b', tile.b]] as const as [team, s], i (team)}
 				{#if i === 1}<div class="net" aria-hidden="true"></div>{/if}
 				<div class="s {team}">
 					<span class="who">{s.names}</span>
-					{#if tile.state === 'live'}
-						<span class="pts num">{s.point}</span>
-						<span class="gm">
-							{#if s.sets !== null}{t.sets}<b>{s.sets}</b> · {/if}{t.games}<b>{s.games}</b>
-						</span>
-						{#if tile.server === team}
-							<span class="ball"><span class="visually-hidden">{t.serving(s.names)}</span></span>
-						{/if}
-					{:else}
-						<span class="pts num fin">{s.games}</span>
-						<span class="gm">{#if tile.winner === team}{t.won}{:else}&nbsp;{/if}</span>
+					<span class="pts num">{s.point}</span>
+					<span class="gm">
+						{#if s.sets !== null}{t.sets}<b>{s.sets}</b> · {/if}{t.games}<b>{s.games}</b>
+					</span>
+					{#if tile.server === team}
+						<span class="ball"><span class="visually-hidden">{t.serving(s.names)}</span></span>
 					{/if}
 				</div>
 			{/each}
+		{:else}
+			<!-- Sets won and each set's games, or a timed match's games. -->
+			{#each [['a', tile.a], ['b', tile.b]] as const as [team, s], i (team)}
+				{#if i === 1}<div class="net" aria-hidden="true"></div>{/if}
+				<div class="s {team}">
+					<span class="who">{s.names}</span>
+					<span class="pts num fin">{s.sets ?? s.games}</span>
+					<span class="gm">
+						{#if s.setGames.length > 0}<span class="sg num" aria-hidden="true">{s.setGames.join(' ')}</span>{/if}
+						{#if tile.winner === team}<span class="won">{t.won}</span>{:else if s.setGames.length === 0}&nbsp;{/if}
+					</span>
+				</div>
+			{/each}
+			<span class="visually-hidden">{tile.score}</span>
 		{/if}
 	</div>
 
@@ -159,10 +167,10 @@
 		overflow: hidden;
 	}
 	.s.a {
-		background: var(--a);
+		background-color: var(--a-court);
 	}
 	.s.b {
-		background: var(--b);
+		background-color: var(--b-court);
 		text-align: right;
 		align-items: flex-end;
 	}
@@ -225,8 +233,22 @@
 	.gm {
 		position: relative;
 		z-index: 1;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0 8px;
 		font-size: 13px;
-		opacity: 0.95;
+	}
+	.s.b .gm {
+		justify-content: flex-end;
+	}
+	.sg {
+		font-size: 15px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+	}
+	.won {
+		font-weight: 700;
 	}
 	.gm b {
 		margin-left: 3px;
@@ -252,8 +274,9 @@
 		right: 58%;
 		top: 30%;
 	}
+	/* A slate wash dims a finished match; the white text stays above 5:1 in both themes. */
 	.done .s {
-		opacity: 0.55;
+		background-image: linear-gradient(rgb(91 107 120 / 0.4), rgb(91 107 120 / 0.4));
 	}
 	.idle .pitch {
 		grid-template-columns: 1fr;

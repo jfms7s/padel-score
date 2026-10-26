@@ -2,6 +2,7 @@
 // keyboard row moves and the court tile's data.
 
 import { teamText } from './events';
+import { scoreText } from './players';
 import type { EventMatch, EventStatus, EventTeam, EventViewMatch, Score, Team } from './types';
 import { pointLabel } from './view';
 
@@ -79,10 +80,12 @@ export function moveRow(ids: string[], current: string | null, dir: 1 | -1): str
 }
 
 export type TileSide = { names: string; point: string; games: number; sets: number | null };
+/** A finished side also has its games in each set, in order (a super tie-break's points). */
+export type FinishedSide = TileSide & { setGames: number[] };
 
 export type CourtTileData =
 	| { state: 'live'; label: string; a: TileSide; b: TileSide; server: Team }
-	| { state: 'finished'; label: string; a: TileSide; b: TileSide; winner: Team | null; nextLabel: string | null }
+	| { state: 'finished'; label: string; a: FinishedSide; b: FinishedSide; winner: Team | null; score: string; nextLabel: string | null }
 	| { state: 'ready'; label: string; a: string; b: string; nextLabel: string | null }
 	| { state: 'idle'; nextLabel: string | null };
 
@@ -124,8 +127,16 @@ export function courtTile(
 		const last = r.sets.length > 0 ? r.sets[r.sets.length - 1] : null;
 		const games = last ? [last.a, last.b] : r.games;
 		const won = (t: Team) => r.sets.filter((x) => (t === 'a' ? x.a > x.b : x.b > x.a)).length;
-		const side = (i: 0 | 1): TileSide => ({ names: names[i], point: '', games: games[i], sets: r.timed ? null : won(i === 0 ? 'a' : 'b') });
-		return { state: 'finished', label: m.label, a: side(0), b: side(1), winner: m.winner, nextLabel };
+		// A deciding super tie-break is stored as 1-0: its points say more.
+		const setGames = (i: 0 | 1) => r.sets.map((x) => (x.tiebreak && x.a + x.b === 1 ? x.tiebreak[i] : i === 0 ? x.a : x.b));
+		const side = (i: 0 | 1): FinishedSide => ({
+			names: names[i],
+			point: '',
+			games: games[i],
+			sets: r.timed ? null : won(i === 0 ? 'a' : 'b'),
+			setGames: r.timed ? [] : setGames(i)
+		});
+		return { state: 'finished', label: m.label, a: side(0), b: side(1), winner: m.winner, score: scoreText(r), nextLabel };
 	}
 	return { state: 'ready', label: m.label, a: names[0], b: names[1], nextLabel };
 }

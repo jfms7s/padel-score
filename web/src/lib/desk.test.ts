@@ -149,7 +149,36 @@ describe('courtTile', () => {
 	it('shows a finished match with no queue', () => {
 		const m = match('m1', { state: 'finished', winner: 'a', result: final });
 		const t = courtTile({ current: 'm1', queue: [] }, [m], teams);
-		expect(t).toMatchObject({ state: 'finished', winner: 'a', nextLabel: null, a: { games: 6, sets: 2 }, b: { games: 2, sets: 1 } });
+		expect(t).toMatchObject({
+			state: 'finished',
+			winner: 'a',
+			nextLabel: null,
+			score: '6-4 3-6 6-2',
+			a: { games: 6, sets: 2, setGames: [6, 3, 6] },
+			b: { games: 2, sets: 1, setGames: [4, 6, 2] }
+		});
+	});
+
+	it('shows every set of a finished match, a super tie-break by its points', () => {
+		const result: FinalScore = {
+			sets: [
+				{ a: 6, b: 4, tiebreak: null },
+				{ a: 6, b: 7, tiebreak: [5, 7] },
+				{ a: 1, b: 0, tiebreak: [10, 8] }
+			],
+			games: [1, 0],
+			regulation_games: [1, 0],
+			overtime: false,
+			timed: false
+		};
+		const t = courtTile({ current: 'm1', queue: [] }, [match('m1', { state: 'finished', winner: 'a', result })], teams);
+		expect(t).toMatchObject({ score: '6-4 6-7(5) 10-8', a: { sets: 2, setGames: [6, 6, 10] }, b: { sets: 1, setGames: [4, 7, 8] } });
+	});
+
+	it('shows a finished timed match by its games', () => {
+		const result: FinalScore = { sets: [], games: [9, 7], regulation_games: [9, 7], overtime: false, timed: true };
+		const t = courtTile({ current: 'm1', queue: [] }, [match('m1', { state: 'finished', winner: 'a', result })], teams);
+		expect(t).toMatchObject({ score: '9-7', a: { games: 9, sets: null, setGames: [] }, b: { games: 7, sets: null, setGames: [] } });
 	});
 
 	it('is ready with a waiting match on court', () => {
