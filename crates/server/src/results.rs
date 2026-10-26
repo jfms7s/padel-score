@@ -106,11 +106,20 @@ pub async fn sync_in(
 /// Give every finished owned match that has no `match_results` row one, with
 /// `finished_at = last_activity_at`. Returns how many rows it inserted; running it again inserts
 /// none. Each match is replayed in its own write transaction, so a command cannot change it in
-/// between. A match whose log does not replay is skipped with a warning.
+/// between.
+///
+/// Incremental: a replayed match records its revision in `matches.results_checked_revision`, and
+/// only a match with no row whose revision has moved since (or that was never checked) is replayed
+/// again. A command that finishes a match or retracts its row bumps the revision, so both are seen.
+/// A match whose log does not replay is skipped with a warning and tried again next run. A match
+/// checked at its current revision is skipped, so a release that changes when the engine counts a
+/// match as finished must also ship a migration `UPDATE matches SET results_checked_revision = NULL`
+/// to force a full pass.
 pub async fn backfill(store: &Store) -> Result<usize, StoreError> {
     let ids: Vec<String> = sqlx::query_scalar(
         "SELECT id FROM matches WHERE owner_user_id IS NOT NULL \
          AND NOT EXISTS (SELECT 1 FROM match_results r WHERE r.match_id = matches.id) \
+         AND (results_checked_revision IS NULL OR results_checked_revision < revision) \
          ORDER BY id",
     )
     .fetch_all(store.pool())
@@ -132,7 +141,14 @@ pub async fn backfill(store: &Store) -> Result<usize, StoreError> {
                 continue;
             }
         };
+        // Whatever it turns out to be, this revision has been looked at.
+        sqlx::query("UPDATE matches SET results_checked_revision = ? WHERE id = ?")
+            .bind(m.revision)
+            .bind(&m.id)
+            .execute(&mut *tx)
+            .await?;
         let Some((winner, final_score)) = result_of(&m.format, &view.score) else {
+            tx.commit().await?;
             continue;
         };
         let done = sqlx::query(
