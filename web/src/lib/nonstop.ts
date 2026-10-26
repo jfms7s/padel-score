@@ -398,3 +398,15 @@ export function clockButtons(clock: Clock | null): ClockButton[] {
 export function placeText(row: Pick<StandingRow, 'place' | 'place_to'>): string {
 	return row.place_to > row.place ? `${row.place}–${row.place_to}` : String(row.place);
 }
+
+/** Ids of the teams level on points with a neighbour in the table (games may separate them). */
+export function levelOnPoints(rows: readonly StandingRow[]): Set<string> {
+	const out = new Set<string>();
+	for (let i = 1; i < rows.length; i++) {
+		if (rows[i].points === rows[i - 1].points) {
+			out.add(rows[i].team_id);
+			out.add(rows[i - 1].team_id);
+		}
+	}
+	return out;
+}

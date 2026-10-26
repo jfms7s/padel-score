@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
 	import { teamText } from '#lib/events.ts';
-	import { placeText, type StandingRow } from '#lib/nonstop.ts';
+	import { levelOnPoints, placeText, type StandingRow } from '#lib/nonstop.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { EventTeam } from '#lib/types.ts';
 
@@ -16,7 +16,7 @@
 		const tm = teams.find((x) => x.id === id);
 		return tm ? teamText(tm) : strings.events.unknownTeam;
 	};
-	const shared = (r: StandingRow) => r.place_to > r.place;
+	const level = $derived(levelOnPoints(rows));
 	// A shared range is printed on its first row only.
 	const shown = (i: number) => i === 0 || rows[i - 1].place !== rows[i].place;
 </script>
@@ -25,19 +25,19 @@
 	<caption class="sr">{t.standings}</caption>
 	<thead>
 		<tr>
-			<th scope="col" class="pl">#</th>
+			<th scope="col" class="pl"><abbr title={t.placeFull}>{t.placeShort}</abbr></th>
 			<th scope="col" class="tm">{t.team}</th>
-			<th scope="col" title={t.played}>{t.played}</th>
-			<th scope="col">{t.won}</th>
-			<th scope="col">{t.drawn}</th>
-			<th scope="col">{t.lost}</th>
-			<th scope="col" title={t.games}>G</th>
-			<th scope="col">{t.points}</th>
+			<th scope="col"><abbr title={t.playedFull}>{t.played}</abbr></th>
+			<th scope="col"><abbr title={t.wonFull}>{t.won}</abbr></th>
+			<th scope="col"><abbr title={t.drawnFull}>{t.drawn}</abbr></th>
+			<th scope="col"><abbr title={t.lostFull}>{t.lost}</abbr></th>
+			<th scope="col"><abbr title={t.gamesFull}>{t.games}</abbr></th>
+			<th scope="col"><abbr title={t.pointsFull}>{t.points}</abbr></th>
 		</tr>
 	</thead>
 	<tbody>
 		{#each rows as r, i (r.team_id)}
-			<tr class:level={shared(r)}>
+			<tr class:level={level.has(r.team_id)}>
 				<td class="pl">{shown(i) ? placeText(r) : ''}</td>
 				<td class="tm">{nameOf(r.team_id)}</td>
 				<td>{r.played}</td>
@@ -64,6 +64,9 @@
 		text-align: center;
 		border-bottom: 1px solid var(--line);
 		font-feature-settings: 'tnum';
+	}
+	abbr {
+		text-decoration: none;
 	}
 	th {
 		color: var(--muted);

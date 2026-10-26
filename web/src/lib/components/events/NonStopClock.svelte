@@ -76,7 +76,7 @@
 {#if clock !== null}
 	<section class="clock" aria-label={t.roundOf(clock.round, rounds)}>
 		<p class="round">
-			{t.roundOf(clock.round, rounds)}{#if waves > 1}, {t.waveOf(clock.wave, waves).toLowerCase()}{/if}
+			{t.roundWave(clock.round, rounds, clock.wave, waves)}
 		</p>
 		{#if countIn > 0}
 			<p class="state">{stateText}</p>

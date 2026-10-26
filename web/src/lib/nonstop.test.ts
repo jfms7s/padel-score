@@ -8,6 +8,7 @@ import {
 	countInMs,
 	createServerClock,
 	isLow,
+	levelOnPoints,
 	markBeeps,
 	markHorn,
 	nonStopCourtData,
@@ -19,7 +20,8 @@ import {
 	msToEnd,
 	remainingMs,
 	shouldHorn,
-	type Clock
+	type Clock,
+	type StandingRow
 } from './nonstop';
 
 const clock = (over: Partial<Clock> = {}): Clock => ({
@@ -263,5 +265,16 @@ describe('placeText', () => {
 	it('shows_a_range_once_for_a_shared_place', () => {
 		expect(placeText({ place: 1, place_to: 1 })).toBe('1');
 		expect(placeText({ place: 2, place_to: 3 })).toBe('2–3');
+	});
+});
+
+describe('levelOnPoints', () => {
+	it('marks_teams_level_on_points_even_when_places_differ', () => {
+		const row = (team_id: string, place: number, points: number): StandingRow => ({
+			team_id, place, place_to: place, played: 3, won: 0, drawn: 0, lost: 0, games_won: 0, points
+		});
+		const rows = [row('a', 1, 9), row('b', 2, 4), row('c', 3, 4), row('d', 4, 1)];
+		expect([...levelOnPoints(rows)].sort()).toEqual(['b', 'c']);
+		expect(levelOnPoints([]).size).toBe(0);
 	});
 });

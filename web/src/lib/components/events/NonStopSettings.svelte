@@ -19,9 +19,10 @@
 		onchange: (settings: Record<string, unknown>) => void;
 	} = $props();
 
-	const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
-	const minutes = $derived(num(settings.match_minutes, 15));
-	const legs = $derived(num(settings.legs, 1));
+	const num = (v: unknown, d: number, lo = -Infinity, hi = Infinity) =>
+		typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.trunc(v))) : d;
+	const minutes = $derived(num(settings.match_minutes, 15, 1, 60));
+	const legs = $derived(num(settings.legs, 1, 1, 3));
 	const order = $derived<Order>(settings.order === 'random' ? 'random' : 'listed');
 
 	function emit(change: Partial<{ match_minutes: number; legs: number; order: Order }>) {
@@ -35,16 +36,19 @@
 		}
 	});
 
+	// Clamp when the field is left, not on each keystroke, so "1" then "5" isn't snapped mid-edit.
 	function setMinutes(e: Event) {
-		const n = Math.trunc((e.currentTarget as HTMLInputElement).valueAsNumber);
-		if (Number.isFinite(n)) emit({ match_minutes: Math.min(60, Math.max(1, n)) });
+		const input = e.currentTarget as HTMLInputElement;
+		const n = num(input.valueAsNumber, minutes, 1, 60);
+		input.value = String(n);
+		emit({ match_minutes: n });
 	}
 </script>
 
 <div class="ns">
 	<label>
 		{t.matchMinutes}
-		<input type="number" inputmode="numeric" min="1" max="60" step="1" value={minutes} oninput={setMinutes} />
+		<input type="number" inputmode="numeric" min="1" max="60" step="1" value={minutes} onchange={setMinutes} />
 	</label>
 
 	<div role="group" aria-labelledby="l-legs">
@@ -88,7 +92,7 @@
 	.seg button {
 		flex: 1;
 		min-width: 0;
-		min-height: 42px;
+		min-height: var(--tap);
 		font-size: 14px;
 		border: 0;
 		background: transparent;
