@@ -148,7 +148,7 @@
 		);
 </script>
 
-<main class="acct">
+<main class="acct page-wide">
 	<h1>{a.title}</h1>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
@@ -162,6 +162,8 @@
 			{#if me.is_admin}<a class="secondary" href="/admin">{a.admin}</a>{/if}
 		</div>
 
+		<div class="secs">
+		<section>
 		<h2>{a.invites}</h2>
 		<p class="hint">{a.invitesHint}</p>
 		<button class="primary" type="button" onclick={newInvite} disabled={busy}>{a.createInvite}</button>
@@ -196,7 +198,9 @@
 				{/each}
 			</ul>
 		{/if}
+		</section>
 
+		<section>
 		<h2>{a.devices}</h2>
 		<p class="hint">{a.devicesHint}</p>
 		{#if deviceFailure}<p class="error" role="alert">{deviceFailure}</p>{/if}
@@ -225,7 +229,9 @@
 				{/each}
 			</ul>
 		{/if}
+		</section>
 
+		<section>
 		<h2>{a.password}</h2>
 		<form onsubmit={submitPassword}>
 			<label>
@@ -241,10 +247,25 @@
 			{#if pwDone}<p class="ok" role="status">{a.passwordChanged}</p>{/if}
 			<button class="primary" type="submit" disabled={pwBusy}>{pwBusy ? t.saving : a.password}</button>
 		</form>
+		</section>
 
+		<section>
 		<h2>{t.signOut}</h2>
 		<button class="danger" type="button" onclick={signOut} disabled={busy}>{t.signOut}</button>
+		</section>
+		</div>
 	{:else if !loadFailure}
 		<p class="hint">{t.loading}</p>
 	{/if}
 </main>
+
+<style>
+	@media (min-width: 1100px) {
+		.secs {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 0 32px;
+			align-items: start;
+		}
+	}
+</style>
