@@ -788,6 +788,7 @@ export const strings = {
 					: `${ordinals.slice(0, -1).join(', ')} and ${ordinals[ordinals.length - 1]} place`,
 		redraw: 'Redraw',
 		redrawing: 'Drawing…',
+		replaying: 'Replaying…',
 		redrawHint: 'Shuffle the teams into new places, until the first point is played.',
 		redrawConfirm: 'Draw the bracket again? Every first-round match is made again.',
 		fillCourts: 'Fill free courts',

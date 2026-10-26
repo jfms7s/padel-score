@@ -168,14 +168,15 @@ const isFinal = (n: Pick<BracketNode, 'place_from' | 'size'>) => n.place_from ==
 
 /**
  * The server keeps the final off the courts while any other bracket node has no match yet or an
- * unfinished match on no court (a 5th/7th-place match can still be made after it).
+ * unfinished match on no court, a match not in `matches` yet counting as unfinished (a
+ * 5th/7th-place match can still be made after the final).
  */
 function finalHeldBack(d: TournamentData, matches: readonly MatchWhere[]): boolean {
 	return d.nodes.some((n) => {
 		if (isFinal(n)) return false;
 		if (n.match_id === null) return true;
 		const m = matches.find((x) => x.id === n.match_id);
-		return m !== undefined && m.state !== 'finished' && m.court_id === null;
+		return m === undefined || (m.state !== 'finished' && m.court_id === null);
 	});
 }
 
