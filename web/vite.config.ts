@@ -9,7 +9,9 @@ export default defineConfig({
 				runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true)
 			},
 			// Pure SPA: the Rust server embeds build/ and serves index.html for unknown paths.
-			adapter: adapter({ pages: 'build', assets: 'build', fallback: 'index.html' })
+			adapter: adapter({ pages: 'build', assets: 'build', fallback: 'index.html' }),
+			// An open page asks for a new deploy every minute (and on focus); see #lib/update.ts.
+			version: { pollInterval: 60_000 }
 		})
 	],
 	server: {
