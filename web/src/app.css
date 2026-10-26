@@ -151,8 +151,9 @@ button {
 }
 
 /* The account pages (sign-in, setup, invite, reset, account, admin, link): one column at phone
-   width, in the new-match form's style. */
-.acct {
+   width, in the new-match form's style. No specificity, so a `.page-*` width wins wherever
+   it is declared. */
+:where(.acct) {
 	max-width: 28rem;
 	margin: 0 auto;
 	padding: 8px 16px 48px;
