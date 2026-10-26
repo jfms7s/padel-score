@@ -11,6 +11,7 @@
 	import { courtMatchText, courtScreen, finalRefusal, goneReason, isCourtState, loadJoined, saveJoined } from '#lib/court.ts';
 	import { advanceByCourt, courtStreamUrl, getCourt } from '#lib/events.ts';
 	import { latestView } from '#lib/fence.ts';
+	import { holdUpdates } from '#lib/holds.svelte.ts';
 	import { stickyClientId } from '#lib/ids.ts';
 	import { takeAbandoned } from '#lib/queue.ts';
 	import { safeSessionStorage, safeStorage } from '#lib/storage.ts';
@@ -61,6 +62,11 @@
 	const canChangeServer = $derived(
 		screen === 'live' && view !== null && view.head_seq === 0 && startedHere === current?.id
 	);
+
+	// A new deploy waits while a typed score is open or a request is out.
+	$effect(() => {
+		if (sheetOpen || starting || advancing) return holdUpdates();
+	});
 
 	function dead(reason: 'replaced' | 'finished') {
 		gone = reason;

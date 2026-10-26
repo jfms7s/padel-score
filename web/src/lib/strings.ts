@@ -910,6 +910,11 @@ export const strings = {
 		account: 'Account'
 	},
 
+	// A new version was deployed while this page was open.
+	update: {
+		ready: 'Updated — tap to reload'
+	},
+
 	// The coordinator desk and the spectator page: the court tile and the match list.
 	desk: {
 		live: 'Live',

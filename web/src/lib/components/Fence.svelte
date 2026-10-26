@@ -11,6 +11,7 @@
 	import { ApiError, getScore, postCommands, replace, streamUrl } from '#lib/api.ts';
 	import { unlockAudio } from '#lib/audio.ts';
 	import { engineReady, initEngine, replayLocal } from '#lib/engine.ts';
+	import { holdUpdates } from '#lib/holds.svelte.ts';
 	import { newClientId } from '#lib/ids.ts';
 	import {
 		latestView,
@@ -226,6 +227,11 @@
 			awake = null;
 			sending = idle;
 		};
+	});
+
+	// A new deploy waits until every tap here is on the server.
+	$effect(() => {
+		if (sending.unsaved) return holdUpdates();
 	});
 
 	$effect(() => {
