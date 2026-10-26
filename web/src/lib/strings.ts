@@ -680,6 +680,11 @@ export const strings = {
 			court_in_use: 'A match is on this court.',
 			match_not_finished: 'The match on this court isn’t finished yet.',
 			match_finished: 'This match is finished.',
+			team_count: 'A tournament needs 4, 8, 16 or 32 teams.',
+			play_started: 'A match has started, so the bracket can’t be drawn again.',
+			no_decision: 'That result doesn’t need a decision any more.',
+			bracket_unfinished: 'Some bracket matches aren’t finished yet.',
+			bracket_needs_decision: 'A changed result needs your decision first.',
 			conflict: 'The score changed meanwhile. Try again.',
 			locked: 'You already entered this result.'
 		},
@@ -739,6 +744,75 @@ export const strings = {
 		noMatches: 'No matches yet.',
 		finalPositions: 'Final positions',
 		eventGone: 'This event link doesn’t work any more.'
+	},
+
+	// The tournament's bracket (phase 7).
+	tournament: {
+		fullPlacement: 'Losers keep playing',
+		fullPlacementOn: 'Every place is decided. First-round losers play for the lower places.',
+		fullPlacementOff: 'Losers are out. The semi-final losers play for 3rd.',
+		teamCounts: '4, 8, 16 or 32 teams.',
+		teamCountHint: (n: number, down: number | null, up: number | null) => {
+			const teams = (k: number) => (k === 1 ? '1 team' : `${k} teams`);
+			const add = up === null ? null : `add ${teams(up - n)} to make ${up}`;
+			const remove = down === null ? null : `remove ${teams(n - down)} to make ${down}`;
+			const text = [add, remove].filter((x) => x !== null).join(', or ');
+			return `${n} teams don’t make a bracket: ${text}.`;
+		},
+		bracket: 'Bracket',
+		toBeDrawn: 'To be drawn',
+		winnerOf: (label: string) => `Winner of ${label}`,
+		loserOf: (label: string) => `Loser of ${label}`,
+		eitherOr: (a: string, b: string) => `${a} or ${b}`,
+		liveOn: (court: string) => `Live on ${court}`,
+		nextOn: (court: string) => `Next on ${court}`,
+		nextFreeCourt: 'Next free court',
+		afterOtherMatches: 'After the other matches',
+		roundOf32: 'Round of 32',
+		roundOf16: 'Round of 16',
+		quarterFinals: 'Quarter-finals',
+		semiFinals: 'Semi-finals',
+		finalAndThird: 'Final and 3rd place',
+		placementRoundOf16: 'Placement round of 16',
+		placementQuarterFinals: 'Placement quarter-finals',
+		placementSemis: 'Placement semis',
+		placementSectionOf16: 'Placement round of 16, 17th to 32nd',
+		placementSectionQuarters: 'Placement quarter-finals, 9th to 16th',
+		placementSectionSemis: 'Placement semis, 5th to 8th',
+		// "5th place and 7th place", "9th, 11th, 13th and 15th place".
+		placesColumn: (ordinals: string[]) =>
+			ordinals.length === 2
+				? `${ordinals[0]} place and ${ordinals[1]} place`
+				: ordinals.length < 2
+					? `${ordinals.join('')} place`
+					: `${ordinals.slice(0, -1).join(', ')} and ${ordinals[ordinals.length - 1]} place`,
+		redraw: 'Redraw',
+		redrawing: 'Drawing…',
+		replaying: 'Replaying…',
+		redrawHint: 'Shuffle the teams into new places, until the first point is played.',
+		redrawConfirm: 'Draw the bracket again? Every first-round match is made again.',
+		fillCourts: 'Fill free courts',
+		filling: 'Filling…',
+		held: 'Result changed after later matches started',
+		heldWarning: (label: string, first: string | null) =>
+			`${label}’s result changed after ${first ?? 'a later match'} started.`,
+		replay: 'Replay',
+		replayDiscards: (labels: string[]) =>
+			`Replay ${labels.length === 1 ? '1 match' : `${labels.length} matches`}: ${labels.join(', ')}. Started matches lose their scores.`,
+		keep: 'Keep as played',
+		keepNote: (label: string) => `The later matches stand. The new score counts only for ${label}.`,
+		heldFinished: 'The event is finished, so later matches can’t be replayed.',
+		settingsHeading: 'Settings',
+		fullPlacementState: (on: boolean) => `Losers keep playing: ${on ? 'On' : 'Off'}`,
+		change: 'Change',
+		saving: 'Saving…',
+		teamsAndCourts: (teams: number, courts: number) =>
+			`${teams} teams on ${courts === 1 ? '1 court' : `${courts} courts`}`,
+		matchLink: (label: string) => `Open ${label}`,
+		finishedBlocker: {
+			unfinished: 'Some matches aren’t finished yet.',
+			decision: 'A result needs your decision first.'
+		},
 	},
 
 	// Home, signed in.
