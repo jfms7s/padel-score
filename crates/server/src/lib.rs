@@ -15,6 +15,7 @@ pub mod hub;
 pub mod linked_history;
 pub mod linking;
 pub mod linking_api;
+pub mod non_stop_api;
 pub mod owned;
 pub mod players;
 pub mod players_api;
@@ -67,6 +68,8 @@ pub struct AppState {
     pub list_streams: Arc<owned::ListStreams>,
     /// The court phones connected to each court, for the coordinator's view.
     pub court_phones: Arc<hub::CourtPhones>,
+    /// Wakes the non-stop clock runner ([`non_stop_api::run_clock`]) after a clock change.
+    pub clock_wake: Arc<tokio::sync::Notify>,
 }
 
 /// The default [`AppState::credential_recheck`].
@@ -85,6 +88,7 @@ impl AppState {
             credential_recheck: CREDENTIAL_RECHECK,
             list_streams: Arc::new(owned::ListStreams::new()),
             court_phones: Arc::new(hub::CourtPhones::new()),
+            clock_wake: Arc::new(tokio::sync::Notify::new()),
         }
     }
 }

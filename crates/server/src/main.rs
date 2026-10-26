@@ -75,6 +75,7 @@ async fn main() -> Result<(), BoxError> {
     }
     let streams = state.shutdown.clone();
     tokio::spawn(padel_score_server::retention::run(state.clone()));
+    tokio::spawn(padel_score_server::non_stop_api::run_clock(state.clone()));
     tokio::spawn(padel_score_server::ratelimit::run_sweeper(
         state.limits.clone(),
         state.shutdown.clone(),
