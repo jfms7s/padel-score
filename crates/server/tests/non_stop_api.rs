@@ -19,7 +19,7 @@ use padel_score_server::commands::{
 };
 use padel_score_server::competitions::non_stop::clock::{COUNT_IN_MS, ClockAction};
 use padel_score_server::competitions::{Kind, NewCompetition};
-use padel_score_server::non_stop_api::{fire_due, run_clock};
+use padel_score_server::non_stop_api::{fire_due, go_slot, run_clock};
 use padel_score_server::store::{Store, events_in, match_by_id_in};
 use padel_score_server::{AppState, hub::Subscription};
 use padel_scoring::{DeuceRule, Event, FinalScore, Format, Status, Team};
@@ -593,6 +593,96 @@ async fn replace_dropping_time_up_is_reasserted() {
     );
     assert!(view.events.last().unwrap().seq > time_up_seq);
     assert_eq!(fire_due(&ev.state, ENDS + 2_000).await, 0);
+}
+
+#[tokio::test]
+async fn undo_of_time_up_is_reasserted() {
+    let ev = running(None).await;
+    let one = ev.slot(1).await;
+    ev.clock(ClockAction::Start, 1, T).await;
+    fire_due(&ev.state, GO).await;
+    ev.tap(&one[1], "play", points(&[Team::A])).await;
+    assert_eq!(fire_due(&ev.state, ENDS).await, 2);
+    let time_up_seq = ev.view(&one[1]).await.events.last().unwrap().seq;
+
+    // The scorer undoes the time-up.
+    let m = ev
+        .store()
+        .match_owned_by(&one[1], &ev.owner)
+        .await
+        .unwrap()
+        .unwrap();
+    let req = CommandRequest {
+        client_id: "undo-time-up".into(),
+        batch: false,
+        base_revision: m.revision,
+        commands: vec![Command::Undo {
+            target_seq: time_up_seq,
+        }],
+    };
+    match apply_command(ev.store(), &m, req, NOW, Authority::Scorer)
+        .await
+        .unwrap()
+    {
+        CommandOutcome::Applied(view) => {
+            assert!(view.events.iter().all(|e| e.event != Event::TimeUp));
+        }
+        other => panic!("expected Applied, got {other:?}"),
+    }
+    let flagged: i64 =
+        sqlx::query_scalar("SELECT needs_time_up FROM non_stop_matches WHERE match_id = ?")
+            .bind(&one[1])
+            .fetch_one(&ev.pool)
+            .await
+            .unwrap();
+    assert_eq!(flagged, 1);
+
+    assert_eq!(fire_due(&ev.state, ENDS + 1_000).await, 1);
+    let view = ev.view(&one[1]).await;
+    let kinds: Vec<Event> = view.events.iter().map(|e| e.event).collect();
+    assert_eq!(kinds, vec![Event::Point(Team::A), Event::TimeUp]);
+    assert!(view.events.last().unwrap().seq > time_up_seq);
+    let flagged: i64 =
+        sqlx::query_scalar("SELECT needs_time_up FROM non_stop_matches WHERE match_id = ?")
+            .bind(&one[1])
+            .fetch_one(&ev.pool)
+            .await
+            .unwrap();
+    assert_eq!(flagged, 0);
+    assert_eq!(fire_due(&ev.state, ENDS + 2_000).await, 0);
+}
+
+#[tokio::test]
+async fn go_skips_a_slot_paused_since_it_was_found_due() {
+    let ev = running(None).await;
+    let one = ev.slot(1).await;
+    ev.tap(&one[0], "pre", points(&[Team::A; 3])).await;
+    ev.clock(ClockAction::Start, 1, T).await;
+    // The runner found the slot due at GO; a Pause in the count-in commits before its go runs.
+    ev.clock(ClockAction::Pause, 1, T + 1_000).await;
+    let revision = ev.view(&one[0]).await.revision;
+    let went = go_slot(ev.store(), &ev.id, 1, GO, GO / 1000).await.unwrap();
+    assert!(went.is_none());
+    let view = ev.view(&one[0]).await;
+    assert_eq!(view.events.len(), 3);
+    assert_eq!(view.revision, revision);
+    let started: Option<i64> = sqlx::query_scalar(
+        "SELECT started_at_ms FROM non_stop_slots WHERE event_id = ? AND slot = 1",
+    )
+    .bind(&ev.id)
+    .fetch_one(&ev.pool)
+    .await
+    .unwrap();
+    assert_eq!(started, None);
+    assert_eq!(ev.slot_state(1).await, "paused");
+
+    // Still due: the go runs.
+    ev.clock(ClockAction::Resume, 1, T + 2_000).await;
+    let went = go_slot(ev.store(), &ev.id, 1, T + 2_000 + COUNT_IN_MS, 0)
+        .await
+        .unwrap();
+    assert_eq!(went.unwrap().0.len(), 2);
+    assert!(ev.view(&one[0]).await.events.is_empty());
 }
 
 #[tokio::test]

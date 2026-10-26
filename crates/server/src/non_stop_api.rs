@@ -24,7 +24,7 @@ use sqlx::SqliteConnection;
 
 use crate::AppState;
 use crate::accounts;
-use crate::api::{ApiError, ApiJson, ApiPath, now};
+use crate::api::{ApiError, ApiJson, ApiPath};
 use crate::auth::SessionUser;
 use crate::commands::{
     Authority, Command, CommandOutcome, CommandRequest, MatchView, apply_command, view_of,
@@ -43,7 +43,7 @@ use crate::store::{
 /// done slot that lost its time-up gets it again within this).
 pub const RECHECK: Duration = Duration::from_secs(1);
 
-/// The shortest sleep between passes, so a deadline a pass could not clear does not spin.
+/// The shortest sleep between passes, so a deadline a few ms ahead is not polled in a burst.
 const MIN_SLEEP: Duration = Duration::from_millis(20);
 
 pub fn routes() -> Router<AppState> {
@@ -142,15 +142,32 @@ async fn clear_match_in(
 }
 
 /// The go of one slot, in one transaction: clear every match of it without a result, then
-/// [`went_in`]. Returns the fresh views and the event's owner.
-async fn go_slot(
+/// [`went_in`]. Returns the fresh views and the event's owner, or `None` (nothing written) when
+/// the slot is no longer due to go as of `now_ms` (a Pause or a finish committed since the slot
+/// was found due): the predicate of `due_go_in` is re-checked under the write lock.
+pub async fn go_slot(
     store: &Store,
     event_id: &str,
     slot: u32,
     now_ms: i64,
     now_secs: i64,
-) -> Result<(Vec<MatchView>, Option<String>), StoreError> {
+) -> Result<Option<(Vec<MatchView>, Option<String>)>, StoreError> {
     let mut tx = store.begin().await?;
+    let due: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM non_stop_slots s JOIN competitions c ON c.id = s.event_id \
+         WHERE s.event_id = ? AND s.slot = ? AND c.status = 'running' \
+         AND s.started_at_ms IS NULL \
+         AND ((s.state = 'running' AND s.starts_at_ms <= ?) OR s.state = 'done')",
+    )
+    .bind(event_id)
+    .bind(slot)
+    .bind(now_ms)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if due.is_none() {
+        // Dropping `tx` rolls it back.
+        return Ok(None);
+    }
     let owner = owner_of_event_in(&mut tx, event_id).await?;
     let matches: Vec<String> = sqlx::query_scalar(
         "SELECT n.match_id FROM non_stop_matches n WHERE n.event_id = ? AND n.slot = ? \
@@ -169,7 +186,7 @@ async fn go_slot(
     }
     went_in(&mut tx, event_id, slot, now_ms).await?;
     tx.commit().await?;
-    Ok((views, owner))
+    Ok(Some((views, owner)))
 }
 
 fn notify(state: &AppState, event_id: &str, owner: Option<&str>) {
@@ -194,7 +211,8 @@ async fn fire_goes(state: &AppState, now_ms: i64, now_secs: i64) {
     };
     for (event_id, slot) in due {
         match go_slot(&state.store, &event_id, slot, now_ms, now_secs).await {
-            Ok((views, owner)) => {
+            Ok(None) => {}
+            Ok(Some((views, owner))) => {
                 for view in views {
                     state.hub.publish(view);
                 }
@@ -265,6 +283,25 @@ async fn check_in(
     Ok(Some((m, view.head_seq)))
 }
 
+/// Clear the match's flag if, under the write lock, it needs nothing more (finished, or its
+/// time-up effective). Writers are serialized, so a scorer's undo of the time-up cannot land
+/// between the check and the clear: it either came before (the flag stays) or re-flags after.
+async fn settle(store: &Store, match_id: &str) -> Result<(), StoreError> {
+    let mut tx = store.begin().await?;
+    if check_in(&mut tx, match_id).await?.is_none() {
+        clear_time_up_in(&mut tx, match_id).await?;
+        tx.commit().await?;
+    }
+    Ok(())
+}
+
+/// Clear the flag whatever the log says: the time-up is refused for good (`Rejected` is saved
+/// under its client id and would only replay; `Invalid` never changes).
+async fn clear_for_good(store: &Store, match_id: &str) -> Result<(), StoreError> {
+    let mut conn = acquire(store).await?;
+    clear_time_up_in(&mut conn, match_id).await
+}
+
 /// Call time on one flagged match. Returns whether a `TimeUp` was applied; an error leaves the
 /// flag set for the next pass.
 async fn time_up_match(
@@ -277,8 +314,7 @@ async fn time_up_match(
         check_in(&mut conn, match_id).await?
     };
     let Some((m, head_seq)) = check else {
-        let mut conn = acquire(&state.store).await?;
-        clear_time_up_in(&mut conn, match_id).await?;
+        settle(&state.store, match_id).await?;
         return Ok(false);
     };
     let req = CommandRequest {
@@ -288,18 +324,47 @@ async fn time_up_match(
         commands: vec![Command::TimeUp],
     };
     let outcome = apply_command(&state.store, &m, req, now_secs, Authority::Owner).await?;
-    let applied = match &outcome {
-        CommandOutcome::Applied(_) => true,
-        CommandOutcome::Rejected { kind, .. } => {
-            tracing::warn!(match_id, ?kind, "time-up refused by the engine");
-            false
-        }
-        CommandOutcome::Replayed { .. } => false,
-        CommandOutcome::Conflict(_) | CommandOutcome::Locked(_) | CommandOutcome::Invalid(_) => {
-            tracing::warn!(match_id, "time-up not applied; retried on the next pass");
+    match &outcome {
+        CommandOutcome::Applied(_) => {}
+        CommandOutcome::Replayed { status, .. } => {
+            tracing::info!(match_id, status, "time-up already sent at this log head");
+            settle(&state.store, match_id).await?;
             return Ok(false);
         }
-    };
+        CommandOutcome::Rejected { kind, index } => {
+            tracing::warn!(match_id, ?kind, index, "time-up refused by the engine");
+            clear_for_good(&state.store, match_id).await?;
+            return Ok(false);
+        }
+        CommandOutcome::Invalid(message) => {
+            tracing::error!(
+                match_id,
+                outcome = "invalid",
+                message,
+                "time-up request invalid"
+            );
+            clear_for_good(&state.store, match_id).await?;
+            return Ok(false);
+        }
+        CommandOutcome::Conflict(view) => {
+            tracing::warn!(
+                match_id,
+                outcome = "conflict",
+                revision = view.revision,
+                "time-up not applied; retried on the next pass"
+            );
+            return Ok(false);
+        }
+        CommandOutcome::Locked(view) => {
+            tracing::warn!(
+                match_id,
+                outcome = "locked",
+                revision = view.revision,
+                "time-up not applied; retried on the next pass"
+            );
+            return Ok(false);
+        }
+    }
     if let CommandOutcome::Applied(view) = outcome {
         state.hub.publish(view);
         let event_id: Option<String> =
@@ -311,11 +376,8 @@ async fn time_up_match(
             notify(state, &event_id, m.owner_user_id.as_deref());
         }
     }
-    {
-        let mut conn = acquire(&state.store).await?;
-        clear_time_up_in(&mut conn, match_id).await?;
-    }
-    Ok(applied)
+    settle(&state.store, match_id).await?;
+    Ok(true)
 }
 
 /// Step 2b: every flagged match of a slot that has gone gets its time-up, unless it is
@@ -352,7 +414,8 @@ async fn acquire(store: &Store) -> Result<sqlx::pool::PoolConnection<sqlx::Sqlit
 /// how many time-ups it applied. Failures are logged; whatever they left undone is retried on
 /// the next pass.
 pub async fn fire_due(state: &AppState, now_ms: i64) -> usize {
-    let now_secs = now();
+    // One clock for the whole pass: the command path's seconds come from the same `now_ms`.
+    let now_secs = now_ms.div_euclid(1000);
     fire_goes(state, now_ms, now_secs).await;
     close_due_slots(state, now_ms).await;
     fire_time_ups(state, now_secs).await
@@ -366,8 +429,11 @@ async fn next_wait(store: &Store, now_ms: i64) -> Result<Option<Duration>, Store
         return Ok(None);
     }
     let wait = match next_deadline_in(&mut conn).await? {
+        // Already past (a go or an end that keeps failing): retry at the re-check pace
+        // instead of spinning.
+        Some(at) if at <= now_ms => RECHECK,
         Some(at) => {
-            let ms = u64::try_from(at.saturating_sub(now_ms).max(0)).unwrap_or(0);
+            let ms = u64::try_from(at.saturating_sub(now_ms)).unwrap_or(0);
             Duration::from_millis(ms).min(RECHECK)
         }
         None => RECHECK,
