@@ -830,6 +830,7 @@ export const strings = {
 			`Round ${r} of ${rounds}, ${waves > 1 ? `wave ${wave}, ` : ''}${courtName}`,
 		waitingForClock: 'Waiting for the clock',
 		paused: 'Paused',
+		pausedBeforeGo: 'Paused · Waiting for the clock',
 		timeUp: 'Time’s up',
 		overtime: 'Overtime: the next game wins',
 		start: (slotText: string) => `Start ${slotText}`,
