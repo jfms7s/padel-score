@@ -3,15 +3,17 @@
 //! `bracket.rs`; this file only moves them to and from SQLite. Like `courts.rs`, the `*_in`
 //! functions run in the caller's transaction and take `now` as a parameter.
 
+use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection};
 
-use super::bracket::{Bracket, Layout, Node, Plan, Pos, Side, shuffle};
+use super::bracket::{Bracket, Layout, Node, Plan, Pos, Side, Source, shuffle};
 use super::settings_of;
 use crate::competitions::courts::{
     advance_court_in, assign_in, courts_in, create_event_match_in, next_queued_in,
 };
-use crate::competitions::{Competition, teams_in};
-use crate::store::{StoreError, Tx};
+use crate::competitions::places::{Place, validate_places, write_placings_in};
+use crate::competitions::{Audience, Competition, Kind, Status, competition_in, teams_in};
+use crate::store::{Store, StoreError, Tx};
 
 fn to_u32(n: i64) -> Result<u32, StoreError> {
     u32::try_from(n).map_err(|e| StoreError::Db(sqlx::Error::Decode(Box::new(e))))
@@ -158,14 +160,12 @@ async fn create_match_for_in(
     set_match_in(tx, ev, pos, &made.match_id).await
 }
 
-/// The draw, at Start: a row for every match of the layout, the teams shuffled into the first
-/// round, its matches created in `idx` order, then the free courts filled.
+/// The draw, at Start: a row for every match of the layout, then [`seed_in`].
 pub async fn draw_in(tx: &mut Tx<'_>, ev: &Competition, now: i64) -> Result<(), StoreError> {
     let teams = teams_in(tx, &ev.id).await?;
     let layout = Layout::new(teams.len(), settings_of(ev).full_placement)
         .ok_or(StoreError::Conflict("team_count"))?;
-    let positions = layout.positions();
-    for pos in &positions {
+    for pos in &layout.positions() {
         sqlx::query(
             "INSERT INTO bracket_matches (event_id, place_from, size, idx) VALUES (?, ?, ?, ?)",
         )
@@ -176,7 +176,23 @@ pub async fn draw_in(tx: &mut Tx<'_>, ev: &Competition, now: i64) -> Result<(), 
         .execute(&mut **tx)
         .await?;
     }
-    let mut ids: Vec<String> = teams.into_iter().map(|t| t.id).collect();
+    seed_in(tx, ev, &layout, now).await
+}
+
+/// Fill empty bracket rows: the teams shuffled into the first round, its matches created in
+/// `idx` order, then the free courts filled.
+async fn seed_in(
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+    layout: &Layout,
+    now: i64,
+) -> Result<(), StoreError> {
+    let positions = layout.positions();
+    let mut ids: Vec<String> = teams_in(tx, &ev.id)
+        .await?
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
     shuffle(&mut ids, random_u32);
     // The first round is the positions that have no source, in `idx` order.
     let first_round: Vec<Pos> = positions
@@ -190,9 +206,274 @@ pub async fn draw_in(tx: &mut Tx<'_>, ev: &Competition, now: i64) -> Result<(), 
         }
     }
     for pos in &first_round {
-        create_match_for_in(tx, ev, &layout, *pos, now).await?;
+        create_match_for_in(tx, ev, layout, *pos, now).await?;
     }
     fill_courts_in(tx, ev).await
+}
+
+/// Draw again: needs a running event (`Conflict("event_not_running")`) whose bracket matches
+/// have not started (`Conflict("play_started")`). Every bracket match is withdrawn, every slot
+/// and hold cleared, and the teams shuffled into the first round again. Returns the withdrawn
+/// match ids.
+pub async fn redraw_in(
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+    now: i64,
+) -> Result<Vec<String>, StoreError> {
+    if ev.status != Status::Running {
+        return Err(StoreError::Conflict("event_not_running"));
+    }
+    let bracket = load_in(tx, ev).await?.ok_or(StoreError::NotFound)?;
+    if bracket.nodes.iter().any(|n| n.started) {
+        return Err(StoreError::Conflict("play_started"));
+    }
+    let withdrawn: Vec<String> = bracket
+        .nodes
+        .iter()
+        .filter_map(|n| n.match_id.clone())
+        .collect();
+    for match_id in &withdrawn {
+        withdraw_in(tx, ev, match_id).await?;
+    }
+    sqlx::query(
+        "UPDATE bracket_matches SET team_a_id = NULL, team_b_id = NULL, match_id = NULL, \
+         held = 0 WHERE event_id = ?",
+    )
+    .bind(&ev.id)
+    .execute(&mut **tx)
+    .await?;
+    seed_in(tx, ev, &bracket.layout, now).await?;
+    Ok(withdrawn)
+}
+
+/// The coordinator's answer to a held match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Choice {
+    /// Discard the later matches the old winner played and make them again.
+    Replay,
+    /// Keep the later matches as played.
+    Keep,
+}
+
+/// Decide on the held bracket match `match_id`: unknown is `NotFound`, not held is
+/// `Conflict("no_decision")`. `Keep` clears the hold (after Finish it also writes the placings
+/// again, with the event's `finished_at`). `Replay` needs a running event
+/// (`Conflict("event_finished")`) and carries out `Bracket::replay`; then every hold still set
+/// is looked at again, as a result would be, since the matches it was waiting on may be gone.
+/// Returns the withdrawn match ids.
+pub async fn decide_in(
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+    match_id: &str,
+    choice: Choice,
+    now: i64,
+) -> Result<Vec<String>, StoreError> {
+    let bracket = load_in(tx, ev).await?.ok_or(StoreError::NotFound)?;
+    let node = bracket
+        .node_by_match(match_id)
+        .ok_or(StoreError::NotFound)?;
+    if !node.held {
+        return Err(StoreError::Conflict("no_decision"));
+    }
+    let pos = node.pos;
+    match choice {
+        Choice::Keep => {
+            let plan = Plan {
+                held: vec![(pos, false)],
+                ..Plan::default()
+            };
+            apply_plan_in(tx, ev, &bracket, &plan, now).await?;
+            if ev.status == Status::Finished {
+                rewrite_placings_in(tx, ev, now).await?;
+            }
+            Ok(Vec::new())
+        }
+        Choice::Replay => {
+            if ev.status != Status::Running {
+                return Err(StoreError::Conflict("event_finished"));
+            }
+            let plan = bracket.replay(pos);
+            let mut withdrawn = apply_plan_in(tx, ev, &bracket, &plan, now).await?;
+            for p in bracket.layout.positions() {
+                let Some(bracket) = load_in(tx, ev).await? else {
+                    break;
+                };
+                if !bracket.node(p).is_some_and(|n| n.held) {
+                    continue;
+                }
+                let plan = bracket.on_result(p);
+                withdrawn.extend(apply_plan_in(tx, ev, &bracket, &plan, now).await?);
+            }
+            Ok(withdrawn)
+        }
+    }
+}
+
+/// The bracket's places, if it is complete and they pass `validate_places`.
+async fn valid_places(
+    conn: &mut SqliteConnection,
+    ev: &Competition,
+    bracket: &Bracket,
+) -> Result<Option<Vec<Place>>, StoreError> {
+    let Some(places) = bracket.places() else {
+        return Ok(None);
+    };
+    let ids: Vec<String> = teams_in(conn, &ev.id)
+        .await?
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    Ok(validate_places(&ids, &places).is_ok().then_some(places))
+}
+
+/// After Finish: write the placings again from the bracket, keeping the event's
+/// `finished_at`, when it is complete and its places are valid; else leave them.
+pub async fn rewrite_placings_in(
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+    now: i64,
+) -> Result<(), StoreError> {
+    let Some(bracket) = load_in(tx, ev).await? else {
+        return Ok(());
+    };
+    if let Some(places) = valid_places(tx, ev, &bracket).await? {
+        let teams = teams_in(tx, &ev.id).await?;
+        write_placings_in(tx, ev, &teams, &places, ev.finished_at.unwrap_or(now)).await?;
+    }
+    Ok(())
+}
+
+/// One node of the bracket as `kind_data` shows it.
+#[derive(Serialize)]
+struct NodeOut<'a> {
+    place_from: u32,
+    size: u32,
+    idx: u32,
+    label: String,
+    teams: &'a [Option<String>; 2],
+    from: [Option<Source>; 2],
+    match_id: Option<&'a str>,
+    held: bool,
+    /// Coordinator only, on a held node: the labels of the matches Replay would discard.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    replay_discards: Option<Vec<String>>,
+}
+
+/// The bracket as `kind_data`.
+#[derive(Serialize)]
+struct BracketOut<'a> {
+    full_placement: bool,
+    teams: u32,
+    nodes: Vec<NodeOut<'a>>,
+    places: Option<Vec<Place>>,
+    /// Coordinator only: the event runs and no bracket match has started.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    can_redraw: Option<bool>,
+}
+
+/// The bracket as `kind_data` (see the plan's wire shapes): `None` with no bracket and for a
+/// court. `replay_discards` (on held nodes) and `can_redraw` are for the coordinator only. No
+/// token of any kind is in it.
+pub async fn kind_json(
+    conn: &mut SqliteConnection,
+    ev: &Competition,
+    audience: &Audience,
+) -> Result<Option<serde_json::Value>, StoreError> {
+    if matches!(audience, Audience::Court { .. }) {
+        return Ok(None);
+    }
+    let Some(bracket) = load_in(conn, ev).await? else {
+        return Ok(None);
+    };
+    let coordinator = *audience == Audience::Coordinator;
+    let layout = &bracket.layout;
+    let nodes = bracket
+        .nodes
+        .iter()
+        .map(|n| NodeOut {
+            place_from: n.pos.place_from,
+            size: n.pos.size,
+            idx: n.pos.idx,
+            label: layout.label(n.pos),
+            teams: &n.teams,
+            from: [layout.source(n.pos, Side::A), layout.source(n.pos, Side::B)],
+            match_id: n.match_id.as_deref(),
+            held: n.held,
+            replay_discards: (coordinator && n.held).then(|| {
+                bracket
+                    .replay_discards(n.pos)
+                    .into_iter()
+                    .map(|p| layout.label(p))
+                    .collect()
+            }),
+        })
+        .collect();
+    let out = BracketOut {
+        full_placement: layout.full_placement(),
+        teams: layout.teams(),
+        nodes,
+        places: valid_places(conn, ev, &bracket).await?,
+        can_redraw: coordinator
+            .then(|| ev.status == Status::Running && !bracket.nodes.iter().any(|n| n.started)),
+    };
+    serde_json::to_value(out)
+        .map(Some)
+        .map_err(|e| StoreError::Corrupt(format!("cannot encode the bracket: {e}")))
+}
+
+/// The owner's tournament `id` in `tx`: another owner's, an unknown one or a non-tournament
+/// event is `NotFound`.
+async fn tournament_in(tx: &mut Tx<'_>, owner: &str, id: &str) -> Result<Competition, StoreError> {
+    competition_in(tx, owner, id)
+        .await?
+        .filter(|ev| ev.kind == Kind::Tournament)
+        .ok_or(StoreError::NotFound)
+}
+
+impl Store {
+    /// [`redraw_in`] on the owner's tournament, in one transaction.
+    pub async fn redraw_bracket(
+        &self,
+        owner: &str,
+        id: &str,
+        now: i64,
+    ) -> Result<Vec<String>, StoreError> {
+        let mut tx = self.begin().await?;
+        let ev = tournament_in(&mut tx, owner, id).await?;
+        let withdrawn = redraw_in(&mut tx, &ev, now).await?;
+        tx.commit().await?;
+        Ok(withdrawn)
+    }
+
+    /// [`decide_in`] on the owner's tournament, in one transaction.
+    pub async fn decide_bracket(
+        &self,
+        owner: &str,
+        id: &str,
+        match_id: &str,
+        choice: Choice,
+        now: i64,
+    ) -> Result<Vec<String>, StoreError> {
+        let mut tx = self.begin().await?;
+        let ev = tournament_in(&mut tx, owner, id).await?;
+        let withdrawn = decide_in(&mut tx, &ev, match_id, choice, now).await?;
+        tx.commit().await?;
+        Ok(withdrawn)
+    }
+
+    /// Put waiting bracket matches on the free courts of the owner's running tournament
+    /// (`Conflict("event_not_running")` otherwise), in one transaction.
+    pub async fn fill_bracket_courts(&self, owner: &str, id: &str) -> Result<(), StoreError> {
+        let mut tx = self.begin().await?;
+        let ev = tournament_in(&mut tx, owner, id).await?;
+        if ev.status != Status::Running {
+            return Err(StoreError::Conflict("event_not_running"));
+        }
+        fill_courts_in(&mut tx, &ev).await?;
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 /// Carry out a plan, in this order: withdraw the matches, set the slots, create the matches
@@ -227,7 +508,7 @@ pub async fn apply_plan_in(
         .execute(&mut **tx)
         .await?;
     }
-    if ev.status == crate::competitions::Status::Running {
+    if ev.status == Status::Running {
         fill_courts_in(tx, ev).await?;
     }
     Ok(plan.withdraw.clone())

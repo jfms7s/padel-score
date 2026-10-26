@@ -251,7 +251,8 @@ async fn create_event_round_trip() {
     assert!(d["event"].get("owner_user_id").is_none());
     assert!(d["spectator_token"].is_string());
     assert_eq!(d["teams"].as_array().unwrap().len(), 4);
-    assert_eq!(d["kind_data"], Value::Null);
+    // The started tournament has its bracket (clear_draw removed only its matches).
+    assert_eq!(d["kind_data"]["teams"], json!(4));
     assert_eq!(d["places"], json!([]));
     // A tournament works out its places from its bracket.
     assert_eq!(d["places_computed"], json!(true));
