@@ -236,12 +236,23 @@ pub async fn apply_plan_in(
 /// Take a match out of the tournament: off its court the phase 6 way (an unfinished match is
 /// unassigned; the finished current match advances its court), then delete its `matches` row.
 /// The cascade removes its log, players, result and event link, and the bracket row's
-/// `match_id` goes back to `NULL`.
+/// `match_id` goes back to `NULL`. A match that is not this event's is `NotFound` and nothing
+/// is touched. Errors on a finished event (`assign_in` and `advance_court_in` refuse it).
 pub async fn withdraw_in(
     tx: &mut Tx<'_>,
     ev: &Competition,
     match_id: &str,
 ) -> Result<(), StoreError> {
+    let linked: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM competition_matches WHERE match_id = ? AND event_id = ? LIMIT 1",
+    )
+    .bind(match_id)
+    .bind(&ev.id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if linked.is_none() {
+        return Err(StoreError::NotFound);
+    }
     let finished: Option<i64> =
         sqlx::query_scalar("SELECT 1 FROM match_results WHERE match_id = ? LIMIT 1")
             .bind(match_id)
@@ -251,18 +262,23 @@ pub async fn withdraw_in(
         assign_in(tx, ev, match_id, None).await?;
     } else {
         let current_on: Option<String> =
-            sqlx::query_scalar("SELECT id FROM courts WHERE current_match_id = ?")
+            sqlx::query_scalar("SELECT id FROM courts WHERE current_match_id = ? AND event_id = ?")
                 .bind(match_id)
+                .bind(&ev.id)
                 .fetch_optional(&mut **tx)
                 .await?;
         if let Some(court_id) = current_on {
             advance_court_in(tx, ev, &court_id).await?;
         }
     }
-    sqlx::query("DELETE FROM matches WHERE id = ?")
-        .bind(match_id)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM matches WHERE id = ? \
+         AND id IN (SELECT match_id FROM competition_matches WHERE event_id = ?)",
+    )
+    .bind(match_id)
+    .bind(&ev.id)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
