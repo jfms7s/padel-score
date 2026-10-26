@@ -4,17 +4,18 @@
 	// viewing link; it never holds a scoring token. A signed-in viewer also gets "That's me" on
 	// the teams' players, to claim their entry.
 	import { page } from '$app/state';
+	import CourtGrid from '#lib/components/events/CourtGrid.svelte';
 	import CourtTile from '#lib/components/events/CourtTile.svelte';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
-	import { matchResultText } from '#lib/court.ts';
-	import { eventViewStreamUrl, getEventView, isEventDetail, matchText, matchViewPath, rulesText, teamText } from '#lib/events.ts';
+	import MatchList from '#lib/components/events/MatchList.svelte';
+	import { eventViewStreamUrl, getEventView, isEventDetail, rulesText, teamText } from '#lib/events.ts';
 	import { ApiError } from '#lib/api.ts';
 	import { getEventSlots } from '#lib/linking.ts';
 	import { session } from '#lib/session.ts';
 	import ClaimSheet from '#lib/components/ClaimSheet.svelte';
 	import { openSseStream, type StreamStatus } from '#lib/stream.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { EventSlotState, EventView, EventViewMatch } from '#lib/types.ts';
+	import type { EventSlotState, EventView } from '#lib/types.ts';
 
 	const t = strings.court;
 	const te = strings.events;
@@ -30,9 +31,16 @@
 	const matches = $derived([...(detail?.matches ?? [])].sort((x, y) => x.ordinal - y.ordinal));
 	const places = $derived([...(detail?.places ?? [])].sort((x, y) => x.place - y.place));
 
-	const matchById = (mid: string | null): EventViewMatch | undefined =>
-		mid === null ? undefined : matches.find((m) => m.id === mid);
-	const courtName = (cid: string | null) => courts.find((c) => c.id === cid)?.name ?? null;
+	// The tiles are compact below the desktop width, as on the desk's Live tab.
+	let compact = $state(typeof window === 'undefined' ? true : !matchMedia('(min-width: 1100px)').matches);
+	$effect(() => {
+		const desk = matchMedia('(min-width: 1100px)');
+		const update = () => (compact = !desk.matches);
+		update();
+		desk.addEventListener('change', update);
+		return () => desk.removeEventListener('change', update);
+	});
+
 	const teamName = (tid: string) => {
 		const tm = teams.find((x) => x.id === tid);
 		return tm ? teamText(tm) : te.unknownTeam;
@@ -103,7 +111,7 @@
 	<title>{ev ? ev.name : strings.appName}</title>
 </svelte:head>
 
-<main class="acct">
+<main class="acct page-wide">
 	{#if loadFailure && !detail}
 		<p class="error" role="alert">{loadFailure}</p>
 	{:else if detail && ev}
@@ -141,64 +149,30 @@
 		{#if courts.length > 0 && ev.status !== 'finished'}
 			<section aria-labelledby="h-courts">
 				<h2 id="h-courts">{t.courts}</h2>
-				<!-- Temporary: Task 6 places the tiles for good. -->
-				<div class="tiles">
+				<CourtGrid count={courts.length}>
 					{#each courts as court (court.id)}
-						<CourtTile {court} {matches} {teams} />
+						<CourtTile {court} {matches} {teams} {compact} />
 					{/each}
-				</div>
-				<ul class="list" aria-labelledby="h-courts">
-					{#each courts as court (court.id)}
-						{@const m = matchById(court.current)}
-						<li class="row">
-							<span class="what">
-								<strong>{court.name}</strong>
-								{#if m}
-									<span>{m.label}: {matchText(m, teams)}</span>
-									{@const line = matchResultText(m, teams)}
-									{#if line}<span class="score">{line}</span>{/if}
-								{:else}
-									<span class="hint">{t.courtIdle}</span>
-								{/if}
-							</span>
-							<div class="actions">
-								<a class="secondary" href="/cv/{encodeURIComponent(court.spectator_token)}" aria-label={t.watchLabel(court.name)}>{t.watch}</a>
-							</div>
-						</li>
-					{/each}
-				</ul>
+				</CourtGrid>
 			</section>
 		{/if}
 
-		<section aria-labelledby="h-matches">
-			<h2 id="h-matches">{t.matches}</h2>
-			{#if matches.length === 0}
-				<p class="hint">{t.noMatches}</p>
-			{:else}
-				<ul class="list" aria-labelledby="h-matches">
-					{#each matches as m (m.id)}
-						{@const text = matchText(m, teams)}
-						{@const line = matchResultText(m, teams)}
-						{@const where = courtName(m.court_id)}
-						<li class="row">
-							<span class="what">
-								<strong>{m.label}</strong>
-								<span>{text}</span>
-								<span class="hint">{te.matchState[m.state]}{#if where}{' · '}{where}{/if}{#if line}{' · '}{line}{/if}</span>
-							</span>
-							<div class="actions">
-								<a class="secondary" href={matchViewPath(m.spectator_token)} aria-label={te.viewLabel(text)}>{te.view}</a>
-							</div>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</section>
-
-		<KindPanel event={detail} audience="spectator" />
+		<div class="split">
+			<div class="kind">
+				<KindPanel event={detail} audience="spectator" parts="all" />
+			</div>
+			<section class="panel" aria-labelledby="h-matches">
+				<h2 id="h-matches">{t.matches}</h2>
+				{#if matches.length === 0}
+					<p class="hint empty">{t.noMatches}</p>
+				{:else}
+					<MatchList {matches} {courts} {teams} format={ev.format} mode="view" />
+				{/if}
+			</section>
+		</div>
 
 		{#if claimable.length > 0}
-			<section aria-labelledby="h-claims">
+			<section class="page-narrow claims" aria-labelledby="h-claims">
 				<h2 id="h-claims">{strings.linking.thatsMe}</h2>
 				<ul class="list" aria-labelledby="h-claims">
 					{#each claimable as slot (`${slot.team_id}${slot.position}`)}
@@ -242,11 +216,6 @@
 {/if}
 
 <style>
-	.tiles {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
-		gap: 14px;
-	}
 	.head h1 {
 		margin-bottom: 4px;
 		overflow-wrap: anywhere;
@@ -275,12 +244,46 @@
 		border-radius: 12px;
 		color: var(--warn);
 	}
+	.split {
+		display: grid;
+		gap: 16px;
+		align-items: start;
+		margin-top: 16px;
+	}
+	.split > * {
+		min-width: 0;
+	}
+	/* The kind's own sections bring their top margin; the column starts flush. */
+	.kind :global(section:first-child),
+	.kind :global(h2:first-child),
+	.kind :global(h3:first-child) {
+		margin-top: 0;
+	}
+	.panel {
+		margin-top: 0;
+		border: 1px solid var(--line);
+		border-radius: 16px;
+		background: var(--panel);
+		overflow: hidden;
+	}
+	.panel h2 {
+		margin: 0;
+		padding: 12px 14px;
+		font-size: 16px;
+		border-bottom: 1px solid var(--line);
+	}
+	.empty {
+		margin: 0;
+		padding: 12px 14px;
+	}
+	/* Claims keep the phone column's width, flush left under the wide page. */
+	.claims {
+		margin-left: 0;
+		padding-left: 0;
+		padding-right: 0;
+	}
 	.row .what {
 		flex: 1 1 10rem;
-	}
-	.score {
-		font-weight: 700;
-		font-feature-settings: 'tnum';
 	}
 	.pos {
 		flex: none;
@@ -290,5 +293,10 @@
 	}
 	.final {
 		margin: 0;
+	}
+	@media (min-width: 1100px) {
+		.split {
+			grid-template-columns: minmax(0, 1fr) 380px;
+		}
 	}
 </style>

@@ -5,6 +5,7 @@
 	Once finished, the final places come first.
 -->
 <script lang="ts">
+	import CourtGrid from '#lib/components/events/CourtGrid.svelte';
 	import CourtTile from '#lib/components/events/CourtTile.svelte';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import MatchList from '#lib/components/events/MatchList.svelte';
@@ -97,12 +98,11 @@
 	{#if failure}<p class="error" role="alert">{failure}</p>{/if}
 
 	{#if courts.length > 0}
-		<!-- A tablet fits up to three courts in a row, more in two columns. -->
-		<div class="live-courts" style:--cols={courts.length <= 3 ? courts.length : 2}>
+		<CourtGrid count={courts.length}>
 			{#each courts as court (court.id)}
 				<CourtTile {court} {matches} {teams} {busy} compact={size !== 'desk'} onnext={running ? () => onnext(court) : undefined} />
 			{/each}
-		</div>
+		</CourtGrid>
 	{/if}
 
 	{#if size === 'phone'}
@@ -172,11 +172,6 @@
 		opacity: 0.6;
 		cursor: default;
 	}
-	.live-courts {
-		display: grid;
-		gap: 12px;
-		grid-template-columns: 1fr;
-	}
 	.live-split {
 		display: grid;
 		gap: 16px;
@@ -220,15 +215,7 @@
 	p.error {
 		margin: 0;
 	}
-	@media (min-width: 700px) {
-		.live-courts {
-			grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
-		}
-	}
 	@media (min-width: 1100px) {
-		.live-courts {
-			grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-		}
 		.live-split {
 			grid-template-columns: minmax(0, 1fr) 360px;
 		}
