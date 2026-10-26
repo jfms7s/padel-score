@@ -2,7 +2,7 @@
 	// The coordinator's event desk: a header, a tab bar and the open tab (see desk.ts). The page
 	// loads the event, follows its stream (offering a reload when it is lost) and runs every
 	// call; the tabs only show and ask.
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
@@ -144,8 +144,8 @@
 	});
 
 	/** Swap the tab in place: no new history entry, and scroll and focus stay put. */
-	function select(tab: DeskTab) {
-		void goto(`?tab=${tab}`, { replace: true, reset: false });
+	function select(tab: DeskTab): Promise<void> {
+		return goto(`?tab=${tab}`, { replace: true, reset: false });
 	}
 
 	// ---- teams -----------------------------------------------------------------------------
@@ -241,7 +241,12 @@
 	function finish(places?: Place[]) {
 		void act('lifecycle', async () => {
 			detail = await finishEvent(id, places);
-			select('live');
+		}).then(async (finished) => {
+			if (!finished) return;
+			// The Finish tab goes with its button: the cursor moves to the Live tab.
+			await select('live');
+			await tick();
+			document.getElementById('tab-live')?.focus();
 		});
 	}
 </script>
@@ -258,7 +263,7 @@
 			{copyFailed}
 			oncopy={() => copy('spectator', eventLink(origin, detail?.spectator_token ?? ''))}
 			onstart={start}
-			onfinish={() => select('finish')}
+			onfinish={() => void select('finish')}
 		/>
 		{#if failures.lifecycle && active !== 'finish'}<p class="error" role="alert">{failures.lifecycle}</p>{/if}
 

@@ -4,6 +4,7 @@
 -->
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import type { DeskTab } from '#lib/desk.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { EventKind } from '#lib/types.ts';
@@ -23,7 +24,8 @@
 	const t = strings.desk.tabs;
 	const links: Partial<Record<DeskTab, HTMLAnchorElement | null>> = {};
 
-	let narrow = $state(false);
+	const phone = new MediaQuery('(max-width: 699px)');
+	const narrow = $derived(phone.current);
 	let bar: HTMLDivElement | undefined = $state();
 	let more = $state({ start: false, end: false });
 
@@ -35,19 +37,8 @@
 		more = { start: bar.scrollLeft > 1, end: bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1 };
 	}
 
-	$effect(() => {
-		const query = matchMedia('(max-width: 699px)');
-		const sync = () => {
-			narrow = query.matches;
-			// The labels change width: measure once they are rendered.
-			void tick().then(measure);
-		};
-		sync();
-		query.addEventListener('change', sync);
-		return () => query.removeEventListener('change', sync);
-	});
-
-	// Keep the active tab in view on load and when it changes.
+	// Keep the active tab in view on load and when it changes, and measure again once the
+	// labels change width.
 	$effect(() => {
 		void active;
 		void narrow;
@@ -134,6 +125,10 @@
 	}
 	a:hover {
 		color: var(--ink);
+	}
+	/* The strip scrolls, which clips anything outside it: draw the ring inside the tab. */
+	a:focus-visible {
+		outline-offset: -3px;
 	}
 	a[aria-selected='true'] {
 		color: var(--ink);

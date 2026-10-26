@@ -9,6 +9,7 @@
 	import CourtTile from '#lib/components/events/CourtTile.svelte';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import MatchList from '#lib/components/events/MatchList.svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { groupMatches, isJumpKey } from '#lib/desk.ts';
 	import { teamText } from '#lib/events.ts';
 	import { strings } from '#lib/strings.ts';
@@ -48,22 +49,10 @@
 
 	/** The phone, tablet and desktop layouts differ in what they show, not only in where. */
 	type Size = 'phone' | 'tablet' | 'desk';
-	const measure = (): Size =>
-		matchMedia('(min-width: 1100px)').matches ? 'desk' : matchMedia('(min-width: 700px)').matches ? 'tablet' : 'phone';
 	// Read at once, so a wide screen doesn't flash the phone layout first.
-	let size = $state<Size>(typeof window === 'undefined' ? 'phone' : measure());
-	$effect(() => {
-		const tablet = matchMedia('(min-width: 700px)');
-		const desk = matchMedia('(min-width: 1100px)');
-		const update = () => (size = measure());
-		update();
-		tablet.addEventListener('change', update);
-		desk.addEventListener('change', update);
-		return () => {
-			tablet.removeEventListener('change', update);
-			desk.removeEventListener('change', update);
-		};
-	});
+	const tablet = new MediaQuery('(min-width: 700px)');
+	const desk = new MediaQuery('(min-width: 1100px)');
+	const size = $derived<Size>(desk.current ? 'desk' : tablet.current ? 'tablet' : 'phone');
 
 	const byId = (mid: string | null) => (mid === null ? undefined : matches.find((m) => m.id === mid));
 	/** The first court whose match is over while another waits for it. */

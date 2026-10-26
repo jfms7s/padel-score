@@ -4,6 +4,7 @@
 	// viewing link; it never holds a scoring token. A signed-in viewer also gets "That's me" on
 	// the teams' players, to claim their entry.
 	import { page } from '$app/state';
+	import { MediaQuery } from 'svelte/reactivity';
 	import CourtGrid from '#lib/components/events/CourtGrid.svelte';
 	import CourtTile from '#lib/components/events/CourtTile.svelte';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
@@ -32,14 +33,8 @@
 	const places = $derived([...(detail?.places ?? [])].sort((x, y) => x.place - y.place));
 
 	// The tiles are compact below the desktop width, as on the desk's Live tab.
-	let compact = $state(typeof window === 'undefined' ? true : !matchMedia('(min-width: 1100px)').matches);
-	$effect(() => {
-		const desk = matchMedia('(min-width: 1100px)');
-		const update = () => (compact = !desk.matches);
-		update();
-		desk.addEventListener('change', update);
-		return () => desk.removeEventListener('change', update);
-	});
+	const desk = new MediaQuery('(min-width: 1100px)');
+	const compact = $derived(!desk.current);
 
 	const teamName = (tid: string) => {
 		const tm = teams.find((x) => x.id === tid);
