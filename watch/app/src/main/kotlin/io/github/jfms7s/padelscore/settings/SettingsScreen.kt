@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException
 import android.view.inputmethod.EditorInfo
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,11 +18,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,11 +28,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
-import androidx.wear.compose.material3.AlertDialog
 import androidx.wear.compose.material3.Button
-import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
@@ -50,7 +47,14 @@ fun SettingsScreen(model: SettingsModel, onApplied: () -> Unit) {
     }
     val editServer = rememberTextInput(stringResource(R.string.settings_server_input), model::submitServer)
     val editAddresses = rememberTextInput(stringResource(R.string.settings_addresses_input), model::submitAddresses)
-    SettingsContent(state, onEditServer = editServer, onEditAddresses = editAddresses, onReset = model::reset)
+    SettingsContent(state, onEditServer = editServer, onEditAddresses = editAddresses)
+}
+
+/** A first run, with no server set yet: the settings are the only screen. */
+@Composable
+fun FirstRunSettings(store: SettingsStore, onApplied: () -> Unit) {
+    val model = viewModel { SettingsModel(store, current = null, tokens = null) }
+    Box(Modifier.fillMaxSize().background(Color.Black)) { SettingsScreen(model, onApplied) }
 }
 
 private const val INPUT_KEY = "text"
@@ -96,10 +100,8 @@ internal fun SettingsContent(
     state: SettingsState,
     onEditServer: () -> Unit,
     onEditAddresses: () -> Unit,
-    onReset: () -> Unit,
 ) {
-    var confirming by rememberSaveable { mutableStateOf(false) }
-    val addresses = addressText(state.settings.fallback).ifEmpty { stringResource(R.string.settings_addresses_none) }
+    val settings = state.settings
     MaterialTheme {
         val listState = rememberTransformingLazyColumnState()
         ScreenScaffold(scrollState = listState) { padding ->
@@ -107,32 +109,23 @@ internal fun SettingsContent(
                 item { Title(stringResource(R.string.settings_title)) }
                 state.error?.let { error -> item { Hint(stringResource(error.message())) } }
                 if (state.saving) item { Hint(stringResource(R.string.settings_saving)) }
-                item {
-                    RowButton(stringResource(R.string.settings_server), displayUrl(state.settings.serverUrl), onEditServer)
+                if (settings == null) {
+                    item {
+                        RowButton(stringResource(R.string.settings_server), stringResource(R.string.settings_server_none), onEditServer)
+                    }
+                    item { Hint(stringResource(R.string.settings_first_run)) }
+                } else {
+                    item {
+                        RowButton(stringResource(R.string.settings_server), displayUrl(settings.serverUrl), onEditServer)
+                    }
+                    item {
+                        val addresses = addressText(settings.fallback).ifEmpty { stringResource(R.string.settings_addresses_none) }
+                        RowButton(stringResource(R.string.settings_addresses), addresses, onEditAddresses)
+                    }
+                    item { Hint(stringResource(R.string.settings_help)) }
                 }
-                item { RowButton(stringResource(R.string.settings_addresses), addresses, onEditAddresses) }
-                item { Hint(stringResource(R.string.settings_help)) }
-                item { RowButton(stringResource(R.string.settings_reset), onClick = { confirming = true }) }
             }
         }
-        AlertDialog(
-            visible = confirming,
-            onDismissRequest = { confirming = false },
-            confirmButton = {
-                Button(onClick = { confirming = false; onReset() }, modifier = Modifier.heightIn(min = MinTarget)) {
-                    Text(stringResource(R.string.settings_reset_confirm))
-                }
-            },
-            dismissButton = {
-                Button(
-                    onClick = { confirming = false },
-                    colors = ButtonDefaults.filledTonalButtonColors(),
-                    modifier = Modifier.heightIn(min = MinTarget),
-                ) { Text(stringResource(R.string.settings_cancel)) }
-            },
-            title = { Text(stringResource(R.string.settings_reset_title)) },
-            text = { Text(stringResource(R.string.settings_reset_text)) },
-        )
     }
 }
 

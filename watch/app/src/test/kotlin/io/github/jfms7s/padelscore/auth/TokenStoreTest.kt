@@ -57,9 +57,9 @@ private class TestCipher(private val key: SecretKey = newKey()) : TokenCipher {
 private const val SERVER_A = "https://a.example.test/"
 private const val SERVER_B = "https://b.example.test/"
 
-/** A store for [origin], with [SERVER_A] as the build's default server. */
+/** A store for the server at [origin]. */
 private fun tokenStore(dataStore: DataStore<Preferences>, cipher: TokenCipher, origin: String = SERVER_A) =
-    DataStoreTokenStore(dataStore, cipher, origin = origin, legacyOrigin = SERVER_A)
+    DataStoreTokenStore(dataStore, cipher, origin = origin)
 
 class TokenStoreTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
@@ -227,31 +227,12 @@ class TokenStoreTest {
     }
 
     @Test
-    fun legacy_token_without_origin_belongs_to_the_default_server() = runTest {
+    fun token_without_an_origin_is_dropped() = runTest {
+        // Saved by a build from before tokens were tied to their server: nothing says who issued it.
         val blob = java.util.Base64.getEncoder().encodeToString(cipher.encrypt("pdl_TEST_old".toByteArray()))
         dataStore.edit { it[stringPreferencesKey("device_token")] = blob }
-        assertFalse(tokenStore(dataStore, cipher, SERVER_B).signedIn.first())
-        val onDefault = tokenStore(dataStore, cipher, SERVER_A)
-        assertTrue(onDefault.signedIn.first())
-        assertEquals("pdl_TEST_old", onDefault.read())
-    }
-
-    @Test
-    fun legacy_token_is_dropped_when_running_on_another_server() = runTest {
-        val blob = java.util.Base64.getEncoder().encodeToString(cipher.encrypt("pdl_TEST_old".toByteArray()))
-        dataStore.edit { it[stringPreferencesKey("device_token")] = blob }
-        assertNull(tokenStore(dataStore, cipher, SERVER_B).read())
-        assertNull(tokenStore(dataStore, cipher, SERVER_A).read())
-    }
-
-    @Test
-    fun legacy_token_stays_with_the_server_it_was_first_read_on_when_the_build_default_changes() = runTest {
-        val blob = java.util.Base64.getEncoder().encodeToString(cipher.encrypt("pdl_TEST_old".toByteArray()))
-        dataStore.edit { it[stringPreferencesKey("device_token")] = blob }
-        assertEquals("pdl_TEST_old", tokenStore(dataStore, cipher, SERVER_A).read())
-        // A later build makes B the default: the old token was issued by A, so B never gets it.
-        val newDefault = DataStoreTokenStore(dataStore, cipher, origin = SERVER_B, legacyOrigin = SERVER_B)
-        assertFalse(newDefault.signedIn.first())
-        assertNull(newDefault.read())
+        assertFalse(store.signedIn.first())
+        assertNull(store.read())
+        assertNull(dataStore.data.first()[stringPreferencesKey("device_token")])
     }
 }

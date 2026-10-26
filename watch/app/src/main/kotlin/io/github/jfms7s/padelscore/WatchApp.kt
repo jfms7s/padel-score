@@ -107,7 +107,7 @@ private fun WatchNavHost(
             ScoreScreen(model, onDone = { nav.popBackStack(MATCHES, inclusive = false) })
         }
         composable(SETTINGS) {
-            val model = viewModel { SettingsModel(container.settingsStore, container.tokens, container.settings) }
+            val model = viewModel { SettingsModel(container.settingsStore, container.settings, container.tokens) }
             SettingsScreen(model, onApplied = onSettingsApplied)
         }
     }

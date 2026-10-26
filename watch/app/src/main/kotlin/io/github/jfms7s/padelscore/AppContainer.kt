@@ -49,10 +49,12 @@ interface AppContainer {
 
 /** Holds the process's [AppContainer]; the [MainActivity] asks it for a new one after the settings change. */
 interface ContainerHost {
-    val container: AppContainer
+    /** Null until a server is set on the watch. */
+    val container: AppContainer?
+    val settingsStore: SettingsStore
 
     /** Replaces [container] with one built on the stored settings. */
-    suspend fun reload(): AppContainer
+    suspend fun reload(): AppContainer?
 }
 
 // DataStore allows one active instance per file, so the delegate keeps it process-wide.
@@ -67,9 +69,8 @@ private val Context.settingsDataStore by preferencesDataStore(
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
 )
 
-/** The process-wide store of the owner's server settings, on top of the build's [defaults]. */
-fun settingsStoreOf(context: Context, defaults: ServerSettings): SettingsStore =
-    DataStoreSettingsStore(context.applicationContext.settingsDataStore, defaults)
+/** The process-wide store of the server settings set on the watch. */
+fun settingsStoreOf(context: Context): SettingsStore = DataStoreSettingsStore(context.applicationContext.settingsDataStore)
 
 /**
  * Manual dependency injection, built by [PadelApp]: one instance per process until the server
@@ -100,7 +101,6 @@ class DefaultAppContainer(
         appContext.authDataStore,
         KeystoreCipher(),
         origin = originKey(settings.serverUrl),
-        legacyOrigin = originKey(settingsStore.defaults.serverUrl),
     )
 
     override val api: PadelApi = HttpPadelApi(serverUrl, http, WireJson, token = { tokens.read() })

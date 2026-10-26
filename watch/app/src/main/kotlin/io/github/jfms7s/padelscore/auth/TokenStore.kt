@@ -86,16 +86,14 @@ class KeystoreCipher(private val alias: String = "padel-device-token") : TokenCi
  *
  * A token is only good for the server that issued it, so it is stored with that server's [origin]
  * and a store for another origin reads it as signed out (and drops it). Whatever path led to a
- * mismatch (settings changed, a save cut short, a new build default, an unreadable settings file),
- * the token is never sent to a server it wasn't issued by. Tokens saved before origins were stored
- * belong to [legacyOrigin], the build's default server, so existing installs stay signed in; the
- * first read stamps them with it, so a later build default doesn't inherit them.
+ * mismatch (settings changed, a save cut short, an unreadable settings file), the token is never
+ * sent to a server it wasn't issued by. A token saved with no origin (by a build from before they
+ * were stored) has no known issuer, so it is dropped too.
  */
 class DataStoreTokenStore(
     private val dataStore: DataStore<Preferences>,
     private val cipher: TokenCipher,
     private val origin: String,
-    private val legacyOrigin: String,
 ) : TokenStore {
     // Every API call and stream reconnect reads the token, so after the first read it comes from memory
     // instead of a KeyStore load and a GCM decrypt. Only the ciphertext ever reaches disk.
@@ -116,7 +114,6 @@ class DataStoreTokenStore(
                 return null
             }
             encoded?.let { String(cipher.decrypt(Base64.getDecoder().decode(it)), Charsets.UTF_8) }
-                ?.also { if (prefs[ORIGIN] == null) stamp() }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -124,19 +121,6 @@ class DataStoreTokenStore(
             discard()
             null
         }
-
-    /**
-     * Best effort: records that a token saved before origins were stored belongs to this server, so
-     * a later build with another default server reads it as someone else's instead of adopting it.
-     */
-    private suspend fun stamp() {
-        try {
-            dataStore.edit { if (it[KEY] != null && it[ORIGIN] == null) it[ORIGIN] = origin }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-        }
-    }
 
     /** Best effort: read() must stay total even when the file itself is unusable. */
     private suspend fun discard() {
@@ -174,7 +158,7 @@ class DataStoreTokenStore(
         }
     }
 
-    private fun ownedHere(prefs: Preferences): Boolean = (prefs[ORIGIN] ?: legacyOrigin) == origin
+    private fun ownedHere(prefs: Preferences): Boolean = prefs[ORIGIN] == origin
 
     override val signedIn: Flow<Boolean> = dataStore.data.map { it[KEY] != null && ownedHere(it) }
 

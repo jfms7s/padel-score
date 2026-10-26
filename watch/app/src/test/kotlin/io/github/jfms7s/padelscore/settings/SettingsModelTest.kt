@@ -21,14 +21,14 @@ import java.net.InetAddress
 @OptIn(ExperimentalCoroutinesApi::class)
 class SettingsModelTest {
     private val scheduler = TestCoroutineScheduler()
-    private val store = FakeSettingsStore()
+    private val store = FakeSettingsStore(testSettings.serverUrl, testSettings.fallback)
     private val tokens = MemoryTokenStore().apply { token = "tok" }
 
     @Before fun setMain() = Dispatchers.setMain(StandardTestDispatcher(scheduler))
 
     @After fun resetMain() = Dispatchers.resetMain()
 
-    private fun model(current: ServerSettings = testDefaults) = SettingsModel(store, tokens, current)
+    private fun model(current: ServerSettings = testSettings) = SettingsModel(store, current, tokens)
 
     @Test
     fun new_server_clears_the_token_then_saves_and_applies() {
@@ -56,7 +56,7 @@ class SettingsModelTest {
         model.submitAddresses("10.0.0.1 10.0.0.2")
         scheduler.runCurrent()
         assertEquals("tok", tokens.token)
-        assertEquals(listOf("10.0.0.1", "10.0.0.2"), store.fallback?.map { it.hostAddress })
+        assertEquals(listOf("10.0.0.1", "10.0.0.2"), store.fallback.map { it.hostAddress })
         assertTrue(model.state.value.applied)
     }
 
@@ -69,7 +69,7 @@ class SettingsModelTest {
         model.submitAddresses("10.0.0.1, nope")
         scheduler.runCurrent()
         assertEquals(SettingsError.BadAddresses, model.state.value.error)
-        assertEquals(testDefaults, model.state.value.settings)
+        assertEquals(testSettings, model.state.value.settings)
         assertEquals(0, store.writes)
         assertEquals("tok", tokens.token)
         assertFalse(model.state.value.applied)
@@ -98,57 +98,43 @@ class SettingsModelTest {
     }
 
     @Test
-    fun reset_back_to_the_default_server_clears_the_token() {
-        store.server = "https://padel.other.test/".toHttpUrl()
-        val model = model(ServerSettings("https://padel.other.test/".toHttpUrl(), testDefaults.fallback))
-        model.reset()
-        scheduler.runCurrent()
-        assertNull(store.server)
-        assertNull(tokens.token)
-        assertTrue(model.state.value.applied)
-    }
-
-    @Test
-    fun reset_of_addresses_only_keeps_the_token() {
-        store.fallback = emptyList()
-        val model = model(testDefaults.copy(fallback = emptyList()))
-        model.reset()
-        scheduler.runCurrent()
-        assertNull(store.fallback)
-        assertEquals("tok", tokens.token)
-        assertTrue(model.state.value.applied)
-    }
-
-    @Test
     fun new_host_drops_the_lan_addresses() {
         val model = model()
         model.submitServer("padel.other.test")
         scheduler.runCurrent()
         assertEquals(emptyList<InetAddress>(), store.fallback)
         // Shown as such on the screen until the app restarts.
-        assertEquals(emptyList<InetAddress>(), model.state.value.settings.fallback)
-    }
-
-    @Test
-    fun back_to_the_default_host_brings_back_the_default_addresses() {
-        store.server = "https://padel.other.test/".toHttpUrl()
-        store.fallback = listOf(InetAddress.getByName("10.9.9.9"))
-        val model = model(ServerSettings("https://padel.other.test/".toHttpUrl(), store.fallback!!))
-        model.submitServer("example.test")
-        scheduler.runCurrent()
-        assertNull(store.fallback)
-        assertEquals(testDefaults, model.state.value.settings)
-        assertNull(tokens.token)
+        assertEquals(emptyList<InetAddress>(), model.state.value.settings?.fallback)
     }
 
     @Test
     fun same_host_other_port_keeps_the_addresses_but_not_the_token() {
-        store.fallback = listOf(InetAddress.getByName("10.9.9.9"))
-        val model = model(testDefaults.copy(fallback = store.fallback!!))
+        val model = model()
         model.submitServer("https://example.test:8443")
         scheduler.runCurrent()
-        assertEquals(listOf(InetAddress.getByName("10.9.9.9")), store.fallback)
-        assertEquals(listOf(InetAddress.getByName("10.9.9.9")), model.state.value.settings.fallback)
+        assertEquals(testSettings.fallback, store.fallback)
+        assertEquals(testSettings.fallback, model.state.value.settings?.fallback)
         assertNull(tokens.token)
+    }
+
+    @Test
+    fun first_server_on_a_new_install_saves_and_applies() {
+        val fresh = FakeSettingsStore()
+        val model = SettingsModel(fresh, current = null, tokens = null)
+        model.submitServer("padel.example.test")
+        scheduler.runCurrent()
+        assertEquals("https://padel.example.test/".toHttpUrl(), fresh.server)
+        assertEquals(emptyList<InetAddress>(), fresh.fallback)
+        assertTrue(model.state.value.applied)
+    }
+
+    @Test
+    fun addresses_before_any_server_are_ignored() {
+        val fresh = FakeSettingsStore()
+        val model = SettingsModel(fresh, current = null, tokens = null)
+        model.submitAddresses("10.0.0.1")
+        scheduler.runCurrent()
+        assertEquals(0, fresh.writes)
+        assertFalse(model.state.value.applied)
     }
 }

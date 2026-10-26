@@ -42,6 +42,8 @@
     <string name="settings_server">Server</string>
     <string name="settings_addresses">LAN addresses</string>
     <string name="settings_addresses_none">None</string>
+    <string name="settings_server_none">Not set</string>
+    <string name="settings_first_run">Set the server\'s address to start. LAN addresses come next.</string>
     <string name="settings_server_input">Server address</string>
     <string name="settings_addresses_input">LAN IP addresses, comma-separated</string>
     <string name="settings_help">LAN addresses are used when the watch\'s DNS can\'t find the server. Changing the server signs this watch out and resets them.</string>
@@ -49,9 +51,4 @@
     <string name="settings_bad_server">Not a valid server. Use an https address.</string>
     <string name="settings_bad_addresses">Not valid. Use IP addresses separated by commas.</string>
     <string name="settings_save_failed">Couldn\'t save. Try again.</string>
-    <string name="settings_reset">Reset to defaults</string>
-    <string name="settings_reset_title">Reset to defaults?</string>
-    <string name="settings_reset_text">Uses the server and LAN addresses this app was built with.</string>
-    <string name="settings_reset_confirm">Yes, reset</string>
-    <string name="settings_cancel">Cancel</string>
 </resources>

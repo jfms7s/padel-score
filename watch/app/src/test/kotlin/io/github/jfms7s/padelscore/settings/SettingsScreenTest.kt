@@ -8,10 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.hasScrollToNodeAction
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.wear.input.RemoteInputIntentHelper
@@ -23,10 +20,8 @@ import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.setMain
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -42,14 +37,14 @@ class SettingsScreenTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     private val scheduler = TestCoroutineScheduler()
-    private val store = FakeSettingsStore()
+    private val store = FakeSettingsStore(testSettings.serverUrl, testSettings.fallback)
 
     @Before fun setMain() = Dispatchers.setMain(StandardTestDispatcher(scheduler))
 
     @After fun resetMain() = Dispatchers.resetMain()
 
-    private fun show(settings: ServerSettings = testDefaults): SettingsModel {
-        val model = SettingsModel(store, MemoryTokenStore(), settings)
+    private fun show(settings: ServerSettings? = testSettings): SettingsModel {
+        val model = SettingsModel(store, settings, MemoryTokenStore())
         compose.setContent { SettingsScreen(model, onApplied = {}) }
         return model
     }
@@ -60,12 +55,12 @@ class SettingsScreenTest {
         compose.onNodeWithText("Server").assertHeightIsAtLeast(48.dp)
         compose.onNodeWithText("example.test").assertExists()
         compose.onNodeWithText("LAN addresses").assertHeightIsAtLeast(48.dp)
-        compose.onNodeWithText("192.168.50.10").assertExists()
+        compose.onNodeWithText("10.0.0.10").assertExists()
     }
 
     @Test
     fun no_addresses_shows_none() {
-        show(testDefaults.copy(fallback = emptyList()))
+        show(testSettings.copy(fallback = emptyList()))
         compose.onNodeWithText("None").assertExists()
     }
 
@@ -94,7 +89,7 @@ class SettingsScreenTest {
         answerInput("Server", "http://padel.other.test")
         compose.onNodeWithText("Not a valid server. Use an https address.").assertExists()
         compose.onNodeWithText("example.test").assertExists()
-        assertNull(store.server)
+        assertEquals(testSettings.serverUrl, store.server)
     }
 
     @Test
@@ -124,47 +119,30 @@ class SettingsScreenTest {
         compose.runOnUiThread { model.submitServer("http://padel.other.test") }
         compose.onNodeWithText("Not a valid server. Use an https address.").assertExists()
         compose.onNodeWithText("example.test").assertExists()
-        assertNull(store.server)
+        assertEquals(0, store.writes)
     }
 
     @Test
     fun bad_addresses_show_the_error_and_keep_the_old_ones() {
         val model = show()
-        compose.runOnUiThread { model.submitAddresses("192.168.50.20, nope") }
+        compose.runOnUiThread { model.submitAddresses("10.0.0.20, nope") }
         compose.onNodeWithText("Not valid. Use IP addresses separated by commas.").assertExists()
-        compose.onNodeWithText("192.168.50.10").assertExists()
-        assertNull(store.fallback)
-    }
-
-    @Test
-    fun reset_needs_confirm() {
-        store.server = "https://padel.other.test/".toHttpUrl()
-        show(testDefaults.copy(serverUrl = "https://padel.other.test/".toHttpUrl()))
-        scrollTo("Reset to defaults")
-        compose.onNodeWithText("Reset to defaults").assertHeightIsAtLeast(48.dp).performClick()
-        compose.waitForIdle()
-        scheduler.runCurrent()
+        compose.onNodeWithText("10.0.0.10").assertExists()
         assertEquals(0, store.writes)
-        compose.onNodeWithText("Uses the server and LAN addresses", substring = true).assertExists()
-        compose.onNodeWithText("Yes, reset").performClick()
-        compose.waitForIdle()
-        scheduler.runCurrent()
-        assertEquals(1, store.writes)
-        assertNull(store.server)
     }
 
     @Test
-    fun reset_cancel_changes_nothing() {
+    fun first_run_asks_for_the_server_and_hides_the_addresses() {
+        show(null)
+        compose.onNodeWithText("Not set").assertExists()
+        compose.onNodeWithText("LAN addresses").assertDoesNotExist()
+        answerInput("Server", "padel.example.test")
+        assertEquals("https://padel.example.test/", store.server.toString())
+    }
+
+    @Test
+    fun there_is_no_reset() {
         show()
-        scrollTo("Reset to defaults")
-        compose.onNodeWithText("Reset to defaults").performClick()
-        compose.onNodeWithText("Cancel").performClick()
-        compose.waitForIdle()
-        scheduler.runCurrent()
-        assertEquals(0, store.writes)
-    }
-
-    private fun scrollTo(text: String) {
-        compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(text))
+        compose.onNodeWithText("Reset", substring = true).assertDoesNotExist()
     }
 }

@@ -48,12 +48,6 @@ class LanFallbackDns(
         private val lookupExecutor: ExecutorService = Executors.newCachedThreadPool { runnable ->
             Thread(runnable, "padel-dns").apply { isDaemon = true }
         }
-
-        /**
-         * Parses a comma-separated list of IP literals (from the `padelServerFallbackIps` Gradle
-         * property). Anything that isn't a strict IP literal is skipped. Never does a DNS lookup.
-         */
-        fun parseAddresses(csv: String): List<InetAddress> = csv.split(',').mapNotNull { parseIpLiteral(it.trim()) }
     }
 }
 

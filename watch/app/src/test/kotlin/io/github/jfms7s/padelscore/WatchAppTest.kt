@@ -30,7 +30,7 @@ import io.github.jfms7s.padelscore.score.fixtureView
 import io.github.jfms7s.padelscore.settings.FakeSettingsStore
 import io.github.jfms7s.padelscore.settings.ServerSettings
 import io.github.jfms7s.padelscore.settings.SettingsModel
-import io.github.jfms7s.padelscore.settings.testDefaults
+import io.github.jfms7s.padelscore.settings.testSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,8 +91,8 @@ private class FakeContainer(
     override val tokens: FakeTokens,
     private val list: Flow<StreamItem<List<MyMatch>>> = emptyFlow(),
     private val match: Flow<StreamItem<MatchView>> = emptyFlow(),
-    override val settingsStore: FakeSettingsStore = FakeSettingsStore(),
-    override val settings: ServerSettings = testDefaults,
+    override val settings: ServerSettings = testSettings,
+    override val settingsStore: FakeSettingsStore = FakeSettingsStore(settings.serverUrl, settings.fallback),
 ) : AppContainer {
     override val haptics: Haptics = FakeHaptics()
     override val deviceName: String = "Test watch"
@@ -278,7 +278,7 @@ class WatchAppTest {
         assertEquals(1, applied)
         assertEquals(0, tokens.clears)
         assertEquals("tok", runBlocking { tokens.read() })
-        assertEquals(listOf("10.1.2.3", "10.1.2.4"), container.settingsStore.fallback?.map { it.hostAddress })
+        assertEquals(listOf("10.1.2.3", "10.1.2.4"), container.settingsStore.fallback.map { it.hostAddress })
     }
 
     @Test

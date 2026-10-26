@@ -12,7 +12,7 @@ import java.util.concurrent.Executors
 
 class LanFallbackDnsTest {
     private val host = "padel.example.test"
-    private val lan = LanFallbackDns.parseAddresses("192.168.50.231, 192.168.50.201")
+    private val lan = listOf("192.168.50.231", "192.168.50.201").map(InetAddress::getByName)
     private val publicIp = InetAddress.getByName("203.0.113.7")
     private val privateIp = InetAddress.getByName("192.168.50.11")
 
@@ -86,16 +86,6 @@ class LanFallbackDnsTest {
         assertTrue(runCatching { failing.lookup(host) }.exceptionOrNull() is UnknownHostException)
         val public = LanFallbackDns(host, emptyList(), FakeDns { listOf(publicIp) })
         assertEquals(listOf(publicIp), public.lookup(host))
-    }
-
-    @Test
-    fun parse_takes_only_ip_literals() {
-        val parsed = LanFallbackDns.parseAddresses(" 192.168.50.231,,not-a-host.example, 999.1.1.1, fd00::1 ,10.0.0.5")
-        assertEquals(
-            listOf("192.168.50.231", "fd00::1", "10.0.0.5").map(InetAddress::getByName),
-            parsed,
-        )
-        assertEquals(emptyList<InetAddress>(), LanFallbackDns.parseAddresses(""))
     }
 
     @Test

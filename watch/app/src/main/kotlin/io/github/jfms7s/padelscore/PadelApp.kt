@@ -1,31 +1,26 @@
 package io.github.jfms7s.padelscore
 
 import android.app.Application
-import io.github.jfms7s.padelscore.net.LanFallbackDns
-import io.github.jfms7s.padelscore.settings.ServerSettings
 import io.github.jfms7s.padelscore.settings.SettingsStore
 import kotlinx.coroutines.runBlocking
-import okhttp3.HttpUrl.Companion.toHttpUrl
 
 class PadelApp : Application(), ContainerHost {
-    override lateinit var container: AppContainer
+    override var container: AppContainer? = null
         private set
 
-    private lateinit var settingsStore: SettingsStore
+    override lateinit var settingsStore: SettingsStore
+        private set
 
     override fun onCreate() {
         super.onCreate()
-        val defaults = ServerSettings(
-            BuildConfig.SERVER_URL.toHttpUrl(),
-            LanFallbackDns.parseAddresses(BuildConfig.SERVER_FALLBACK_IPS),
-        )
-        settingsStore = settingsStoreOf(this, defaults)
+        settingsStore = settingsStoreOf(this)
         // One small local file, read once before the first screen needs the server.
         container = runBlocking { build() }
     }
 
     /** Rebuilds [container] on the stored settings, after the owner changed them on the watch. */
-    override suspend fun reload(): AppContainer = build().also { container = it }
+    override suspend fun reload(): AppContainer? = build().also { container = it }
 
-    private suspend fun build(): AppContainer = DefaultAppContainer(this, settingsStore.read(), settingsStore)
+    private suspend fun build(): AppContainer? =
+        settingsStore.read()?.let { DefaultAppContainer(this, it, settingsStore) }
 }

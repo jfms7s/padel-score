@@ -14,20 +14,21 @@ import kotlinx.coroutines.launch
 enum class SettingsError { BadServer, BadAddresses, CouldNotSave }
 
 /**
- * [settings] are the ones the app runs on. [applied] turns true once different settings are saved:
- * the app then rebuilds itself on them, so this model is done.
+ * [settings] are the ones the app runs on, null before a server is set. [applied] turns true once
+ * different settings are saved: the app then rebuilds itself on them, so this model is done.
  */
 data class SettingsState(
-    val settings: ServerSettings,
+    val settings: ServerSettings?,
     val error: SettingsError? = null,
     val saving: Boolean = false,
     val applied: Boolean = false,
 )
 
+/** [tokens] is the current server's sign-in; null on a first run, when there is no server yet. */
 class SettingsModel(
     private val store: SettingsStore,
-    private val tokens: TokenStore,
-    current: ServerSettings,
+    current: ServerSettings?,
+    private val tokens: TokenStore?,
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsState(current))
     val state: StateFlow<SettingsState> = _state.asStateFlow()
@@ -36,25 +37,19 @@ class SettingsModel(
     fun submitServer(text: String) {
         val url = parseServerUrl(text) ?: return fail(SettingsError.BadServer)
         val current = _state.value.settings
-        // LAN addresses belong to a host: a new host gets the build's addresses if it is the build's
-        // server, else none (the owner can add them next).
-        val (addresses, fallback) = when {
-            url.host == current.serverUrl.host -> AddressChange.Keep to current.fallback
-            url.host == store.defaults.serverUrl.host -> AddressChange.Defaults to store.defaults.fallback
-            else -> AddressChange.Exactly(emptyList()) to emptyList()
-        }
-        save(ServerSettings(url, fallback)) { store.setServer(url, addresses) }
+        // LAN addresses belong to a host: a new host starts with none (the owner can add them next).
+        val fallback = if (current != null && url.host == current.serverUrl.host) current.fallback else emptyList()
+        save(ServerSettings(url, fallback)) { store.setServer(url, fallback) }
     }
 
-    /** Text from the keyboard or voice; bad input keeps the current addresses and shows an error. */
+    /**
+     * Text from the keyboard or voice; bad input keeps the current addresses and shows an error.
+     * Before a server is set there is nothing to attach them to, so it does nothing.
+     */
     fun submitAddresses(text: String) {
+        val current = _state.value.settings ?: return
         val addresses = parseAddressList(text) ?: return fail(SettingsError.BadAddresses)
-        val current = _state.value.settings
         save(current.copy(fallback = addresses)) { store.setFallback(addresses) }
-    }
-
-    fun reset() {
-        save(store.defaults) { store.reset() }
     }
 
     private fun fail(error: SettingsError) {
@@ -69,9 +64,10 @@ class SettingsModel(
             try {
                 // The token belongs to the old server: it goes first, so a failure can never leave it
                 // pointed at a new one. A failed write after that only costs a sign-in.
-                if (!sameOrigin(next.serverUrl, state.settings.serverUrl)) tokens.clear()
+                val old = state.settings
+                if (old != null && !sameOrigin(next.serverUrl, old.serverUrl)) tokens?.clear()
                 write()
-                // Saving what the app already runs on (say, a default as an override) needs no restart.
+                // Saving what the app already runs on needs no restart.
                 _state.update { it.copy(settings = next, saving = false, applied = next != state.settings) }
             } catch (e: CancellationException) {
                 throw e

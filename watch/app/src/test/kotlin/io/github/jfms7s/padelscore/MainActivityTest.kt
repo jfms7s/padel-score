@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.wear.input.RemoteInputIntentHelper
 import io.github.jfms7s.padelscore.auth.TokenStore
@@ -26,7 +27,7 @@ import io.github.jfms7s.padelscore.net.TokenPoll
 import io.github.jfms7s.padelscore.score.FakeHaptics
 import io.github.jfms7s.padelscore.settings.FakeSettingsStore
 import io.github.jfms7s.padelscore.settings.ServerSettings
-import io.github.jfms7s.padelscore.settings.testDefaults
+import io.github.jfms7s.padelscore.settings.testSettings
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,16 +45,22 @@ import org.robolectric.annotation.Config
 
 /** Stands in for [PadelApp] so the real [MainActivity] runs on fake containers. */
 class TestApp : Application(), ContainerHost {
-    val store = FakeSettingsStore()
+    override val settingsStore = FakeSettingsStore()
     val tokens = MemoryTokens()
-    override var container: AppContainer = SignInContainer(store.defaults, store, tokens)
+    override var container: AppContainer? = null
     val built = mutableListOf<SignInContainer>()
 
-    override suspend fun reload(): AppContainer =
-        SignInContainer(store.read(), store, tokens).also {
-            built += it
-            container = it
-        }
+    /** Starts the app as if the owner had set [settings] on an earlier run. */
+    fun configure(settings: ServerSettings) {
+        settingsStore.server = settings.serverUrl
+        settingsStore.fallback = settings.fallback
+        container = SignInContainer(settings, settingsStore, tokens)
+    }
+
+    override suspend fun reload(): AppContainer? =
+        settingsStore.read()?.let { settings ->
+            SignInContainer(settings, settingsStore, tokens).also { built += it }
+        }.also { container = it }
 }
 
 class MemoryTokens : TokenStore {
@@ -109,8 +116,41 @@ class SignInContainer(
 class MainActivityTest {
     @get:Rule val compose = createEmptyComposeRule()
 
+    private fun answerServerInput(activity: MainActivity, text: String) {
+        compose.onNodeWithText("Server").performClick()
+        val shadow = shadowOf(activity)
+        val input = checkNotNull(shadow.nextStartedActivityForResult)
+        val inputs = checkNotNull(RemoteInputIntentHelper.getRemoteInputsExtra(input.intent))
+        val data = Intent()
+        RemoteInput.addResultsToIntent(
+            inputs.toTypedArray(),
+            data,
+            Bundle().apply { putCharSequence(inputs.single().resultKey, text) },
+        )
+        shadow.receiveResult(input.intent, Activity.RESULT_OK, data)
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun first_run_opens_on_the_settings_then_restarts_on_the_new_server() {
+        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        lateinit var activity: MainActivity
+        scenario.onActivity { activity = it }
+        val app = activity.application as TestApp
+        compose.waitForIdle()
+        compose.onNodeWithText("Not set").assertExists()
+
+        answerServerInput(activity, "padel.example.test")
+
+        assertTrue(activity.isFinishing)
+        assertEquals(MainActivity::class.java.name, shadowOf(activity).nextStartedActivity.component?.className)
+        assertEquals("https://padel.example.test/", app.container?.serverUrl.toString())
+        scenario.moveToState(Lifecycle.State.DESTROYED)
+    }
+
     @Test
     fun new_server_restarts_the_activity_and_cancels_the_old_screens() {
+        ApplicationProvider.getApplicationContext<TestApp>().configure(testSettings)
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         lateinit var activity: MainActivity
         scenario.onActivity { activity = it }
@@ -120,23 +160,13 @@ class MainActivityTest {
         assertEquals(1, old.api.started) // the sign-in screen is waiting on the old server
 
         compose.onNodeWithText("Server settings").performClick()
-        compose.onNodeWithText("Server").performClick()
+        answerServerInput(activity, "padel.other.test")
         val shadow = shadowOf(activity)
-        val input = checkNotNull(shadow.nextStartedActivityForResult)
-        val inputs = checkNotNull(RemoteInputIntentHelper.getRemoteInputsExtra(input.intent))
-        val data = Intent()
-        RemoteInput.addResultsToIntent(
-            inputs.toTypedArray(),
-            data,
-            Bundle().apply { putCharSequence(inputs.single().resultKey, "padel.other.test") },
-        )
-        shadow.receiveResult(input.intent, Activity.RESULT_OK, data)
-        compose.waitForIdle()
 
         // A fresh activity on a container for the new server replaces this one.
         assertTrue(activity.isFinishing)
         assertEquals(MainActivity::class.java.name, shadow.nextStartedActivity.component?.className)
-        assertEquals("https://padel.other.test/", app.container.serverUrl.toString())
+        assertEquals("https://padel.other.test/", app.container?.serverUrl.toString())
         assertEquals(1, app.built.size)
 
         assertEquals(0, old.api.cancelled)

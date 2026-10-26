@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import java.io.File
@@ -34,84 +35,50 @@ class SettingsStoreTest {
         dir.deleteRecursively()
     }
 
-    private fun store(defaults: ServerSettings = testDefaults) = DataStoreSettingsStore(
+    private fun store() = DataStoreSettingsStore(
         PreferenceDataStoreFactory.create(
             corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
             scope = scope,
         ) { file },
-        defaults,
     )
 
     @Test
-    fun unset_reads_as_defaults() = runTest {
-        assertEquals(testDefaults, store().read())
+    fun nothing_set_reads_as_null() = runTest {
+        assertNull(store().read())
     }
 
     @Test
-    fun overrides_round_trip() = runTest {
+    fun settings_round_trip() = runTest {
         val store = store()
-        store.setServer("https://padel.other.test/link".toHttpUrl(), AddressChange.Keep)
+        store.setServer("https://padel.other.test/link".toHttpUrl(), emptyList())
         store.setFallback(listOf(InetAddress.getByName("10.0.0.7")))
-        val read = store.read()
+        val read = checkNotNull(store.read())
         assertEquals("https://padel.other.test/", read.serverUrl.toString())
         assertEquals(listOf(InetAddress.getByName("10.0.0.7")), read.fallback)
     }
 
     @Test
-    fun empty_addresses_override_means_none() = runTest {
+    fun addresses_without_a_server_still_read_as_null() = runTest {
         val store = store()
-        store.setFallback(emptyList())
-        assertEquals(emptyList<InetAddress>(), store.read().fallback)
-        assertEquals(testDefaults.serverUrl, store.read().serverUrl)
-    }
-
-    @Test
-    fun unset_settings_follow_new_defaults() = runTest {
-        store().setFallback(listOf(InetAddress.getByName("10.0.0.7")))
-        scope.cancel() // one DataStore per file at a time, as in one process
-
-        // A later build with other defaults: the overridden addresses stay, the server follows the build.
-        val newDefaults = ServerSettings("https://new.example.test/".toHttpUrl(), emptyList())
-        val freshScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-        try {
-            val later = DataStoreSettingsStore(PreferenceDataStoreFactory.create(scope = freshScope) { file }, newDefaults)
-            val read = later.read()
-            assertEquals(newDefaults.serverUrl, read.serverUrl)
-            assertEquals(listOf(InetAddress.getByName("10.0.0.7")), read.fallback)
-        } finally {
-            freshScope.cancel()
-        }
-    }
-
-    @Test
-    fun reset_drops_the_overrides() = runTest {
-        val store = store()
-        store.setServer("https://padel.other.test/".toHttpUrl(), AddressChange.Keep)
-        store.setFallback(emptyList())
-        store.reset()
-        assertEquals(testDefaults, store.read())
-    }
-
-    @Test
-    fun corrupt_file_reads_as_defaults_and_accepts_new_overrides() = runTest {
-        file.writeBytes(byteArrayOf(0x0F, 0x7A, 0x01, 0x55, 0x33))
-        val store = store()
-        assertEquals(testDefaults, store.read())
-        store.setServer("https://padel.other.test/".toHttpUrl(), AddressChange.Keep)
-        assertEquals("https://padel.other.test/", store.read().serverUrl.toString())
+        store.setFallback(listOf(InetAddress.getByName("10.0.0.7")))
+        assertNull(store.read())
     }
 
     @Test
     fun server_change_sets_the_addresses_in_the_same_write() = runTest {
         val store = store()
-        store.setFallback(listOf(InetAddress.getByName("10.0.0.7")))
-        store.setServer("https://padel.other.test/".toHttpUrl(), AddressChange.Exactly(emptyList()))
-        assertEquals(emptyList<InetAddress>(), store.read().fallback)
-        store.setFallback(listOf(InetAddress.getByName("10.0.0.7")))
-        store.setServer(testDefaults.serverUrl, AddressChange.Defaults)
-        assertEquals(testDefaults, store.read())
-        store.setFallback(emptyList())
-        store.setServer("https://padel.other.test/".toHttpUrl(), AddressChange.Keep)
-        assertEquals(emptyList<InetAddress>(), store.read().fallback)
+        store.setServer("https://example.test/".toHttpUrl(), listOf(InetAddress.getByName("10.0.0.7")))
+        assertEquals(testSettings.copy(fallback = listOf(InetAddress.getByName("10.0.0.7"))), store.read())
+        store.setServer("https://padel.other.test/".toHttpUrl(), emptyList())
+        assertEquals(emptyList<InetAddress>(), store.read()?.fallback)
+    }
+
+    @Test
+    fun corrupt_file_reads_as_null_and_accepts_new_settings() = runTest {
+        file.writeBytes(byteArrayOf(0x0F, 0x7A, 0x01, 0x55, 0x33))
+        val store = store()
+        assertNull(store.read())
+        store.setServer("https://padel.other.test/".toHttpUrl(), emptyList())
+        assertEquals("https://padel.other.test/", store.read()?.serverUrl.toString())
     }
 }
