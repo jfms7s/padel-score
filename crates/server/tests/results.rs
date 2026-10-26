@@ -900,3 +900,40 @@ async fn placings_are_returned() {
     assert_eq!(placings[0].finished_at, NOW + 50);
     assert_eq!(placings[1].event_id, "ev-old");
 }
+
+#[tokio::test]
+async fn placings_exclude_other_coordinators_events() {
+    let (s, pool) = setup().await;
+    let ana = player(&s, OWNER, "Ana").await;
+    for (event, owner, at) in [("ev-mine", OWNER, NOW), ("ev-theirs", "user-rui", NOW + 50)] {
+        sqlx::query(
+            "INSERT INTO competitions (id, owner_user_id, name, kind, format, spectator_token, \
+             created_at) VALUES (?, ?, ?, 'tournament', '{}', ?, 1)",
+        )
+        .bind(event)
+        .bind(owner)
+        .bind(format!("Event {event}"))
+        .bind(format!("tok-{event}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO placings (player_id, event_id, event_kind, place, place_to, field_size, \
+             finished_at) VALUES (?, ?, 'tournament', 1, 1, 8, ?)",
+        )
+        .bind(&ana)
+        .bind(event)
+        .bind(at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let ids: Vec<String> = s
+        .placings(OWNER, &ana)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| p.event_id)
+        .collect();
+    assert_eq!(ids, ["ev-mine"]);
+}
