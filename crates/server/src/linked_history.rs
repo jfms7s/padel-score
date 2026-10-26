@@ -8,9 +8,9 @@ use serde::Serialize;
 use sqlx::{QueryBuilder, Row, Sqlite};
 
 use crate::results::{
-    Cursor, FinalScore, Outcome, Placing, Record, entry_from_row, event_joins, history_columns,
-    outcome_of, parse_team, placing_from_row, push_page, record_columns, record_from_row,
-    split_page,
+    Cursor, EventContext, FinalScore, Outcome, Record, entry_from_row, event_joins,
+    history_columns, outcome_of, parse_team, placing_from_row, push_page, record_columns,
+    record_from_row, split_page,
 };
 use crate::store::{Store, StoreError, Teams};
 
@@ -30,7 +30,64 @@ pub struct LinkedEntry {
     pub coordinator_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spectator_token: Option<String>,
+    /// The event the match was played in, for an event match only; a redacted entry keeps only
+    /// its kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event: Option<LinkedEvent>,
     /// The match's coordinator, read by [`crate::privacy::redact`]; never served.
+    #[serde(skip)]
+    pub owner_user_id: String,
+}
+
+/// A linked entry's event: phase 6's [`EventContext`] in full form, the kind alone when
+/// redacted (no id, name or label).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LinkedEvent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl From<EventContext> for LinkedEvent {
+    fn from(event: EventContext) -> LinkedEvent {
+        LinkedEvent {
+            id: Some(event.id),
+            name: Some(event.name),
+            kind: event.kind,
+            label: Some(event.label),
+        }
+    }
+}
+
+impl LinkedEvent {
+    /// The kind alone, for a redacted entry.
+    pub fn redacted(self) -> LinkedEvent {
+        LinkedEvent {
+            id: None,
+            name: None,
+            kind: self.kind,
+            label: None,
+        }
+    }
+}
+
+/// A placing in a combined history: phase 5's `Placing`, with the event's name only for a
+/// viewer allowed to see it ([`crate::privacy::redact_placing`] clears it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LinkedPlacing {
+    pub event_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_name: Option<String>,
+    pub event_kind: String,
+    pub place: i64,
+    pub place_to: i64,
+    pub field_size: i64,
+    pub finished_at: i64,
+    /// The event's coordinator, read by [`crate::privacy::redact_placing`]; never served.
     #[serde(skip)]
     pub owner_user_id: String,
 }
@@ -106,6 +163,7 @@ impl Store {
                     teams: Some(entry.teams),
                     coordinator_name: Some(row.try_get("coordinator_name")?),
                     spectator_token: Some(entry.spectator_token),
+                    event: entry.event.map(LinkedEvent::from),
                     owner_user_id: row.try_get("owner_user_id")?,
                 })
             })
@@ -117,9 +175,9 @@ impl Store {
     }
 
     /// The placings of the entries linked to `user_id`, newest first.
-    pub async fn linked_placings(&self, user_id: &str) -> Result<Vec<Placing>, StoreError> {
+    pub async fn linked_placings(&self, user_id: &str) -> Result<Vec<LinkedPlacing>, StoreError> {
         let rows = sqlx::query(
-            "SELECT pl.event_id, c.name AS event_name, pl.event_kind, pl.place, pl.place_to, \
+            "SELECT pl.event_id, c.name AS event_name, c.owner_user_id, pl.event_kind, pl.place, pl.place_to, \
              pl.field_size, pl.finished_at FROM placings pl JOIN players p ON p.id = pl.player_id \
              JOIN competitions c ON c.id = pl.event_id \
              WHERE p.linked_user_id = ? ORDER BY pl.finished_at DESC, pl.event_id DESC",
@@ -127,6 +185,20 @@ impl Store {
         .bind(user_id)
         .fetch_all(self.pool())
         .await?;
-        rows.iter().map(placing_from_row).collect()
+        rows.iter()
+            .map(|row| {
+                let p = placing_from_row(row)?;
+                Ok(LinkedPlacing {
+                    event_id: p.event_id,
+                    event_name: Some(p.event_name),
+                    event_kind: p.event_kind,
+                    place: p.place,
+                    place_to: p.place_to,
+                    field_size: p.field_size,
+                    finished_at: p.finished_at,
+                    owner_user_id: row.try_get("owner_user_id")?,
+                })
+            })
+            .collect()
     }
 }

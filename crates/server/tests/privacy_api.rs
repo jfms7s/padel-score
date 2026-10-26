@@ -638,3 +638,50 @@ async fn privacy_routes_need_session() {
         assert_eq!(res.status, StatusCode::FORBIDDEN, "{m} {p}");
     }
 }
+
+#[tokio::test]
+async fn event_context_follows_the_viewer() {
+    let w = world().await;
+    w.link_both().await;
+    let full_event = json!({ "id": "ev1", "name": "Bea's cup", "kind": "tournament",
+                             "label": "Match 1" });
+
+    // The player sees it all: b1's event and the placing's event name.
+    let res = w.get(&w.r, "/api/me/results").await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(ids(&res), [&w.a2, &w.b1, &w.a1]);
+    assert_eq!(res.body["items"][1]["event"], full_event);
+    assert!(res.body["items"][0].get("event").is_none());
+    assert_eq!(res.body["placings"][0]["event_name"], "Bea's cup");
+
+    // Bea, the event's coordinator, sees it all too.
+    let path = format!("/api/players/{}/linked-history", w.rui_c);
+    let res = w.get(&w.bea, &path).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.body["items"][1]["event"], full_event);
+    assert_eq!(res.body["placings"][0]["event_name"], "Bea's cup");
+
+    // Ana sees only the kind of Bea's event, and no event name on the placing.
+    let path = format!("/api/players/{}/linked-history", w.rui);
+    let res = w.get(&w.ana, &path).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(res.body["items"][1]["redacted"], true);
+    assert_eq!(
+        res.body["items"][1]["event"],
+        json!({ "kind": "tournament" })
+    );
+    let placing = res.body["placings"][0].as_object().unwrap();
+    assert!(!placing.contains_key("event_name"), "event_name leaked");
+    assert_eq!(placing["event_kind"], "tournament");
+    assert_eq!(placing["place"], 2);
+
+    // A public profile: the kind only, everywhere.
+    let token = w.profile_token().await;
+    let res = w.profile(&token).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(
+        res.body["items"][1]["event"],
+        json!({ "kind": "tournament" })
+    );
+    assert!(res.body["placings"][0].get("event_name").is_none());
+}
