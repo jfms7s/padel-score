@@ -767,6 +767,7 @@ export const strings = {
 		liveOn: (court: string) => `Live on ${court}`,
 		nextOn: (court: string) => `Next on ${court}`,
 		nextFreeCourt: 'Next free court',
+		afterOtherMatches: 'After the other matches',
 		roundOf32: 'Round of 32',
 		roundOf16: 'Round of 16',
 		quarterFinals: 'Quarter-finals',
@@ -796,7 +797,7 @@ export const strings = {
 			`${label}’s result changed after ${first ?? 'a later match'} started.`,
 		replay: 'Replay',
 		replayDiscards: (labels: string[]) =>
-			`Replay ${labels.length === 1 ? '1 match' : `${labels.length} matches`}: ${labels.join(', ')}. Their scores are discarded.`,
+			`Replay ${labels.length === 1 ? '1 match' : `${labels.length} matches`}: ${labels.join(', ')}. Started matches lose their scores.`,
 		keep: 'Keep as played',
 		keepNote: (label: string) => `The later matches stand. The new score counts only for ${label}.`,
 		heldFinished: 'The event is finished, so later matches can’t be replayed.',

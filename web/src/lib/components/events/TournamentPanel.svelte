@@ -14,7 +14,8 @@
 		heldText,
 		redrawBracket,
 		teamCountHint,
-		tournamentData
+		tournamentData,
+		type BracketNode
 	} from '#lib/tournament.ts';
 	import type { EventDetail, EventView } from '#lib/types.ts';
 	import BracketMatch from './BracketMatch.svelte';
@@ -36,7 +37,11 @@
 
 	let busy = $state<string | null>(null);
 	let confirming = $state(false);
+	/** The held node whose Replay awaits its confirm; one at a time. */
+	let replaying = $state<string | null>(null);
 	let failure = $state<string | null>(null);
+
+	const nodeKey = (n: Pick<BracketNode, 'place_from' | 'size' | 'idx'>) => `${n.place_from}-${n.size}-${n.idx}`;
 
 	// The page follows the event stream, so a reply's detail is not needed: only a failure is.
 	async function run(key: string, call: () => Promise<unknown>) {
@@ -45,6 +50,7 @@
 		try {
 			await call();
 			confirming = false;
+			replaying = null;
 		} catch (e) {
 			failure = eventMessage(e);
 		} finally {
@@ -79,7 +85,7 @@
 		<p class="hint">{t.teamsAndCourts(data.teams, event.courts.length)}</p>
 
 		{#if coordinator}
-			{#each held as node (`${node.place_from}-${node.size}-${node.idx}`)}
+			{#each held as node (nodeKey(node))}
 				{@const text = heldText(data, node, status === 'finished', event.matches)}
 				<div class="held" role="group" aria-label={node.label}>
 					<p class="warn">{text.warning}</p>
@@ -88,17 +94,33 @@
 						{@const matchId = node.match_id}
 						<div class="decision">
 							{#if text.replay}
-								<div>
-									<button
-										class="secondary"
-										type="button"
-										disabled={busy !== null}
-										onclick={() => run(`replay-${matchId}`, () => decideBracket(id, matchId, 'replay'))}
-									>
-										{t.replay}
-									</button>
-									<p class="hint">{text.replay}</p>
-								</div>
+								{#if replaying === nodeKey(node)}
+									<div class="confirm" role="group" aria-label={t.replay}>
+										<p>{text.replay}</p>
+										<div class="actions">
+											<button
+												class="danger"
+												type="button"
+												disabled={busy !== null}
+												onclick={() => run(`replay-${matchId}`, () => decideBracket(id, matchId, 'replay'))}
+											>
+												{ev.confirm}
+											</button>
+											<button class="secondary" type="button" onclick={() => (replaying = null)}>{ev.cancel}</button>
+										</div>
+									</div>
+								{:else}
+									<div>
+										<button
+											class="secondary"
+											type="button"
+											disabled={busy !== null}
+											onclick={() => (replaying = nodeKey(node))}
+										>
+											{t.replay}
+										</button>
+									</div>
+								{/if}
 							{/if}
 							<div>
 								<button
@@ -126,7 +148,7 @@
 						<div class="round">
 							<h4>{column.title}</h4>
 							<div class="stack">
-								{#each column.nodes as node (`${node.place_from}-${node.size}-${node.idx}`)}
+								{#each column.nodes as node (nodeKey(node))}
 									<BracketMatch {data} {node} {event} />
 								{/each}
 							</div>
