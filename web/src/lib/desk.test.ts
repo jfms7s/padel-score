@@ -57,7 +57,14 @@ const final: FinalScore = {
 
 describe('jump key', () => {
 	const field = { closest: (sel: string) => (sel.includes('input') ? {} : null) };
-	const base = { key: '/', ctrlKey: false, metaKey: false, altKey: false, defaultPrevented: false, target: {} as EventTarget };
+	const base = {
+		key: '/',
+		ctrlKey: false,
+		metaKey: false,
+		altKey: false,
+		defaultPrevented: false,
+		target: {} as EventTarget
+	};
 	it('takes a bare slash outside fields', () => {
 		expect(isJumpKey({ ...base, target: { closest: () => null } as unknown as EventTarget })).toBe(true);
 	});
@@ -126,13 +133,24 @@ describe('keyboard rows', () => {
 
 describe('courtTile', () => {
 	it('shows a live game', () => {
-		const m = match('m1', { state: 'live', live: liveScore([4, 3], { game: { a: 'forty', b: 'thirty', deuces: 0, deciding_point: false } }, [1, 0]) });
+		const m = match('m1', {
+			state: 'live',
+			live: liveScore([4, 3], { game: { a: 'forty', b: 'thirty', deuces: 0, deciding_point: false } }, [1, 0])
+		});
 		const t = courtTile({ current: 'm1', queue: [] }, [m], teams);
-		expect(t).toMatchObject({ state: 'live', server: 'a', a: { point: '40', games: 4, sets: 1, names: 'Ana / Marta' }, b: { point: '30', games: 3, sets: 0 } });
+		expect(t).toMatchObject({
+			state: 'live',
+			server: 'a',
+			a: { point: '40', games: 4, sets: 1, names: 'Ana / Marta' },
+			b: { point: '30', games: 3, sets: 0 }
+		});
 	});
 
 	it('shows tie-break points and timed games', () => {
-		const m = match('m1', { state: 'live', live: liveScore([6, 6], { tie_break: { a: 3, b: 5, super_tiebreak: false } }) });
+		const m = match('m1', {
+			state: 'live',
+			live: liveScore([6, 6], { tie_break: { a: 3, b: 5, super_tiebreak: false } })
+		});
 		const t = courtTile({ current: 'm1', queue: [] }, [m], teams);
 		expect(t).toMatchObject({ state: 'live', a: { point: '3' }, b: { point: '5' } });
 	});
@@ -142,7 +160,11 @@ describe('courtTile', () => {
 		const m = match('m1', { state: 'live', live: s });
 		const t = courtTile({ current: 'm1', queue: [] }, [m], teams);
 		expect(t).toMatchObject({ a: { point: '' }, b: { point: '' } });
-		const timed = courtTile({ current: 'm1', queue: [] }, [{ ...m, live: { ...s, sets_won: [0, 0], sets: [] } }], teams);
+		const timed = courtTile(
+			{ current: 'm1', queue: [] },
+			[{ ...m, live: { ...s, sets_won: [0, 0], sets: [] } }],
+			teams
+		);
 		expect(timed).toMatchObject({ a: { sets: null } });
 	});
 
@@ -172,13 +194,21 @@ describe('courtTile', () => {
 			timed: false
 		};
 		const t = courtTile({ current: 'm1', queue: [] }, [match('m1', { state: 'finished', winner: 'a', result })], teams);
-		expect(t).toMatchObject({ score: '6-4 6-7(5) 10-8', a: { sets: 2, setGames: [6, 6, 10] }, b: { sets: 1, setGames: [4, 7, 8] } });
+		expect(t).toMatchObject({
+			score: '6-4 6-7(5) 10-8',
+			a: { sets: 2, setGames: [6, 6, 10] },
+			b: { sets: 1, setGames: [4, 7, 8] }
+		});
 	});
 
 	it('shows a finished timed match by its games', () => {
 		const result: FinalScore = { sets: [], games: [9, 7], regulation_games: [9, 7], overtime: false, timed: true };
 		const t = courtTile({ current: 'm1', queue: [] }, [match('m1', { state: 'finished', winner: 'a', result })], teams);
-		expect(t).toMatchObject({ score: '9-7', a: { games: 9, sets: null, setGames: [] }, b: { games: 7, sets: null, setGames: [] } });
+		expect(t).toMatchObject({
+			score: '9-7',
+			a: { games: 9, sets: null, setGames: [] },
+			b: { games: 7, sets: null, setGames: [] }
+		});
 	});
 
 	it('is ready with a waiting match on court', () => {

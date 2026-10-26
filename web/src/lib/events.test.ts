@@ -345,10 +345,14 @@ describe('coordinator screens', () => {
 
 	it('result_refusal_text', () => {
 		const reason = { impossible_set: { index: 0 } } as const;
-		expect(resultRefusalText(new ApiError(422, 'invalid_score', 'x', false, { reason }))).toBe(invalidScoreText(reason));
+		expect(resultRefusalText(new ApiError(422, 'invalid_score', 'x', false, { reason }))).toBe(
+			invalidScoreText(reason)
+		);
 		expect(resultRefusalText(new ApiError(409, 'conflict', 'x'))).toBe(strings.events.sheet.conflict);
 		expect(resultRefusalText(new ApiError(409, 'locked', 'x'))).toBe(strings.events.sheet.locked);
-		expect(resultRefusalText(new ApiError(409, 'no_courts', 'x'))).toBe(eventMessage(new ApiError(409, 'no_courts', 'x')));
+		expect(resultRefusalText(new ApiError(409, 'no_courts', 'x'))).toBe(
+			eventMessage(new ApiError(409, 'no_courts', 'x'))
+		);
 		expect(resultRefusalText(new Error('boom'))).toBe(strings.networkError);
 	});
 

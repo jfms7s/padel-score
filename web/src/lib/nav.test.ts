@@ -8,13 +8,7 @@ const current = (path: string) =>
 
 describe('railItems', () => {
 	it('lists the five destinations in order', () => {
-		expect(railItems('/').map((i) => i.href)).toEqual([
-			'/',
-			'/events',
-			'/players',
-			'/history',
-			'/profile'
-		]);
+		expect(railItems('/').map((i) => i.href)).toEqual(['/', '/events', '/players', '/history', '/profile']);
 	});
 
 	it('marks only Home on /', () => {

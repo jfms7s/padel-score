@@ -33,7 +33,9 @@ export function resolveTab(param: string | null, status: EventStatus): DeskTab {
  * Whether a key press is the bare `/` that jumps to the first unfinished match: not typed into
  * a field, no modifier held.
  */
-export function isJumpKey(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'defaultPrevented'> & { target: EventTarget | null }): boolean {
+export function isJumpKey(
+	e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'defaultPrevented'> & { target: EventTarget | null }
+): boolean {
 	if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return false;
 	const target = e.target as { closest?: (selector: string) => unknown } | null;
 	return !target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
@@ -61,7 +63,12 @@ export function groupMatches<M extends Pick<EventMatch, 'state' | 'court_id' | '
  * Where the cursor goes after a row's Enter. Unsaved: stay. Saved: the next unfinished row
  * after `fromId`, wrapping round, or null when none is left.
  */
-export function nextUnfinished(ids: string[], unfinished: Set<string>, fromId: string | null, saved: boolean): string | null {
+export function nextUnfinished(
+	ids: string[],
+	unfinished: Set<string>,
+	fromId: string | null,
+	saved: boolean
+): string | null {
 	if (!saved) return fromId;
 	const start = fromId === null ? -1 : ids.indexOf(fromId);
 	for (let i = 1; i <= ids.length; i++) {
@@ -85,7 +92,15 @@ export type FinishedSide = TileSide & { setGames: number[] };
 
 export type CourtTileData =
 	| { state: 'live'; label: string; a: TileSide; b: TileSide; server: Team }
-	| { state: 'finished'; label: string; a: FinishedSide; b: FinishedSide; winner: Team | null; score: string; nextLabel: string | null }
+	| {
+			state: 'finished';
+			label: string;
+			a: FinishedSide;
+			b: FinishedSide;
+			winner: Team | null;
+			score: string;
+			nextLabel: string | null;
+	  }
 	| { state: 'ready'; label: string; a: string; b: string; nextLabel: string | null }
 	| { state: 'idle'; nextLabel: string | null };
 
@@ -119,7 +134,12 @@ export function courtTile(
 		const s = m.live;
 		const timed = s.sets.length === 0;
 		const p = points(s);
-		const side = (i: 0 | 1): TileSide => ({ names: names[i], point: p[i], games: s.games[i], sets: timed ? null : s.sets_won[i] });
+		const side = (i: 0 | 1): TileSide => ({
+			names: names[i],
+			point: p[i],
+			games: s.games[i],
+			sets: timed ? null : s.sets_won[i]
+		});
 		return { state: 'live', label: m.label, a: side(0), b: side(1), server: s.server.team };
 	}
 	if (m.state === 'finished' && m.result) {
@@ -128,7 +148,8 @@ export function courtTile(
 		const games = last ? [last.a, last.b] : r.games;
 		const won = (t: Team) => r.sets.filter((x) => (t === 'a' ? x.a > x.b : x.b > x.a)).length;
 		// A deciding super tie-break is stored as 1-0: its points say more.
-		const setGames = (i: 0 | 1) => r.sets.map((x) => (x.tiebreak && x.a + x.b === 1 ? x.tiebreak[i] : i === 0 ? x.a : x.b));
+		const setGames = (i: 0 | 1) =>
+			r.sets.map((x) => (x.tiebreak && x.a + x.b === 1 ? x.tiebreak[i] : i === 0 ? x.a : x.b));
 		const side = (i: 0 | 1): FinishedSide => ({
 			names: names[i],
 			point: '',
@@ -136,7 +157,15 @@ export function courtTile(
 			sets: r.timed ? null : won(i === 0 ? 'a' : 'b'),
 			setGames: r.timed ? [] : setGames(i)
 		});
-		return { state: 'finished', label: m.label, a: side(0), b: side(1), winner: m.winner, score: scoreText(r), nextLabel };
+		return {
+			state: 'finished',
+			label: m.label,
+			a: side(0),
+			b: side(1),
+			winner: m.winner,
+			score: scoreText(r),
+			nextLabel
+		};
 	}
 	return { state: 'ready', label: m.label, a: names[0], b: names[1], nextLabel };
 }
