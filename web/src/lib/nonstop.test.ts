@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './api';
+import { strings } from './strings';
 import {
 	beepsDue,
 	bestOffset,
@@ -276,5 +277,20 @@ describe('levelOnPoints', () => {
 		const rows = [row('a', 1, 9), row('b', 2, 4), row('c', 3, 4), row('d', 4, 1)];
 		expect([...levelOnPoints(rows)].sort()).toEqual(['b', 'c']);
 		expect(levelOnPoints([]).size).toBe(0);
+	});
+});
+
+describe('courtLine', () => {
+	it('courtLine_text', () => {
+		expect(strings.nonStop.courtLine('Court 2', 3, 7)).toBe('Round 3 of 7, court 2');
+		expect(strings.nonStop.courtLine('Court 2', 3, 7, 1, 1)).toBe('Round 3 of 7, court 2');
+	});
+
+	it('courtLine_text_with_waves', () => {
+		expect(strings.nonStop.courtLine('Court 2', 3, 7, 2, 2)).toBe('Round 3 of 7, wave 2, court 2');
+	});
+
+	it('courtLine_keeps_a_name_without_the_court_prefix', () => {
+		expect(strings.nonStop.courtLine('Centre', 1, 7)).toBe('Round 1 of 7, court Centre');
 	});
 });

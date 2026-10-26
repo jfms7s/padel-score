@@ -823,7 +823,9 @@ export const strings = {
 		orderOptions: { listed: 'As listed', random: 'Random draw' },
 		roundOf: (r: number, rounds: number) => `Round ${r} of ${rounds}`,
 		waveOf: (w: number, waves: number) => `Wave ${w} of ${waves}`,
-		courtLine: (court: number | string, r: number, rounds: number) => `Round ${r} of ${rounds}, court ${court}`,
+		/** "Round 3 of 7, court 2"; with waves, "Round 3 of 7, wave 2, court 2". A name "Court 2" reads as "court 2". */
+		courtLine: (court: number | string, r: number, rounds: number, wave = 1, waves = 1) =>
+			`Round ${r} of ${rounds}, ${waves > 1 ? `wave ${wave}, ` : ''}court ${String(court).replace(/^court\s+/i, '')}`,
 		waitingForClock: 'Waiting for the clock',
 		paused: 'Paused',
 		timeUp: 'Time’s up',
