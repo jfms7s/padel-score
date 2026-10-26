@@ -2,6 +2,7 @@
 //! below do nothing; phase 8 fills them in.
 
 mod schedule;
+mod standings;
 
 use sqlx::SqliteConnection;
 
