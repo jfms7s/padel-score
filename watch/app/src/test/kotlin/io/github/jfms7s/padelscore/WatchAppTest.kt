@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -415,6 +416,42 @@ class WatchAppTest {
         compose.waitForIdle()
         assertEquals("local/score", nav.currentDestination?.route)
         assertEquals("signin", nav.previousBackStackEntry?.destination?.route)
+    }
+
+    @Test
+    fun failed_setup_save_says_not_saved_and_a_retry_opens_the_score_without_it() {
+        val store = FakeLocalMatchStore()
+        launch(signedOut(), store)
+        tap("Local match")
+        tap("Golden point")
+        tap("One set")
+        tap("Blue 1")
+        store.failWrites = true
+        tap("Green 2")
+        assertEquals("local/other", nav.currentDestination?.route)
+        compose.onNodeWithText("Not saved").assertIsDisplayed()
+
+        store.failWrites = false
+        tap("Green 2")
+        assertEquals("local/score", nav.currentDestination?.route)
+        compose.onNodeWithText("Not saved").assertDoesNotExist()
+        assertEquals(LocalMatch(setup, emptyList()), store.saved.single())
+    }
+
+    @Test
+    fun failed_discard_says_not_saved_and_resume_shows_no_stale_notice() {
+        val store = stored(listOf(Team.A))
+        launch(signedOut(), store)
+        pressBack()
+        store.failWrites = true
+        tap("Discard local match")
+        tap("Yes, discard")
+        compose.onNodeWithText("Not saved").assertIsDisplayed()
+        assertEquals(listOf(Team.A), storedMatch(store)?.points)
+
+        tap("Resume local match")
+        assertEquals("local/score", nav.currentDestination?.route)
+        compose.onNodeWithText("Not saved").assertDoesNotExist()
     }
 
     @Test

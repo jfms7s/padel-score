@@ -34,6 +34,12 @@ data class LocalUi(
     val feedbackId: Long,
 )
 
+/**
+ * [feedback] if it came after [feedbackId] [since], else none: feedback from before a screen opened (a failed
+ * write elsewhere, a point before swiping away) belongs to that moment, not to the screen.
+ */
+fun LocalUi.feedbackSince(since: Long): Feedback = if (feedbackId == since) Feedback.None else feedback
+
 /** The rules and first server picked so far; null until picked (or known from the last setup). */
 data class SetupDraft(
     val deuce: DeuceRule?,

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,12 +32,16 @@ import io.github.jfms7s.padelscore.local.engine.DeuceRule
 import io.github.jfms7s.padelscore.local.engine.SetsFormat
 import io.github.jfms7s.padelscore.net.Player
 import io.github.jfms7s.padelscore.net.Team
+import io.github.jfms7s.padelscore.score.Feedback
 
 internal const val CHOICE_SELECTED_TAG = "choice-selected"
 
 private val MinTarget = 48.dp
 
-/** One rule-picking screen: a title, a full-width button per option (the [highlighted] one filled), then the hint. */
+/**
+ * One rule-picking screen: a title, any [notice] under it, a full-width button per option (the [highlighted] one
+ * filled), then the hint.
+ */
 @Composable
 internal fun ChoiceScreen(
     title: String,
@@ -44,12 +49,14 @@ internal fun ChoiceScreen(
     options: List<String>,
     highlighted: Int?,
     onPick: (Int) -> Unit,
+    notice: String? = null,
 ) {
     MaterialTheme {
         val listState = rememberTransformingLazyColumnState()
         ScreenScaffold(scrollState = listState) { padding ->
             TransformingLazyColumn(state = listState, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
                 item { Caption(title, 15.sp) }
+                if (notice != null) item { Caption(notice, 13.sp) }
                 itemsIndexed(options) { index, option ->
                     val selected = index == highlighted
                     Button(
@@ -130,10 +137,16 @@ fun LocalServeScreen(model: LocalMatchModel, onNext: () -> Unit) {
     )
 }
 
-/** The other pair's two players; a pick finishes the setup, which [onNext] receives. */
+/**
+ * The other pair's two players; a pick finishes the setup, which [onNext] receives. A start that failed to save
+ * says so here, where the pick can be tapped again.
+ */
 @Composable
 fun LocalOtherServerScreen(model: LocalMatchModel, onNext: (LocalSetup) -> Unit) {
     val draft by model.draft.collectAsState()
+    val ui by model.ui.collectAsState()
+    val opened = remember { model.ui.value.feedbackId }
+    val notSaved = ui.feedbackSince(opened) == Feedback.NotSaved
     val otherTeam = if (draft.firstServer?.team == Team.A) Team.B else Team.A
     val players = listOf(Player(otherTeam, 0), Player(otherTeam, 1))
     ChoiceScreen(
@@ -142,6 +155,7 @@ fun LocalOtherServerScreen(model: LocalMatchModel, onNext: (LocalSetup) -> Unit)
         options = players.map { playerName(it) },
         highlighted = null,
         onPick = { index -> model.pickOtherServer(index)?.let(onNext) },
+        notice = if (notSaved) stringResource(R.string.local_not_saved) else null,
     )
 }
 

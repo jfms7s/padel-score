@@ -46,7 +46,14 @@ fun MatchListScreen(
         onStopOrDispose { model.stopStream() }
     }
     val state by model.state.collectAsState()
-    MatchListContent(state, onPick, onRetry = model::refresh, onSettings = onSettings, onSignOut = onSignOut, localEntry = localEntry)
+    MatchListContent(
+        state,
+        onPick,
+        onRetry = model::refresh,
+        onSettings = onSettings,
+        onSignOut = onSignOut,
+        localEntry = localEntry,
+    )
 }
 
 private val MinTarget = 48.dp

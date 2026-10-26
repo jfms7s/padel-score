@@ -6,7 +6,6 @@ import android.content.ActivityNotFoundException
 import android.view.inputmethod.EditorInfo
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,7 +53,7 @@ fun SettingsScreen(model: SettingsModel, onApplied: () -> Unit, localEntry: @Com
 @Composable
 fun FirstRunSettings(store: SettingsStore, onApplied: () -> Unit, localEntry: @Composable () -> Unit = {}) {
     val model = viewModel { SettingsModel(store, current = null, tokens = null) }
-    Box(Modifier.fillMaxSize().background(Color.Black)) { SettingsScreen(model, onApplied, localEntry) }
+    SettingsScreen(model, onApplied, localEntry)
 }
 
 private const val INPUT_KEY = "text"

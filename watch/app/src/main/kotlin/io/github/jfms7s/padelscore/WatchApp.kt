@@ -67,8 +67,12 @@ private const val LOCAL_SCORE = "local/score"
  * runs once new server settings are saved; the activity then restarts on them.
  */
 @Composable
-fun WatchApp(container: AppContainer?, settingsStore: SettingsStore, local: LocalDeps, onSettingsApplied: () -> Unit) =
-    WatchApp(container, settingsStore, local, rememberSwipeDismissableNavController(), onSettingsApplied)
+fun WatchApp(
+    container: AppContainer?,
+    settingsStore: SettingsStore,
+    local: LocalDeps,
+    onSettingsApplied: () -> Unit,
+) = WatchApp(container, settingsStore, local, rememberSwipeDismissableNavController(), onSettingsApplied)
 
 /** [nav] is a seam for tests, which check the back stack after a sign-out. */
 @Composable
