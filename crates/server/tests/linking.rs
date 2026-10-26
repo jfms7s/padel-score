@@ -9,7 +9,7 @@ mod support;
 
 use axum::http::{Method, StatusCode};
 use padel_score_server::accounts_store::NewUser;
-use padel_score_server::competitions::{Kind, NewCompetition};
+use padel_score_server::competitions::{Kind, NewCompetition, TeamChange};
 use padel_score_server::db;
 use padel_score_server::linking::{ClaimPreview, preview_in};
 use padel_score_server::players::PlayerSlots;
@@ -348,6 +348,81 @@ async fn overlapping_through_an_event_team_cannot_both_link() {
         "{err:?}"
     );
     padel_score_server::linking::link_in(&mut tx, &solo, &u, 14)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn linked_entries_cannot_share_an_event() {
+    let (s, _pool) = setup().await;
+    let ana = user(&s, "ana@example.com", "Ana").await;
+    let u = user(&s, "u@example.com", "U").await;
+    let v = user(&s, "v@example.com", "V").await;
+    let rui = player(&s, &ana, "Rui").await;
+    let rui_s = player(&s, &ana, "Rui S.").await;
+    let vic = player(&s, &ana, "Vic").await;
+    let x = player(&s, &ana, "X").await;
+    let y = player(&s, &ana, "Y").await;
+    let z = player(&s, &ana, "Z").await;
+    let mut tx = s.begin().await.unwrap();
+    for (p, who) in [(&rui, &u), (&rui_s, &u), (&vic, &v)] {
+        padel_score_server::linking::link_in(&mut tx, p, who, 10)
+            .await
+            .unwrap();
+    }
+    tx.commit().await.unwrap();
+    let ev = event_with_teams(&s, &ana, &[]).await;
+    let conflict = |r: Result<_, StoreError>| match r {
+        Err(StoreError::Conflict("player_in_team")) => {}
+        other => panic!("{other:?}"),
+    };
+
+    // One team: two entries of U.
+    conflict(
+        s.add_team(&ana, &ev, [rui.clone(), rui_s.clone()], None, 1)
+            .await,
+    );
+    // Opposing teams: U's other entry is already in this event.
+    let t1 = s
+        .add_team(&ana, &ev, [rui.clone(), x.clone()], None, 1)
+        .await
+        .unwrap();
+    conflict(
+        s.add_team(&ana, &ev, [rui_s.clone(), y.clone()], None, 1)
+            .await,
+    );
+    // Linked to different users, or unlinked: allowed.
+    let t2 = s
+        .add_team(&ana, &ev, [vic.clone(), y.clone()], None, 1)
+        .await
+        .unwrap();
+    // Re-pairing: into U's other entry is refused, its own team excepted.
+    conflict(
+        s.update_team(
+            &ana,
+            &ev,
+            &t2.id,
+            TeamChange {
+                name: None,
+                players: Some([rui_s.clone(), y.clone()]),
+            },
+        )
+        .await,
+    );
+    s.update_team(
+        &ana,
+        &ev,
+        &t1.id,
+        TeamChange {
+            name: None,
+            players: Some([rui.clone(), z.clone()]),
+        },
+    )
+    .await
+    .unwrap();
+    // Another event is a different event.
+    let other = event_with_teams(&s, &ana, &[]).await;
+    s.add_team(&ana, &other, [rui_s.clone(), x.clone()], None, 1)
         .await
         .unwrap();
 }

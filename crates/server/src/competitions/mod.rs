@@ -303,7 +303,8 @@ async fn team_in(
 }
 
 /// Both players are the owner's, active and different, and in no other team of the event
-/// (`except_team` is the team being re-paired, if any).
+/// (`except_team` is the team being re-paired, if any). Entries linked to one account are one
+/// person: the pair may not share an account, nor either share one with a player of another team.
 async fn check_pair(
     conn: &mut SqliteConnection,
     owner: &str,
@@ -330,9 +331,27 @@ async fn check_pair(
     .bind(&pair[1])
     .bind(&pair[0])
     .bind(&pair[1])
-    .fetch_optional(conn)
+    .fetch_optional(&mut *conn)
     .await?;
     if taken.is_some() {
+        return Err(StoreError::Conflict("player_in_team"));
+    }
+    let same_person: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM players a JOIN players b \
+           ON b.linked_user_id = a.linked_user_id AND b.id <> a.id \
+           WHERE a.id = ?1 AND b.id = ?2) \
+         OR EXISTS (SELECT 1 FROM players mine \
+           JOIN players other ON other.linked_user_id = mine.linked_user_id \
+           JOIN competition_teams ct ON other.id IN (ct.player1_id, ct.player2_id) \
+           WHERE mine.id IN (?1, ?2) AND ct.event_id = ?3 AND ct.id IS NOT ?4)",
+    )
+    .bind(&pair[0])
+    .bind(&pair[1])
+    .bind(event_id)
+    .bind(except_team)
+    .fetch_one(conn)
+    .await?;
+    if same_person {
         return Err(StoreError::Conflict("player_in_team"));
     }
     Ok(())
