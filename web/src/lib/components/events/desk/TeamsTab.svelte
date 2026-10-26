@@ -1,9 +1,11 @@
 <!--
-	The desk's Teams tab: the teams with rename and (in setup) remove, and the add-team form.
-	The page runs the calls; a call's promise says whether it worked, so a form can clear.
+	The desk's Teams tab: the teams with rename and (in setup) remove, and the add-team form
+	beside them on a desktop; a tournament's settings sit below in setup. The page runs the
+	calls; a call's promise says whether it worked, so a form can clear.
 -->
 <script lang="ts">
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
+	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import { teamText } from '#lib/events.ts';
 	import { MAX_NAME_LENGTH } from '#lib/setup.ts';
 	import { strings } from '#lib/strings.ts';
@@ -80,98 +82,107 @@
 
 <section aria-labelledby="h-teams">
 	<h2 id="h-teams">{t.teams}</h2>
-	{#if teams.length === 0}
-		<p class="hint">{t.noTeams}</p>
-	{:else}
-		<ul class="list" aria-labelledby="h-teams">
-			{#each teams as team (team.id)}
-				<li class="row">
-					{#if renaming === team.id}
-						<form class="inline" onsubmit={(e) => submitRename(e, team)}>
-							<!-- svelte-ignore a11y_autofocus -->
-							<input
-								bind:value={renameText}
-								aria-label={t.newTeamName(teamText(team))}
-								aria-describedby="h-rename"
-								placeholder={strings.teamName(team.players[0].name, team.players[1].name)}
-								autocomplete="off"
-								maxlength={MAX_NAME_LENGTH}
-								autofocus
-							/>
-							<p class="hint" id="h-rename">{t.newTeamNameHint}</p>
-							<div class="actions">
-								<button class="primary" type="submit" disabled={busy}>{t.save}</button>
-								<button class="secondary" type="button" onclick={() => (renaming = null)}>{t.cancel}</button>
-							</div>
-						</form>
-					{:else}
-						<span class="what">
-							<strong>{teamText(team)}</strong>
-							{#if team.custom_name !== null}
-								<span class="hint">{strings.teamName(team.players[0].name, team.players[1].name)}</span>
-							{/if}
-						</span>
-						{#if status !== 'finished'}
-							<div class="actions">
-								<button class="secondary" type="button" disabled={busy} aria-label={t.renameLabel(teamText(team))} onclick={() => startRename(team)}>
-									{t.rename}
-								</button>
-								{#if status === 'setup'}
-									<button class="danger" type="button" disabled={busy} aria-label={t.removeLabel(teamText(team))} onclick={() => onremove(team)}>
-										{t.remove}
-									</button>
+	<div class="layout" class:with-form={status === 'setup'}>
+		<div class="list-col">
+			{#if teams.length === 0}
+				<p class="hint">{t.noTeams}</p>
+			{:else}
+				<ul class="list grid-auto" style:--min="240px" aria-labelledby="h-teams">
+					{#each teams as team (team.id)}
+						<li class="row">
+							{#if renaming === team.id}
+								<form class="inline" onsubmit={(e) => submitRename(e, team)}>
+									<!-- svelte-ignore a11y_autofocus -->
+									<input
+										bind:value={renameText}
+										aria-label={t.newTeamName(teamText(team))}
+										aria-describedby="h-rename"
+										placeholder={strings.teamName(team.players[0].name, team.players[1].name)}
+										autocomplete="off"
+										maxlength={MAX_NAME_LENGTH}
+										autofocus
+									/>
+									<p class="hint" id="h-rename">{t.newTeamNameHint}</p>
+									<div class="actions">
+										<button class="primary" type="submit" disabled={busy}>{t.save}</button>
+										<button class="secondary" type="button" onclick={() => (renaming = null)}>{t.cancel}</button>
+									</div>
+								</form>
+							{:else}
+								<span class="what">
+									<strong>{teamText(team)}</strong>
+									{#if team.custom_name !== null}
+										<span class="hint">{strings.teamName(team.players[0].name, team.players[1].name)}</span>
+									{/if}
+								</span>
+								{#if status !== 'finished'}
+									<div class="actions">
+										<button class="secondary" type="button" disabled={busy} aria-label={t.renameLabel(teamText(team))} onclick={() => startRename(team)}>
+											{t.rename}
+										</button>
+										{#if status === 'setup'}
+											<button class="danger" type="button" disabled={busy} aria-label={t.removeLabel(teamText(team))} onclick={() => onremove(team)}>
+												{t.remove}
+											</button>
+										{/if}
+									</div>
 								{/if}
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
+		{#if status === 'setup'}
+			<div class="form-col">
+				<h3>{t.addTeam}</h3>
+				{#if players}
+					<form class="add-team" onsubmit={submitTeam}>
+						<div class="slots">
+							<div class="slot">
+								<PlayerPicker
+									bind:value={first.name}
+									bind:playerId={first.id}
+									{players}
+									taken={[...inTeams, ...(second.id ? [second.id] : [])]}
+									placeholder={t.teamPlayer(1)}
+									label={t.teamPlayer(1)}
+									onadd={onplayer}
+								/>
 							</div>
-						{/if}
-					{/if}
-				</li>
-			{/each}
-		</ul>
-	{/if}
-
-	{#if status === 'setup'}
-		<h3>{t.addTeam}</h3>
-		{#if players}
-			<form class="add-team" onsubmit={submitTeam}>
-				<div class="slots">
-					<div class="slot">
-						<PlayerPicker
-							bind:value={first.name}
-							bind:playerId={first.id}
-							{players}
-							taken={[...inTeams, ...(second.id ? [second.id] : [])]}
-							placeholder={t.teamPlayer(1)}
-							label={t.teamPlayer(1)}
-							onadd={onplayer}
-						/>
-					</div>
-					<div class="slot">
-						<PlayerPicker
-							bind:value={second.name}
-							bind:playerId={second.id}
-							{players}
-							taken={[...inTeams, ...(first.id ? [first.id] : [])]}
-							placeholder={t.teamPlayer(2)}
-							label={t.teamPlayer(2)}
-							onadd={onplayer}
-						/>
-					</div>
-				</div>
-				{#if players.length === 0}<p class="hint">{t.noPlayers}</p>{/if}
-				<label>
-					{t.teamName}
-					<input bind:value={teamName} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
-				</label>
-				<button class="primary" type="submit" disabled={busy}>{t.addTeam}</button>
-			</form>
-		{:else if playersFailed}
-			<p class="hint" role="status">{strings.players.listFailed}</p>
-		{:else}
-			<p class="hint">{strings.auth.loading}</p>
+							<div class="slot">
+								<PlayerPicker
+									bind:value={second.name}
+									bind:playerId={second.id}
+									{players}
+									taken={[...inTeams, ...(first.id ? [first.id] : [])]}
+									placeholder={t.teamPlayer(2)}
+									label={t.teamPlayer(2)}
+									onadd={onplayer}
+								/>
+							</div>
+						</div>
+						{#if players.length === 0}<p class="hint">{t.noPlayers}</p>{/if}
+						<label>
+							{t.teamName}
+							<input bind:value={teamName} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
+						</label>
+						<button class="primary" type="submit" disabled={busy}>{t.addTeam}</button>
+					</form>
+				{:else if playersFailed}
+					<p class="hint" role="status">{strings.players.listFailed}</p>
+				{:else}
+					<p class="hint">{strings.auth.loading}</p>
+				{/if}
+			</div>
 		{/if}
-	{/if}
+	</div>
 	{#if failure}<p class="error" role="alert">{failure}</p>{/if}
 </section>
+
+{#if status === 'setup' && detail.event.kind === 'tournament'}
+	<KindPanel event={detail} audience="coordinator" />
+{/if}
 
 <style>
 	section {
@@ -182,8 +193,27 @@
 		font-size: 16px;
 		font-weight: 700;
 	}
+	.layout {
+		display: grid;
+		gap: 8px 24px;
+		align-items: start;
+	}
+	.layout > * {
+		min-width: 0;
+	}
 	.row .what {
 		flex: 1 1 10rem;
+	}
+	.add-team {
+		max-width: 28rem;
+	}
+	@media (min-width: 1100px) {
+		.layout.with-form {
+			grid-template-columns: minmax(0, 1fr) 22rem;
+		}
+		.form-col h3 {
+			margin-top: 0;
+		}
 	}
 	.inline {
 		flex: 1;

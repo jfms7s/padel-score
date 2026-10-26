@@ -51,6 +51,7 @@
 <style>
 	section {
 		margin-top: 8px;
+		max-width: 28rem;
 	}
 	.wide {
 		width: 100%;

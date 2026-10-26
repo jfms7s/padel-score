@@ -54,7 +54,7 @@
 <section aria-labelledby="h-courts">
 	<h2 id="h-courts">{t.courts}</h2>
 	<!-- Once finished, scoring links give 410: only the viewing QR stays (and no rotate). -->
-	<div class="cards">
+	<div class="cards grid-auto" style:--min="300px">
 		{#each courts as court (court.id)}
 			{@const links = courtLinks(origin, court)}
 			{@const current = matchById(court.current)}
@@ -197,6 +197,7 @@
 	}
 	.wide {
 		width: 100%;
+		max-width: 28rem;
 		margin-top: 12px;
 	}
 	p.error {

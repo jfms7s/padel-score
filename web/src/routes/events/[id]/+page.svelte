@@ -7,8 +7,10 @@
 	import { goto } from '$app/navigation';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import CourtsTab from '#lib/components/events/desk/CourtsTab.svelte';
+	import DeskHeader from '#lib/components/events/desk/DeskHeader.svelte';
 	import DeskTabs from '#lib/components/events/desk/DeskTabs.svelte';
 	import FinishTab from '#lib/components/events/desk/FinishTab.svelte';
+	import LiveTab from '#lib/components/events/desk/LiveTab.svelte';
 	import MatchesTab from '#lib/components/events/desk/MatchesTab.svelte';
 	import TeamsTab from '#lib/components/events/desk/TeamsTab.svelte';
 	import { defaultTab, deskTabs, resolveTab, type DeskTab } from '#lib/desk.ts';
@@ -19,6 +21,7 @@
 		assignMatch,
 		createEventMatch,
 		deleteTeam,
+		eventLink,
 		eventMessage,
 		eventStreamUrl,
 		finishEvent,
@@ -26,9 +29,7 @@
 		isEventDetail,
 		postEventResult,
 		rotateCourt,
-		rulesText,
 		startEvent,
-		teamText,
 		updateTeam
 	} from '#lib/events.ts';
 	import { listPlayers } from '#lib/players.ts';
@@ -222,13 +223,6 @@
 
 	// ---- start and finish ------------------------------------------------------------------
 
-	const teamById = (tid: string) => teams.find((x) => x.id === tid);
-	const nameOf = (tid: string) => {
-		const tm = teamById(tid);
-		return tm ? teamText(tm) : t.unknownTeam;
-	};
-	const finalPlaces = $derived([...(detail?.places ?? [])].sort((x, y) => x.place - y.place));
-
 	function start() {
 		void act('lifecycle', async () => {
 			detail = await startEvent(id);
@@ -243,19 +237,21 @@
 	}
 </script>
 
-<main class="acct">
+<main class="acct page-wide">
 	<a class="back" href="/events">{t.allEvents}</a>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
 	{:else if $session.status === 'signed_in' && detail && ev}
-		<header class="head">
-			<h1>{ev.name}</h1>
-			<p class="meta">
-				<span>{t.kinds[ev.kind]}</span>
-				<span class="badge" class:off={status === 'finished'}>{t.status[status]}</span>
-			</p>
-			<p class="hint">{rulesText(ev.format)}</p>
-		</header>
+		<DeskHeader
+			{detail}
+			{busy}
+			{copied}
+			{copyFailed}
+			oncopy={() => copy('spectator', eventLink(origin, detail?.spectator_token ?? ''))}
+			onstart={start}
+			onfinish={() => select('finish')}
+		/>
+		{#if failures.lifecycle && active !== 'finish'}<p class="error" role="alert">{failures.lifecycle}</p>{/if}
 
 		{#if streamStatus === 'offline' || streamStatus === 'gone'}
 			<div class="lost" role="status">
@@ -308,33 +304,11 @@
 			{:else if active === 'finish'}
 				<FinishTab {detail} {matches} {busy} failure={failures.lifecycle} onopen={() => fail('lifecycle', null)} onfinish={finish} />
 			{:else if active === 'kind'}
-				<KindPanel event={detail} audience="coordinator" />
+				<KindPanel event={detail} audience="coordinator" parts={ev.kind === 'non_stop' ? 'tables' : 'all'} />
 			{:else}
-				{#if status === 'finished'}
-					<section aria-labelledby="h-places">
-						<h2 id="h-places">{t.finishTitle}</h2>
-						<ol class="list final">
-							{#each finalPlaces as p (p.team_id)}
-								<li class="row">
-									<span class="pos">{t.place(p.place, p.place_to)}</span>
-									<span class="what"><strong>{nameOf(p.team_id)}</strong></span>
-								</li>
-							{/each}
-						</ol>
-					</section>
-				{/if}
-				<KindPanel event={detail} audience="coordinator" />
+				<LiveTab {detail} {matches} {busy} failure={failures.courts} onnext={nextMatch} onsave={saveResult} />
 			{/if}
 		</div>
-
-		{#if status === 'setup'}
-			<section aria-labelledby="h-lifecycle">
-				<h2 id="h-lifecycle" class="visually-hidden">{t.start}</h2>
-				<p class="hint">{t.startHint}</p>
-				<button class="primary wide" type="button" disabled={busy} onclick={start}>{t.start}</button>
-				{#if failures.lifecycle}<p class="error" role="alert">{failures.lifecycle}</p>{/if}
-			</section>
-		{/if}
 	{:else}
 		<p class="hint">{t.loading}</p>
 	{/if}
@@ -347,22 +321,6 @@
 		min-height: var(--tap);
 		color: var(--muted);
 	}
-	.head h1 {
-		margin-bottom: 4px;
-		overflow-wrap: anywhere;
-	}
-	.meta {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-		margin: 0 0 4px;
-	}
-	.meta .badge {
-		margin-left: 6px;
-	}
-	section {
-		margin-top: 8px;
-	}
 	.lost {
 		display: flex;
 		flex-wrap: wrap;
@@ -374,19 +332,6 @@
 		border: 1px solid var(--warn);
 		border-radius: 12px;
 		color: var(--warn);
-	}
-	.wide {
-		width: 100%;
-		margin-top: 12px;
-	}
-	.pos {
-		flex: none;
-		min-width: 4.5rem;
-		font-weight: 750;
-		font-feature-settings: 'tnum';
-	}
-	.final {
-		margin: 0;
 	}
 	p.error {
 		margin-top: 12px;

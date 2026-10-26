@@ -1,7 +1,8 @@
 <!--
 	Owned by phase 8 (the non-stop). The non-stop's part of the event screen, for the coordinator or a
 	spectator: the clock (buttons for the coordinator only), the standings and the schedule. The data
-	arrives in `kind_data` on the stream the page already holds.
+	arrives in `kind_data` on the stream the page already holds. `parts` shows only the clock or only
+	the tables (side by side on a desktop), for a page that places them apart.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -14,7 +15,11 @@
 
 	const t = strings.nonStop;
 
-	let { event, audience }: { event: EventDetail | EventView; audience: 'coordinator' | 'spectator' } = $props();
+	let {
+		event,
+		audience,
+		parts = 'all'
+	}: { event: EventDetail | EventView; audience: 'coordinator' | 'spectator'; parts?: 'all' | 'clock' | 'tables' } = $props();
 
 	const data = $derived(nonStopData(event.kind_data));
 
@@ -22,18 +27,28 @@
 </script>
 
 {#if data}
-	<NonStopClock
-		eventId={event.event.id}
-		clock={data.clock}
-		rounds={data.rounds}
-		waves={data.waves}
-		controls={audience === 'coordinator'}
-	/>
-	<h3>{t.standings}</h3>
-	<Standings rows={data.standings} teams={event.teams} />
-	<p class="hint">{t.standingsHint}</p>
-	<h3>{t.schedule}</h3>
-	<NonStopSchedule {data} {event} />
+	{#if parts !== 'tables'}
+		<NonStopClock
+			eventId={event.event.id}
+			clock={data.clock}
+			rounds={data.rounds}
+			waves={data.waves}
+			controls={audience === 'coordinator'}
+		/>
+	{/if}
+	{#if parts !== 'clock'}
+		<div class="tables" class:split={parts === 'tables'}>
+			<div>
+				<h3>{t.standings}</h3>
+				<Standings rows={data.standings} teams={event.teams} />
+				<p class="hint">{t.standingsHint}</p>
+			</div>
+			<div>
+				<h3>{t.schedule}</h3>
+				<NonStopSchedule {data} {event} />
+			</div>
+		</div>
+	{/if}
 {/if}
 
 <style>
@@ -41,5 +56,16 @@
 		margin: 20px 0 8px;
 		font-size: 16px;
 		font-weight: 700;
+	}
+	.tables > div {
+		min-width: 0;
+	}
+	@media (min-width: 1100px) {
+		.split {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+			gap: 0 24px;
+			align-items: start;
+		}
 	}
 </style>
