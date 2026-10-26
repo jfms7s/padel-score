@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -521,6 +522,21 @@ class WatchAppTest {
         assertEquals("matches", nav.currentDestination?.route)
         assertNull(nav.previousBackStackEntry)
         assertNull(storedMatch(store))
+        compose.onNodeWithText("Local match").assertExists()
+    }
+
+    @Test
+    fun finished_back_twice_still_leaves_home_showing() {
+        launch(FakeContainer(FakeApi(oneMatch), FakeTokens("tok")), stored(List(24) { Team.A }))
+        // Both taps land before the screen is recomposed away, as in the exit animation.
+        val onClick = compose.onNodeWithText("Back").fetchSemanticsNode().config[SemanticsActions.OnClick].action
+        compose.runOnUiThread {
+            onClick?.invoke()
+            onClick?.invoke()
+        }
+        compose.waitForIdle()
+
+        assertEquals("matches", nav.currentDestination?.route)
         compose.onNodeWithText("Local match").assertExists()
     }
 

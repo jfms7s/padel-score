@@ -196,7 +196,9 @@ private fun WatchNavHost(
             LaunchedEffect(ui.loaded, ui.match == null) {
                 if (ui.loaded && ui.match == null && nav.currentDestination?.route == LOCAL_SCORE) nav.popBackStack()
             }
-            LocalScoreScreen(localModel, onBack = { nav.popBackStack() })
+            // Only the local score is popped, and only while it is the one showing: a second tap during the exit
+            // animation must not take the home screen with it.
+            LocalScoreScreen(localModel, onBack = { nav.popBackStack(LOCAL_SCORE, inclusive = true) })
         }
     }
 }
