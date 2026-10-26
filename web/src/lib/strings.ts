@@ -927,7 +927,21 @@ export const strings = {
 		typeResult: (label: string) => `Result for ${label}`,
 		resultPlaceholder: '6-3 4-6 10-7',
 		keys: { save: 'save, next', cancel: 'cancel', move: 'move' },
-		nextFree: 'Next free court'
+		nextFree: 'Next free court',
+		// The coordinator desk's tabs and header.
+		tabsLabel: 'Event sections',
+		tabs: {
+			live: 'Live',
+			matches: 'Matches',
+			kind: { tournament: 'Bracket', non_stop: 'Standings' },
+			teams: 'Teams',
+			courts: 'Courts & phones',
+			finish: 'Finish'
+		},
+		spectatorLink: 'Spectator link',
+		copied: 'Copied',
+		freeCourt: (name: string) => `${name} is free`,
+		upNext: 'Up next'
 	}
 } as const;
 
