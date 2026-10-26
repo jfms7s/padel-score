@@ -29,13 +29,13 @@
 	class="match"
 	class:held={node.held}
 	href={href ?? undefined}
-	aria-label={href ? t.matchLink(node.label) : undefined}
 >
 	{#each sides as s, i (i)}
 		<div class="t {s.state}" class:tbd={!s.known}>
 			<span class="who">{s.text}</span><span class="s">{s.score}</span>
 		</div>
 	{/each}
+	{#if href}<span class="visually-hidden">{t.matchLink(node.label)}</span>{/if}
 	{#if node.held}
 		<div class="where held">{t.held}</div>
 	{:else if where}

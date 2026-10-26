@@ -219,10 +219,21 @@ export interface HeldText {
  * What a held node tells the coordinator: the warning, the Replay and Keep lines. After Finish
  * no match can be made, so only Keep is offered.
  */
-export function heldText(_d: TournamentData, node: BracketNode, finished: boolean): HeldText {
+export function heldText(
+	d: TournamentData,
+	node: BracketNode,
+	finished: boolean,
+	matches: readonly Pick<EventMatch, 'id' | 'state'>[] = []
+): HeldText {
 	const discards = node.replay_discards ?? [];
+	// Replay also withdraws matches nobody has started: name the first one that has begun.
+	const started = discards.find((label) => {
+		const id = d.nodes.find((n) => n.label === label)?.match_id;
+		const state = id == null ? undefined : matches.find((m) => m.id === id)?.state;
+		return state === 'live' || state === 'finished';
+	});
 	return {
-		warning: t.heldWarning(node.label, discards[0] ?? null),
+		warning: t.heldWarning(node.label, started ?? null),
 		replay: finished || discards.length === 0 ? null : t.replayDiscards(discards),
 		keep: t.keepNote(node.label),
 		finishedNote: finished ? t.heldFinished : null
