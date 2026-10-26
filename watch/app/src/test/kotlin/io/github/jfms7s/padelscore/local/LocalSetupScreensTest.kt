@@ -1,7 +1,6 @@
 package io.github.jfms7s.padelscore.local
 
 import androidx.compose.ui.test.assert
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -78,75 +77,62 @@ class LocalSetupScreensTest {
     }
 
     @Test
-    fun serve_screen_lists_four_players_and_hint() {
+    fun serve_screen_lists_the_two_teams_and_hint() {
         val model = model()
-        var nexts = 0
-        compose.setContent { LocalServeScreen(model) { nexts++ } }
+        compose.setContent { LocalServeScreen(model) {} }
         // The list scrolls on a small screen, so each is scrolled to before it is looked for.
         val list = compose.onNode(hasScrollAction())
-        listOf("Blue 1", "Blue 2", "Green 1", "Green 2", "Not sure? Spin the racket and tap the winner.").forEach {
+        listOf("Blue", "Green", "Not sure? Spin the racket and tap the winner.").forEach {
             list.performScrollToNode(hasText(it))
             compose.onNodeWithText(it).assertExists()
         }
-        list.performScrollToNode(hasText("Green 1"))
-        compose.onNodeWithText("Green 1").performClick()
-        assertEquals(Player(Team.B, 0), model.draft.value.firstServer)
-        assertEquals(1, nexts)
+        compose.onNodeWithText("Blue 1").assertDoesNotExist()
     }
 
     @Test
-    fun other_server_lists_the_other_team_and_finishes_setup() {
+    fun serve_pick_finishes_setup_with_the_second_players_serving() {
         val model = model()
         model.pickDeuce(DeuceRule.ADVANTAGE)
         model.pickSets(SetsFormat.ONE)
-        model.pickFirstServer(Player(Team.A, 1))
         var done: LocalSetup? = null
-        compose.setContent { LocalOtherServerScreen(model) { done = it } }
-        compose.onNodeWithText("Green 1").assertIsDisplayed()
-        compose.onNodeWithText("Blue 1").assertDoesNotExist()
-        compose.onNodeWithText("Green 2").performClick()
+        compose.setContent { LocalServeScreen(model) { done = it } }
+        compose.onNodeWithText("Green").performClick()
         assertEquals(
             LocalSetup(
                 SetRules(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET),
-                Start(Player(Team.A, 1), 1),
+                Start(Player(Team.B, 1), 1),
             ),
             done,
         )
+        assertEquals(Team.B, model.draft.value.firstTeam)
     }
 
     @Test
-    fun other_server_highlights_the_last_pick_for_the_same_serving_pair() {
+    fun serve_screen_highlights_the_last_setups_team_even_with_an_old_index() {
         val last = LocalSetup(
             SetRules(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET),
-            Start(Player(Team.A, 0), 1),
+            Start(Player(Team.B, 0), 0),
         )
         val model = model(last)
-        model.pickFirstServer(Player(Team.A, 1))
-        compose.setContent { LocalOtherServerScreen(model) {} }
+        compose.setContent { LocalServeScreen(model) {} }
         compose.waitForIdle()
-        compose.onNodeWithTag(CHOICE_SELECTED_TAG).assert(hasText("Green 2"))
+        compose.onNodeWithTag(CHOICE_SELECTED_TAG).assert(hasText("Green"))
     }
 
     @Test
-    fun other_server_highlights_nothing_when_the_serving_pair_changed() {
-        val last = LocalSetup(
-            SetRules(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET),
-            Start(Player(Team.A, 0), 1),
-        )
-        val model = model(last)
-        model.pickFirstServer(Player(Team.B, 0))
-        compose.setContent { LocalOtherServerScreen(model) {} }
+    fun serve_screen_highlights_nothing_without_a_last_setup() {
+        val model = model()
+        compose.setContent { LocalServeScreen(model) {} }
         compose.waitForIdle()
         compose.onNodeWithTag(CHOICE_SELECTED_TAG).assertDoesNotExist()
     }
 
     @Test
-    fun other_server_with_a_missing_pick_does_not_finish() {
+    fun serve_pick_with_a_missing_rule_does_not_finish() {
         val model = model()
-        model.pickFirstServer(Player(Team.A, 0))
         var done: LocalSetup? = null
-        compose.setContent { LocalOtherServerScreen(model) { done = it } }
-        compose.onNodeWithText("Green 1").performClick()
+        compose.setContent { LocalServeScreen(model) { done = it } }
+        compose.onNodeWithText("Blue").performClick()
         assertNull(done)
     }
 }

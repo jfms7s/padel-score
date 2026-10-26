@@ -30,7 +30,6 @@ import io.github.jfms7s.padelscore.local.LocalDeuceScreen
 import io.github.jfms7s.padelscore.local.LocalEntryButtons
 import io.github.jfms7s.padelscore.local.LocalMatch
 import io.github.jfms7s.padelscore.local.LocalMatchModel
-import io.github.jfms7s.padelscore.local.LocalOtherServerScreen
 import io.github.jfms7s.padelscore.local.LocalScoreScreen
 import io.github.jfms7s.padelscore.local.LocalServeScreen
 import io.github.jfms7s.padelscore.local.LocalSetsScreen
@@ -59,7 +58,6 @@ private const val LOCAL_DEUCE = "local/deuce"
 private const val LOCAL_SETS = "local/sets"
 private const val LOCAL_DECIDING = "local/deciding"
 private const val LOCAL_SERVE = "local/serve"
-private const val LOCAL_OTHER = "local/other"
 private const val LOCAL_SCORE = "local/score"
 
 /**
@@ -185,10 +183,7 @@ private fun WatchNavHost(
             LocalDecidingScreen(localModel, onNext = { nav.navigate(LOCAL_SERVE) { launchSingleTop = true } })
         }
         composable(LOCAL_SERVE) {
-            LocalServeScreen(localModel, onNext = { nav.navigate(LOCAL_OTHER) { launchSingleTop = true } })
-        }
-        composable(LOCAL_OTHER) {
-            LocalOtherRoute(localModel, nav)
+            LocalServeRoute(localModel, nav)
         }
         composable(LOCAL_SCORE) {
             val ui by localModel.ui.collectAsState()
@@ -221,9 +216,9 @@ private fun LocalEntry(model: LocalMatchModel, nav: NavHostController) {
  * A failed save stays here (the refused haptic says so), and the pick can be tapped again.
  */
 @Composable
-private fun LocalOtherRoute(model: LocalMatchModel, nav: NavHostController) {
+private fun LocalServeRoute(model: LocalMatchModel, nav: NavHostController) {
     var starting by remember { mutableStateOf<Starting?>(null) }
-    LocalOtherServerScreen(model, onNext = { setup ->
+    LocalServeScreen(model, onNext = { setup ->
         if (starting == null) {
             starting = Starting(LocalMatch(setup, emptyList()), model.ui.value.feedbackId)
             model.start(setup)
@@ -235,7 +230,7 @@ private fun LocalOtherRoute(model: LocalMatchModel, nav: NavHostController) {
         val ui = model.ui.first { it.match == start.match || it.feedbackId != start.feedbackId }
         if (ui.match != start.match) {
             starting = null
-        } else if (nav.currentDestination?.route == LOCAL_OTHER) {
+        } else if (nav.currentDestination?.route == LOCAL_SERVE) {
             nav.navigate(LOCAL_SCORE) { popUpTo(LOCAL_DEUCE) { inclusive = true } }
         }
     }

@@ -140,6 +140,9 @@ class WatchAppTest {
         Start(Player(Team.A, 0), 1),
     )
 
+    /** What the setup screens produce when Blue serves first. */
+    private val blueServesSetup = setup.copy(start = Start(Player(Team.A, 1), 1))
+
     private lateinit var nav: NavHostController
     private lateinit var back: OnBackPressedDispatcher
     private lateinit var owner: ViewModelStoreOwner
@@ -371,13 +374,12 @@ class WatchAppTest {
         tap("Golden point")
         tap("One set")
         assertEquals("local/serve", nav.currentDestination?.route)
-        tap("Blue 1")
-        tap("Green 2")
+        tap("Blue")
 
         assertEquals("local/score", nav.currentDestination?.route)
         assertEquals("signin", nav.previousBackStackEntry?.destination?.route) // the setup screens are gone
         compose.onNodeWithContentDescription("Point Blue").assertExists()
-        assertEquals(LocalMatch(setup, emptyList()), store.saved.single())
+        assertEquals(LocalMatch(blueServesSetup, emptyList()), store.saved.single())
     }
 
     @Test
@@ -389,13 +391,12 @@ class WatchAppTest {
         tap("Best of three")
         assertEquals("local/deciding", nav.currentDestination?.route)
         tap("Super tie-break")
-        tap("Green 1")
-        tap("Blue 2")
+        tap("Green")
 
         assertEquals("local/score", nav.currentDestination?.route)
         val expected = LocalSetup(
             SetRules(DeuceRule.ADVANTAGE, SetsFormat.BEST_OF_3, DecidingSet.SUPER_TIE_BREAK),
-            Start(Player(Team.B, 0), 1),
+            Start(Player(Team.B, 1), 1),
         )
         assertEquals(expected, store.saved.single().setup)
     }
@@ -407,11 +408,10 @@ class WatchAppTest {
         tap("Local match")
         tap("Golden point")
         tap("One set")
-        tap("Blue 1")
         val gate = CompletableDeferred<Unit>()
         store.gate = gate
-        tap("Green 2")
-        assertEquals("local/other", nav.currentDestination?.route) // still writing
+        tap("Blue")
+        assertEquals("local/serve", nav.currentDestination?.route) // still writing
 
         compose.runOnUiThread { gate.complete(Unit) }
         compose.waitForIdle()
@@ -426,17 +426,16 @@ class WatchAppTest {
         tap("Local match")
         tap("Golden point")
         tap("One set")
-        tap("Blue 1")
         store.failWrites = true
-        tap("Green 2")
-        assertEquals("local/other", nav.currentDestination?.route)
+        tap("Blue")
+        assertEquals("local/serve", nav.currentDestination?.route)
         compose.onNodeWithText("Not saved").assertIsDisplayed()
 
         store.failWrites = false
-        tap("Green 2")
+        tap("Blue")
         assertEquals("local/score", nav.currentDestination?.route)
         compose.onNodeWithText("Not saved").assertDoesNotExist()
-        assertEquals(LocalMatch(setup, emptyList()), store.saved.single())
+        assertEquals(LocalMatch(blueServesSetup, emptyList()), store.saved.single())
     }
 
     @Test
@@ -474,8 +473,7 @@ class WatchAppTest {
         tap("Local match")
         tap("Golden point")
         tap("One set")
-        tap("Blue 1")
-        tap("Green 2")
+        tap("Blue")
         compose.onNodeWithContentDescription("Point Blue").performClick()
         compose.waitForIdle()
 
