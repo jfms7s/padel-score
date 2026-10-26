@@ -3,6 +3,7 @@
 	place; ←/→ move along the bar. On a phone the bar scrolls sideways on its own.
 -->
 <script lang="ts">
+	import { tick } from 'svelte';
 	import type { DeskTab } from '#lib/desk.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { EventKind } from '#lib/types.ts';
@@ -22,7 +23,39 @@
 	const t = strings.desk.tabs;
 	const links: Partial<Record<DeskTab, HTMLAnchorElement | null>> = {};
 
-	const label = (tab: DeskTab) => (tab === 'kind' ? t.kind[kind] : t[tab]);
+	let narrow = $state(false);
+	let bar: HTMLDivElement | undefined = $state();
+	let more = $state({ start: false, end: false });
+
+	const label = (tab: DeskTab) => (tab === 'kind' ? t.kind[kind] : tab === 'courts' && narrow ? t.courtsShort : t[tab]);
+
+	/** Which sides of the strip have tabs scrolled out of view, for the edge fade. */
+	function measure() {
+		if (!bar) return;
+		more = { start: bar.scrollLeft > 1, end: bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1 };
+	}
+
+	$effect(() => {
+		const query = matchMedia('(max-width: 699px)');
+		const sync = () => {
+			narrow = query.matches;
+			// The labels change width: measure once they are rendered.
+			void tick().then(measure);
+		};
+		sync();
+		query.addEventListener('change', sync);
+		return () => query.removeEventListener('change', sync);
+	});
+
+	// Keep the active tab in view on load and when it changes.
+	$effect(() => {
+		void active;
+		void narrow;
+		void tick().then(() => {
+			links[active]?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+			measure();
+		});
+	});
 
 	function click(e: MouseEvent, tab: DeskTab) {
 		// A new browser tab or window keeps the link's own behaviour.
@@ -40,7 +73,15 @@
 	}
 </script>
 
-<div class="tabs" role="tablist" aria-label={strings.desk.tabsLabel}>
+<div
+	class="tabs"
+	class:more-start={more.start}
+	class:more-end={more.end}
+	role="tablist"
+	aria-label={strings.desk.tabsLabel}
+	bind:this={bar}
+	onscroll={measure}
+>
 	{#each tabs as tab (tab)}
 		<a
 			id="tab-{tab}"
@@ -67,6 +108,16 @@
 		overflow-x: auto;
 		box-shadow: inset 0 -1px 0 var(--line);
 		scrollbar-width: thin;
+	}
+	/* A fade on the side that has more tabs. */
+	.tabs.more-end {
+		mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+	}
+	.tabs.more-start {
+		mask-image: linear-gradient(to right, transparent, #000 28px);
+	}
+	.tabs.more-start.more-end {
+		mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 	}
 	a {
 		flex: none;

@@ -937,6 +937,7 @@ export const strings = {
 			kind: { tournament: 'Bracket', non_stop: 'Standings' },
 			teams: 'Teams',
 			courts: 'Courts & phones',
+			courtsShort: 'Courts',
 			finish: 'Finish'
 		},
 		spectatorLink: 'Spectator link',
