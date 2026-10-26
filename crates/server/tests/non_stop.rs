@@ -510,6 +510,7 @@ async fn start_runs_the_first_slot() {
     assert_eq!(kd["clock"]["round"], 1);
     assert_eq!(kd["clock"]["wave"], 1);
     assert_eq!(kd["clock"]["state"], "running");
+    assert_eq!(kd["clock"]["went"], false);
     assert_eq!(kd["clock"]["duration_ms"], 900_000);
     assert_eq!(kd["clock"]["starts_at_ms"], T + 5_000);
     assert_eq!(kd["clock"]["ends_at_ms"], T + 905_000);
@@ -541,7 +542,8 @@ async fn ready_clock_is_the_lowest_ready_slot() {
     assert_eq!(
         kd["clock"],
         json!({"slot": 1, "round": 1, "wave": 1, "state": "ready", "duration_ms": 900_000,
-               "remaining_ms": 900_000, "starts_at_ms": null, "ends_at_ms": null})
+               "remaining_ms": 900_000, "starts_at_ms": null, "ends_at_ms": null,
+               "went": false})
     );
     clock(&s, &ev, ClockAction::Start, 1, T).await.unwrap();
     clock(&s, &ev, ClockAction::End, 1, T + 10_000)
@@ -886,6 +888,27 @@ async fn court_kind_data_follows_its_match() {
     )
     .await;
     assert_eq!(kd["clock"], Value::Null);
+}
+
+#[tokio::test]
+async fn finished_event_shows_no_clock() {
+    let (s, pool) = setup().await;
+    let (ev, _, courts) = started(&s, timed(), 4, 2).await;
+    clock(&s, &ev, ClockAction::Start, 1, T).await.unwrap();
+    let court = Audience::Court {
+        court_id: courts[0].clone(),
+    };
+    assert_eq!(
+        kind_data(&pool, &ev, court.clone()).await["clock"]["state"],
+        "running"
+    );
+    s.finish_competition(A, &ev.id, None, NOW + 5)
+        .await
+        .unwrap();
+    for audience in [Audience::Coordinator, Audience::Spectator, court] {
+        let kd = kind_data(&pool, &ev, audience).await;
+        assert_eq!(kd["clock"], Value::Null);
+    }
 }
 
 #[tokio::test]

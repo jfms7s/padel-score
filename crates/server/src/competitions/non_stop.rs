@@ -293,9 +293,12 @@ pub async fn kind_data(
                 Some(Some(id)) => Some(id),
                 Some(None) => next_queued_in(conn, &court_id).await?,
             };
+            // A finished event's runner has stopped, so no clock is shown.
             let clock = match match_id {
-                Some(id) => slot_of_match_in(conn, &id).await?.map(|s| s.clock(now_ms)),
-                None => None,
+                Some(id) if ev.status == Status::Running => {
+                    slot_of_match_in(conn, &id).await?.map(|s| s.clock(now_ms))
+                }
+                _ => None,
             };
             let (rounds, waves) = shape_in(conn, &ev.id).await?;
             json!({ "clock": clock, "rounds": rounds, "waves": waves })
@@ -330,7 +333,9 @@ pub async fn kind_data(
                 "settings": settings_of(ev)?,
                 "rounds": slots.iter().map(|s| s.round).max().unwrap_or(0),
                 "waves": slots.iter().map(|s| s.wave).max().unwrap_or(0),
-                "clock": current_clock(&slots).map(|s| s.clock(now_ms)),
+                "clock": current_clock(&slots)
+                    .filter(|_| ev.status == Status::Running)
+                    .map(|s| s.clock(now_ms)),
                 "slots": slot_list,
                 "standings": standings,
             })

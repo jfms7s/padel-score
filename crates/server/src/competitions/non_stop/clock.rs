@@ -60,6 +60,9 @@ pub struct Clock {
     pub starts_at_ms: Option<i64>,
     /// Running only.
     pub ends_at_ms: Option<i64>,
+    /// The first go has happened (practice points are cleared); false for a ready slot and
+    /// for one paused or ended before its first go.
+    pub went: bool,
 }
 
 /// A `non_stop_slots` row.
@@ -73,6 +76,7 @@ pub(crate) struct SlotRow {
     pub remaining_ms: i64,
     pub starts_at_ms: Option<i64>,
     pub ends_at_ms: Option<i64>,
+    pub went: bool,
 }
 
 impl SlotRow {
@@ -94,6 +98,7 @@ impl SlotRow {
             remaining_ms,
             starts_at_ms: self.starts_at_ms,
             ends_at_ms: self.ends_at_ms,
+            went: self.went,
         }
     }
 }
@@ -113,6 +118,7 @@ fn slot_from_row(row: &SqliteRow) -> Result<SlotRow, sqlx::Error> {
         remaining_ms: row.try_get("remaining_ms")?,
         starts_at_ms: row.try_get("starts_at_ms")?,
         ends_at_ms: row.try_get("ends_at_ms")?,
+        went: row.try_get("went")?,
     })
 }
 
@@ -120,7 +126,8 @@ macro_rules! select_slots {
     ($rest:literal) => {
         concat!(
             "SELECT s.slot, s.round, s.wave, s.state, s.duration_ms, s.remaining_ms, \
-             s.starts_at_ms, s.ends_at_ms FROM non_stop_slots s ",
+             s.starts_at_ms, s.ends_at_ms, s.started_at_ms IS NOT NULL AS went \
+             FROM non_stop_slots s ",
             $rest
         )
     };

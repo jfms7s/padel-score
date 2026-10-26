@@ -18,7 +18,7 @@ use padel_score_server::commands::{
     apply_command, record_final, replace_from, view_of,
 };
 use padel_score_server::competitions::non_stop::clock::{COUNT_IN_MS, ClockAction};
-use padel_score_server::competitions::{Kind, NewCompetition};
+use padel_score_server::competitions::{Audience, Kind, NewCompetition, competition_in, kinds};
 use padel_score_server::non_stop_api::{fire_due, go_slot, run_clock};
 use padel_score_server::store::{Store, events_in, match_by_id_in};
 use padel_score_server::{AppState, hub::Subscription};
@@ -650,6 +650,32 @@ async fn undo_of_time_up_is_reasserted() {
             .unwrap();
     assert_eq!(flagged, 0);
     assert_eq!(fire_due(&ev.state, ENDS + 2_000).await, 0);
+}
+
+#[tokio::test]
+async fn clock_went_turns_true_at_the_go() {
+    let ev = running(None).await;
+    let went = |ev: &Ev| {
+        let pool = ev.pool.clone();
+        let (owner, id) = (ev.owner.clone(), ev.id.clone());
+        async move {
+            let mut conn = pool.acquire().await.unwrap();
+            let comp = competition_in(&mut conn, &owner, &id)
+                .await
+                .unwrap()
+                .unwrap();
+            let kd = kinds::kind_data(Kind::NonStop, &mut conn, &comp, Audience::Coordinator)
+                .await
+                .unwrap()
+                .unwrap();
+            kd["clock"]["went"].clone()
+        }
+    };
+    assert_eq!(went(&ev).await, json!(false));
+    ev.clock(ClockAction::Start, 1, T).await;
+    assert_eq!(went(&ev).await, json!(false));
+    fire_due(&ev.state, GO).await;
+    assert_eq!(went(&ev).await, json!(true));
 }
 
 #[tokio::test]
