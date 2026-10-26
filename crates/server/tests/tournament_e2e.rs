@@ -270,6 +270,8 @@ impl Ctx {
             self.advance_all().await;
             let d = self.detail().await;
             let final_match = node_at(&d, 1, 2, 0)["match_id"].as_str().map(str::to_owned);
+            // Finished matches keep their `court_id` (contract: tests/courts.rs
+            // `advanced_past_finished_match_keeps_its_court`), so "on a court" includes done ones.
             if let Some(f) = final_match.filter(|f| match_in(&d, f)["court_id"] != Value::Null) {
                 for m in d["matches"].as_array().unwrap() {
                     assert!(
