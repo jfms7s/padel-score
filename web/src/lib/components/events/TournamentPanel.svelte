@@ -80,7 +80,7 @@
 
 		{#if coordinator}
 			{#each held as node (`${node.place_from}-${node.size}-${node.idx}`)}
-				{@const text = heldText(data, node, status === 'finished')}
+				{@const text = heldText(data, node, status === 'finished', event.matches)}
 				<div class="held" role="group" aria-label={node.label}>
 					<p class="warn">{text.warning}</p>
 					{#if text.finishedNote}<p class="hint">{text.finishedNote}</p>{/if}
@@ -191,6 +191,10 @@
 		gap: 0 28px;
 		min-width: calc(var(--cols) * 190px + (var(--cols) - 1) * 28px);
 	}
+	.round {
+		display: flex;
+		flex-direction: column;
+	}
 	.round h4 {
 		margin: 0 0 10px;
 		font-size: 13px;
@@ -201,7 +205,7 @@
 		display: flex;
 		flex-direction: column;
 		justify-content: space-around;
-		height: calc(100% - 28px);
+		flex: 1;
 		gap: 14px;
 	}
 	.held {

@@ -271,11 +271,27 @@ describe('heldText', () => {
 	it('held_warning_text', () => {
 		const d = tournament(8, true);
 		const n = held(['Semi-final 1', 'Final']);
-		const h = heldText(d, n, false);
+		d.nodes.find((x) => x.label === 'Semi-final 1')!.match_id = 'm-sf1';
+		const h = heldText(d, n, false, [{ id: 'm-sf1', state: 'live' }]);
 		expect(h.warning).toBe('Quarter-final 1’s result changed after Semi-final 1 started.');
 		expect(h.replay).toBe('Replay 2 matches: Semi-final 1, Final. Their scores are discarded.');
 		expect(h.keep).toBe('The later matches stand. The new score counts only for Quarter-final 1.');
 		expect(h.finishedNote).toBeNull();
+	});
+
+	it('held_warning_names_the_started_match', () => {
+		const d = tournament(8, true);
+		const n = d.nodes.find((x) => x.label === 'Quarter-final 1')!;
+		n.held = true;
+		n.replay_discards = ['Placement semi 1 (5th–8th)', 'Semi-final 1', 'Final'];
+		d.nodes.find((x) => x.label === 'Semi-final 1')!.match_id = 'm2';
+		d.nodes.find((x) => x.label === 'Placement semi 1 (5th–8th)')!.match_id = 'm1';
+		const matches = [
+			{ id: 'm1', state: 'waiting' as const },
+			{ id: 'm2', state: 'live' as const }
+		];
+		expect(heldText(d, n, false, matches).warning).toBe('Quarter-final 1’s result changed after Semi-final 1 started.');
+		expect(heldText(d, n, false, [{ id: 'm1', state: 'waiting' }]).warning).toContain('a later match');
 	});
 
 	it('held_text_for_one_match_and_none', () => {
