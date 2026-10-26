@@ -83,7 +83,7 @@
 					</div>
 				{/each}
 				{#if !model.finished}
-					<div class="p num">
+					<div class="p num" class:clear={ball?.team === t && ball.side === 'centre'}>
 						{team.points}
 						{#if ball && ball.team === t}<span class="ball {ball.side}" aria-hidden="true"></span>{/if}
 					</div>
@@ -221,41 +221,43 @@
 		position: relative;
 	}
 	/*
-	 * The serve ball, as on the court: on the corner of the points box, half over its edge so it
-	 * stays clear of the figures. Team A's box is the top one, so its ball sits on the top edge;
-	 * team B's on the bottom edge. Right or left as served, the middle when the receiver picks.
+	 * The serve ball, as on the court, inside a corner of the points box, clear of the figures.
+	 * Team A's box is the top one, so its ball sits in a top corner; team B's in a bottom one.
+	 * Right or left as served; the middle when the receiver picks, where the box makes room for
+	 * it above and below so the figures stay put.
 	 */
+	.p {
+		--ball-size: clamp(20px, 4.4vh, 36px);
+		--ball-inset: 7px;
+	}
+	.p.clear {
+		padding-block: calc(var(--ball-size) + 2 * var(--ball-inset));
+	}
 	.ball {
 		position: absolute;
-		width: clamp(20px, 4.4vh, 36px);
-		height: clamp(20px, 4.4vh, 36px);
+		width: var(--ball-size);
+		height: var(--ball-size);
 		border-radius: 50%;
 		background: var(--ball);
 		box-shadow:
 			inset -3px -3px 0 rgba(0, 0, 0, 0.12),
 			0 0 0 3px rgba(255, 255, 255, 0.35);
-		--x: 0;
-		--y: -30%;
-		transform: translate(var(--x), var(--y));
 	}
 	.a .ball {
-		top: 0;
+		top: var(--ball-inset);
 	}
 	.b .ball {
-		bottom: 0;
-		--y: 30%;
+		bottom: var(--ball-inset);
 	}
 	.ball.right {
-		right: 0;
-		--x: 30%;
+		right: var(--ball-inset);
 	}
 	.ball.left {
-		left: 0;
-		--x: -30%;
+		left: var(--ball-inset);
 	}
 	.ball.centre {
 		left: 50%;
-		--x: -50%;
+		transform: translateX(-50%);
 	}
 	.a .p {
 		background: var(--a);
