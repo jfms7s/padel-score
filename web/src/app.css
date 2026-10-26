@@ -35,6 +35,9 @@
 	--a-soft: #e3ecfb;
 	--b: #0c8a5e;
 	--b-soft: #ddf2ea;
+	/* The court tile's halves, which carry white text: --a and --b darkened to 4.5:1 or more. */
+	--a-court: #1c5fd0;
+	--b-court: #0c845a;
 	--ball: #d9ea2a;
 	--warn: #b42318;
 	--page: #e7ecef;
@@ -54,6 +57,8 @@
 		--a-soft: #1a3358;
 		--b: #1fa474;
 		--b-soft: #123c30;
+		--a-court: #3871d7;
+		--b-court: #19835d;
 		--page: #0a1520;
 		color-scheme: dark;
 	}
@@ -68,6 +73,8 @@
 	--a-soft: #1a3358;
 	--b: #1fa474;
 	--b-soft: #123c30;
+	--a-court: #3871d7;
+	--b-court: #19835d;
 	--page: #0a1520;
 	color-scheme: dark;
 }
@@ -144,8 +151,9 @@ button {
 }
 
 /* The account pages (sign-in, setup, invite, reset, account, admin, link): one column at phone
-   width, in the new-match form's style. */
-.acct {
+   width, in the new-match form's style. No specificity, so a `.page-*` width wins wherever
+   it is declared. */
+:where(.acct) {
 	max-width: 28rem;
 	margin: 0 auto;
 	padding: 8px 16px 48px;
@@ -285,4 +293,50 @@ button {
 	background: transparent;
 	border: 1px solid var(--warn);
 	color: var(--warn);
+}
+
+/* Page widths. Narrow is the phone column (forms, account pages); wide fills a desktop up to a
+   cap. Gutters grow at tablet width. */
+.page-narrow,
+.page-wide,
+.page-wide-desk {
+	margin: 0 auto;
+	padding-left: 16px;
+	padding-right: 16px;
+}
+.page-narrow {
+	max-width: 28rem;
+}
+.page-wide {
+	max-width: 1440px;
+}
+@media (min-width: 700px) {
+	.page-narrow,
+	.page-wide,
+	.page-wide-desk {
+		padding-left: 24px;
+		padding-right: 24px;
+	}
+}
+
+/* Narrow like a phone column below 1100px, wide from there (the desktop layouts). */
+.page-wide-desk {
+	max-width: 28rem;
+}
+@media (min-width: 1100px) {
+	.page-wide-desk {
+		max-width: 1440px;
+	}
+}
+
+/* Cards that fill the row: one column on a phone, as many as fit of --min from tablet width. */
+.grid-auto {
+	display: grid;
+	gap: 8px;
+	grid-template-columns: 1fr;
+}
+@media (min-width: 700px) {
+	.grid-auto {
+		grid-template-columns: repeat(auto-fill, minmax(var(--min, 320px), 1fr));
+	}
 }

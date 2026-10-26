@@ -71,7 +71,7 @@
 		});
 </script>
 
-<main class="acct">
+<main class="acct page-wide-desk">
 	<h1>{a.title}</h1>
 	{#if phase === 'loading'}
 		<p class="hint">{t.loading}</p>
@@ -83,7 +83,7 @@
 			<LinkCode url={reset.url} title={a.resetTitle(reset.name)} hint={a.resetHint} />
 		{/if}
 		{#if phase === 'ready'}
-			<ul class="list" aria-label={a.title}>
+			<ul class="list grid-auto" style="--min: 360px" aria-label={a.title}>
 				{#each users as user (user.id)}
 					{@const self = user.id === me?.id}
 					<li class="row">

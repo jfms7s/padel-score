@@ -120,4 +120,27 @@
 		color: var(--muted);
 		font-size: 14px;
 	}
+	/* A landscape phone has little height: one compact row instead of a stack. */
+	@media (orientation: landscape) and (max-height: 500px) {
+		.clock {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			flex-wrap: nowrap;
+			gap: 4px 14px;
+			max-height: 64px;
+			overflow: hidden;
+			padding: 4px 12px;
+		}
+		.big {
+			font-size: clamp(28px, 9vh, 44px);
+			line-height: 1;
+		}
+		.line,
+		.status,
+		.note {
+			font-size: 14px;
+			line-height: 1.2;
+		}
+	}
 </style>

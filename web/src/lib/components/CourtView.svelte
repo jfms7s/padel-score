@@ -155,7 +155,7 @@
 		top: clamp(10px, 3.6vh, 24px);
 		left: clamp(14px, 2.2vw, 28px);
 		max-width: 62%;
-		font-size: clamp(15px, 2.2vw, 26px);
+		font-size: clamp(16px, 2.4vw, 30px);
 		font-weight: 600;
 		opacity: 0.92;
 		text-align: left;
@@ -179,7 +179,7 @@
 		display: flex;
 		align-items: baseline;
 		gap: 0.4em;
-		font-size: clamp(14px, 2vw, 22px);
+		font-size: clamp(16px, 2.6vw, 34px);
 		white-space: nowrap;
 	}
 	.b .tally {
@@ -189,7 +189,7 @@
 	.tally b {
 		font-variation-settings: 'wdth' 62;
 		font-weight: 800;
-		font-size: 1.75em;
+		font-size: 2em;
 		line-height: 1;
 		margin-right: 0.5em;
 	}

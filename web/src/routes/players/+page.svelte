@@ -147,7 +147,7 @@
 	{#if player.pending_claims > 0}<span class="badge">{l.claimBadge(player.pending_claims)}</span>{/if}
 {/snippet}
 
-<main class="acct">
+<main class="acct page-wide">
 	<a class="back" href="/">{t.back}</a>
 	<h1>{t.title}</h1>
 	{#if loadFailure}
@@ -218,7 +218,7 @@
 		{#if active.length === 0}
 			<p class="hint">{t.none}</p>
 		{:else}
-			<ul class="list" aria-label={t.title}>
+			<ul class="list grid-auto" style="--min: 320px" aria-label={t.title}>
 				{#each active as player (player.id)}
 					<li class="row">
 						{#if editing === player.id}
@@ -245,14 +245,14 @@
 							</a>
 							<div class="actions">
 								<button
-									class="secondary"
+									class="secondary small"
 									type="button"
 									disabled={busy}
 									aria-label={t.renameLabel(player.name)}
 									onclick={() => startRename(player)}>{t.rename}</button
 								>
 								<button
-									class="secondary"
+									class="secondary small"
 									type="button"
 									disabled={busy}
 									aria-label={t.archiveLabel(player.name)}
@@ -268,7 +268,7 @@
 		{#if archived.length > 0}
 			<h2>{t.archived}</h2>
 			<p class="hint">{t.archivedHint}</p>
-			<ul class="list" aria-label={t.archived}>
+			<ul class="list grid-auto" style="--min: 320px" aria-label={t.archived}>
 				{#each archived as player (player.id)}
 					<li class="row">
 						<a class="what" href="/players/{encodeURIComponent(player.id)}" aria-label={t.openLabel(player.name)}>
@@ -277,7 +277,7 @@
 							{@render linkInfo(player)}
 						</a>
 						<button
-							class="secondary"
+							class="secondary small"
 							type="button"
 							disabled={busy}
 							aria-label={t.restoreLabel(player.name)}
@@ -301,13 +301,24 @@
 	}
 	.add {
 		flex-direction: row;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		gap: 8px;
 		margin-bottom: 12px;
 	}
 	.add input {
-		flex: 1 1 12rem;
+		flex: 1 1 0;
+		min-width: 0;
 		width: auto;
+	}
+	.actions .small {
+		min-height: var(--tap);
+		padding: 0 14px;
+		font-size: 14px;
+	}
+	@media (min-width: 700px) {
+		.actions .small {
+			min-height: 36px;
+		}
 	}
 	.add button {
 		flex: 0 0 auto;

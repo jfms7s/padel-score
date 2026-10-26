@@ -12,6 +12,7 @@ import {
 	eventViewStreamUrl,
 	getCourt,
 	groupsFromTies,
+	homeEvents,
 	invalidScoreKey,
 	invalidScoreText,
 	isEventDetail,
@@ -24,6 +25,7 @@ import {
 	parseTypedScore,
 	placesFromOrder,
 	postEventResult,
+	resultRefusalText,
 	rulesText,
 	teamText,
 	unfinishedCount,
@@ -31,7 +33,7 @@ import {
 } from './events';
 import { ApiError, setUnauthorizedHandler } from './api';
 import { strings } from './strings';
-import type { CourtOut, EventMatch, EventTeam, Format, InvalidScore, Score } from './types';
+import type { CourtOut, EventSummary, EventMatch, EventTeam, Format, InvalidScore, Score } from './types';
 
 const ONE_SET: Format = { sets: { deuce: 'advantage', sets: 'one', deciding: 'full_set' } };
 const BEST_OF_3: Format = { sets: { deuce: 'golden_point', sets: 'best_of_3', deciding: 'full_set' } };
@@ -341,6 +343,19 @@ describe('coordinator screens', () => {
 		expect(eventMessage(new Error('boom'))).toBe(strings.networkError);
 	});
 
+	it('result_refusal_text', () => {
+		const reason = { impossible_set: { index: 0 } } as const;
+		expect(resultRefusalText(new ApiError(422, 'invalid_score', 'x', false, { reason }))).toBe(
+			invalidScoreText(reason)
+		);
+		expect(resultRefusalText(new ApiError(409, 'conflict', 'x'))).toBe(strings.events.sheet.conflict);
+		expect(resultRefusalText(new ApiError(409, 'locked', 'x'))).toBe(strings.events.sheet.locked);
+		expect(resultRefusalText(new ApiError(409, 'no_courts', 'x'))).toBe(
+			eventMessage(new ApiError(409, 'no_courts', 'x'))
+		);
+		expect(resultRefusalText(new Error('boom'))).toBe(strings.networkError);
+	});
+
 	it('finish_warns_about_unfinished_matches', () => {
 		const done = { ...match('m3', 't1', 't3'), state: 'finished' as const };
 		const live = { ...match('m2', 't2', 't3'), state: 'live' as const };
@@ -378,5 +393,40 @@ describe('coordinator screens', () => {
 		expect(isEventDetail({ ...detail, courts: null })).toBe(false);
 		expect(isEventDetail(null)).toBe(false);
 		expect(isEventDetail({ ...detail, event: 'x' })).toBe(false);
+	});
+});
+
+describe('homeEvents', () => {
+	const ev = (id: string, status: EventSummary['status'], created_at: number): EventSummary =>
+		({ id, status, created_at }) as EventSummary;
+	const ids = (list: EventSummary[]) => list.map((e) => e.id);
+
+	it('lists running before setup', () => {
+		expect(ids(homeEvents([ev('s', 'setup', 9), ev('r', 'running', 1)]))).toEqual(['r', 's']);
+	});
+
+	it('puts the newest first within each status', () => {
+		const list = [ev('r1', 'running', 1), ev('s2', 'setup', 5), ev('r2', 'running', 3), ev('s1', 'setup', 2)];
+		expect(ids(homeEvents(list))).toEqual(['r2', 'r1', 's2', 's1']);
+	});
+
+	it('leaves finished events out', () => {
+		expect(ids(homeEvents([ev('f', 'finished', 9), ev('s', 'setup', 1)]))).toEqual(['s']);
+	});
+
+	it('shows at most five', () => {
+		const list = Array.from({ length: 8 }, (_, i) => ev(`e${i}`, 'running', i));
+		expect(ids(homeEvents(list))).toEqual(['e7', 'e6', 'e5', 'e4', 'e3']);
+	});
+
+	it('is empty for no events', () => {
+		expect(homeEvents([])).toEqual([]);
+	});
+
+	it('does not change its input', () => {
+		const list = [ev('s', 'setup', 1), ev('f', 'finished', 2), ev('r', 'running', 3)];
+		const before = ids(list);
+		homeEvents(list);
+		expect(ids(list)).toEqual(before);
 	});
 });

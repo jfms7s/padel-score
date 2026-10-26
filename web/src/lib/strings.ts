@@ -605,8 +605,6 @@ export const strings = {
 		moveLabel: (match: string) => `Court for ${match}`,
 		matchState: { waiting: 'Waiting', live: 'Live', finished: 'Finished' },
 		enteredByYou: 'Entered by you',
-		enterResult: 'Enter result',
-		enterResultLabel: (match: string) => `Enter the result of ${match}`,
 		view: 'View',
 		viewLabel: (match: string) => `View ${match}`,
 		liveScore: (games: string, point: string) => `${games}, ${point}`,
@@ -894,7 +892,56 @@ export const strings = {
 	// API failures.
 	signedOutPlayers: "You've been signed out. Sign in again to use your players.",
 	networkError: "Can't reach the server.",
-	serverError: (status: number) => `The server answered ${status}.`
+	serverError: (status: number) => `The server answered ${status}.`,
+
+	// App navigation rail.
+	nav: {
+		label: 'Main',
+		home: 'Home',
+		events: 'Events',
+		players: 'Players',
+		history: 'History',
+		results: 'My results',
+		account: 'Account'
+	},
+
+	// The coordinator desk and the spectator page: the court tile and the match list.
+	desk: {
+		live: 'Live',
+		finished: 'Finished',
+		won: 'Won',
+		ready: 'Ready',
+		idle: 'No match on this court',
+		next: (label: string) => `Next: ${label}`,
+		nextMatch: 'Next match',
+		watch: 'Watch',
+		phones: (n: number) => (n === 1 ? '1 phone' : `${n} phones`),
+		games: 'Games',
+		sets: 'Sets',
+		serving: (names: string) => `${names} serving`,
+		// The match list.
+		onCourt: 'On court',
+		waiting: 'Waiting',
+		finishedGroup: 'Finished',
+		typeResult: (label: string) => `Result for ${label}`,
+		resultPlaceholder: '6-3 4-6 10-7',
+		keys: { save: 'save, next', cancel: 'cancel', move: 'move' },
+		nextFree: 'Next free court',
+		// The coordinator desk's tabs and header.
+		tabsLabel: 'Event sections',
+		tabs: {
+			live: 'Live',
+			matches: 'Matches',
+			kind: { tournament: 'Bracket', non_stop: 'Standings' },
+			teams: 'Teams',
+			courts: 'Courts & phones',
+			courtsShort: 'Courts',
+			finish: 'Finish'
+		},
+		spectatorLink: 'Spectator link',
+		freeCourt: (name: string) => `${name} is free`,
+		upNext: 'Up next'
+	}
 } as const;
 
 /** 1st, 2nd, 3rd, 4th, 11th, 21st. */

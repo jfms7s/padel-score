@@ -1,7 +1,8 @@
 <!--
 	Owned by phase 8 (the non-stop). The big countdown, the round it belongs to and (for the
 	coordinator) the one button that fits. The count-in shows its digit while it runs. No sound
-	here: the horn is the court phone's.
+	here: the horn is the court phone's. `strip` lays it out as one row (the coordinator desk's
+	header, on every tab): round, time, state, then the buttons.
 -->
 <script lang="ts">
 	import { ApiError } from '#lib/api.ts';
@@ -25,8 +26,16 @@
 		clock,
 		rounds,
 		waves,
-		controls
-	}: { eventId: string; clock: Clock | null; rounds: number; waves: number; controls: boolean } = $props();
+		controls,
+		variant = 'full'
+	}: {
+		eventId: string;
+		clock: Clock | null;
+		rounds: number;
+		waves: number;
+		controls: boolean;
+		variant?: 'full' | 'strip';
+	} = $props();
 
 	let now = $state(serverClock().now());
 	let busy = $state(false);
@@ -74,7 +83,7 @@
 </script>
 
 {#if clock !== null}
-	<section class="clock" aria-label={t.roundOf(clock.round, rounds)}>
+	<section class="clock" class:strip={variant === 'strip'} aria-label={t.roundOf(clock.round, rounds)}>
 		<p class="round">
 			{t.roundWave(clock.round, rounds, clock.wave, waves)}
 		</p>
@@ -176,5 +185,33 @@
 	}
 	.error {
 		margin-top: 12px;
+	}
+	/* The strip: the buttons go to their own line when the row is full. */
+	.strip {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 4px 16px;
+		padding: 10px 16px;
+		text-align: left;
+	}
+	.strip .time,
+	.strip .digit {
+		font-size: 46px;
+	}
+	.strip > .actions {
+		flex: 1 1 14rem;
+		justify-content: flex-end;
+		margin: 0;
+	}
+	.strip .actions button {
+		flex: none;
+		padding: 0 16px;
+	}
+	.strip > .confirm,
+	.strip > .hint,
+	.strip > .error {
+		flex-basis: 100%;
+		margin: 0;
 	}
 </style>

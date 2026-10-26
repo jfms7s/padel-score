@@ -168,7 +168,7 @@
 	}
 </script>
 
-<main class="acct">
+<main class="acct page-wide-desk">
 	<a class="back" href="/players">{t.backToPlayers}</a>
 	{#if loadFailure}
 		<h1>{strings.players.title}</h1>
@@ -178,6 +178,8 @@
 		{#if player.archived}<p class="hint">{t.archived}</p>{/if}
 
 		{@const label = linkLabel(player)}
+		<div class="cols">
+		<div class="side">
 		<section class="link" aria-label={l.linkToAccount}>
 			{#if label}
 				<p class="label"><strong>{label}</strong></p>
@@ -243,7 +245,9 @@
 			</ul>
 		{/if}
 
-		<h2>{t.matches}</h2>
+		</div>
+		<div class="main">
+		<h2 class="first">{t.matches}</h2>
 		{#if items.length === 0}
 			<p class="hint">{t.noMatches}</p>
 		{:else}
@@ -284,6 +288,8 @@
 				<p class="hint">{strings.auth.loading}</p>
 			{/if}
 		{/if}
+		</div>
+		</div>
 	{:else}
 		<p class="hint">{strings.auth.loading}</p>
 	{/if}
@@ -332,6 +338,17 @@
 		font-variation-settings: 'wdth' 75;
 		font-variant-numeric: tabular-nums;
 		line-height: 1;
+	}
+	@media (min-width: 1100px) {
+		.cols {
+			display: grid;
+			grid-template-columns: 22rem minmax(0, 1fr);
+			gap: 32px;
+			align-items: start;
+		}
+		.main .first {
+			margin-top: 0;
+		}
 	}
 	.more {
 		width: 100%;

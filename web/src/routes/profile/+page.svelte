@@ -159,7 +159,7 @@
 	}
 </script>
 
-<main class="acct">
+<main class="acct page-wide-desk">
 	<a class="back" href="/">{t.back}</a>
 	<h1>{t.title}</h1>
 	{#if loadFailure}
@@ -170,112 +170,117 @@
 			<p class="hint">{t.empty}</p>
 		{/if}
 
-		{#if results}
-			<RecordPlacings record={results.record} placings={results.placings} />
-			{#if items.length > 0}
-				<ul class="list matches" aria-label={t.title}>
-					{#each items as entry (entry.match_id)}
-						<LinkedResultRow {entry} />
-					{/each}
-				</ul>
-				{#if moreFailure}<p class="error more-error" role="alert">{moreFailure}</p>{/if}
-				{#if next}
-					<button class="secondary more" type="button" disabled={busy} onclick={more}>{t.loadMore}</button>
+		<div class="cols">
+			{#if results}
+				<div class="top"><RecordPlacings record={results.record} placings={results.placings} /></div>
+				{#if items.length > 0}
+					<div class="right">
+						<ul class="list matches" aria-label={t.title}>
+							{#each items as entry (entry.match_id)}
+								<LinkedResultRow {entry} />
+							{/each}
+						</ul>
+						{#if moreFailure}<p class="error more-error" role="alert">{moreFailure}</p>{/if}
+						{#if next}
+							<button class="secondary more" type="button" disabled={busy} onclick={more}>{t.loadMore}</button>
+						{/if}
+					</div>
 				{/if}
 			{/if}
-		{/if}
+			<div class="rest">
+				{#if actionFailure}<p class="error" role="alert">{actionFailure}</p>{/if}
 
-		{#if actionFailure}<p class="error" role="alert">{actionFailure}</p>{/if}
+				{#if links.length > 0}
+					<h2>{t.linkedEntries}</h2>
+					<ul class="list" aria-label={t.linkedEntries}>
+						{#each links as link (link.player_id)}
+							<li class="row">
+								<span class="what">{t.linkedEntry(link.name, link.coordinator_name)}</span>
+								{#if confirmingUnlink === link.player_id}
+									<p class="confirm">{t.unlinkConfirm(link.name)}</p>
+									<div class="actions">
+										<button class="danger" type="button" disabled={busy} onclick={() => unlinkEntry(link.player_id)}
+											>{strings.linking.unlinkYes}</button
+										>
+										<button class="secondary" type="button" onclick={() => (confirmingUnlink = null)}
+											>{strings.linking.keep}</button
+										>
+									</div>
+								{:else}
+									<button
+										class="secondary"
+										type="button"
+										disabled={busy}
+										aria-label={t.unlinkLabel(link.name, link.coordinator_name)}
+										onclick={() => (confirmingUnlink = link.player_id)}>{strings.linking.unlink}</button
+									>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
 
-		{#if links.length > 0}
-			<h2>{t.linkedEntries}</h2>
-			<ul class="list" aria-label={t.linkedEntries}>
-				{#each links as link (link.player_id)}
-					<li class="row">
-						<span class="what">{t.linkedEntry(link.name, link.coordinator_name)}</span>
-						{#if confirmingUnlink === link.player_id}
-							<p class="confirm">{t.unlinkConfirm(link.name)}</p>
+				{#if claims.length > 0}
+					<h2>{t.claimsTitle}</h2>
+					<ul class="list" aria-label={t.claimsTitle}>
+						{#each claims as claim (claim.id)}
+							<li class="row">
+								<span class="what">
+									<strong>{t.claimLine(claim.preview.name, claim.preview.coordinator_name)}</strong>
+									<span class="hint">{t.claimStatus[claim.status]}</span>
+								</span>
+								{#if claim.status === 'pending'}
+									<button
+										class="secondary"
+										type="button"
+										disabled={busy}
+										aria-label={t.withdrawLabel(claim.preview.name)}
+										onclick={() => withdraw(claim.id)}>{t.withdraw}</button
+									>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+
+				{#if privacy}
+					<h2>{t.privacyTitle}</h2>
+					<fieldset class="privacy" disabled={busy}>
+						<legend class="visually-hidden">{t.privacyTitle}</legend>
+						{#each VISIBILITIES as v (v)}
+							<label class="option">
+								<input
+									type="radio"
+									name="visibility"
+									value={v}
+									bind:group={picked}
+									onchange={() => choose(v)}
+								/>
+								<span class="what"
+									><strong>{t.privacyOptions[v].label}</strong><span class="hint">{t.privacyOptions[v].hint}</span></span
+								>
+							</label>
+						{/each}
+					</fieldset>
+					{#if privacyFailure}<p class="error" role="alert">{privacyFailure}</p>{/if}
+					{#if privacyDone}<p class="ok" role="status">{t.privacySaved}</p>{/if}
+					{#if privacy.visibility === 'public' && privacy.profile_url}
+						<LinkCode url={origin + privacy.profile_url} title={t.profileLink} hint={t.profileLinkHint} />
+						{#if confirmingRotate}
+							<p class="confirm">{t.newLinkConfirm}</p>
 							<div class="actions">
-								<button class="danger" type="button" disabled={busy} onclick={() => unlinkEntry(link.player_id)}
-									>{strings.linking.unlinkYes}</button
-								>
-								<button class="secondary" type="button" onclick={() => (confirmingUnlink = null)}
-									>{strings.linking.keep}</button
-								>
+								<button class="danger" type="button" disabled={busy} onclick={rotate}>{t.newLinkYes}</button>
+								<button class="secondary" type="button" onclick={() => (confirmingRotate = false)}>{t.keepLink}</button>
 							</div>
 						{:else}
-							<button
-								class="secondary"
-								type="button"
-								disabled={busy}
-								aria-label={t.unlinkLabel(link.name, link.coordinator_name)}
-								onclick={() => (confirmingUnlink = link.player_id)}>{strings.linking.unlink}</button
+							<button class="secondary rotate" type="button" disabled={busy} onclick={() => (confirmingRotate = true)}
+								>{t.newLink}</button
 							>
 						{/if}
-					</li>
-				{/each}
-			</ul>
-		{/if}
-
-		{#if claims.length > 0}
-			<h2>{t.claimsTitle}</h2>
-			<ul class="list" aria-label={t.claimsTitle}>
-				{#each claims as claim (claim.id)}
-					<li class="row">
-						<span class="what">
-							<strong>{t.claimLine(claim.preview.name, claim.preview.coordinator_name)}</strong>
-							<span class="hint">{t.claimStatus[claim.status]}</span>
-						</span>
-						{#if claim.status === 'pending'}
-							<button
-								class="secondary"
-								type="button"
-								disabled={busy}
-								aria-label={t.withdrawLabel(claim.preview.name)}
-								onclick={() => withdraw(claim.id)}>{t.withdraw}</button
-							>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		{/if}
-
-		{#if privacy}
-			<h2>{t.privacyTitle}</h2>
-			<fieldset class="privacy" disabled={busy}>
-				<legend class="visually-hidden">{t.privacyTitle}</legend>
-				{#each VISIBILITIES as v (v)}
-					<label class="option">
-						<input
-							type="radio"
-							name="visibility"
-							value={v}
-							bind:group={picked}
-							onchange={() => choose(v)}
-						/>
-						<span class="what"
-							><strong>{t.privacyOptions[v].label}</strong><span class="hint">{t.privacyOptions[v].hint}</span></span
-						>
-					</label>
-				{/each}
-			</fieldset>
-			{#if privacyFailure}<p class="error" role="alert">{privacyFailure}</p>{/if}
-			{#if privacyDone}<p class="ok" role="status">{t.privacySaved}</p>{/if}
-			{#if privacy.visibility === 'public' && privacy.profile_url}
-				<LinkCode url={origin + privacy.profile_url} title={t.profileLink} hint={t.profileLinkHint} />
-				{#if confirmingRotate}
-					<p class="confirm">{t.newLinkConfirm}</p>
-					<div class="actions">
-						<button class="danger" type="button" disabled={busy} onclick={rotate}>{t.newLinkYes}</button>
-						<button class="secondary" type="button" onclick={() => (confirmingRotate = false)}>{t.keepLink}</button>
-					</div>
-				{:else}
-					<button class="secondary rotate" type="button" disabled={busy} onclick={() => (confirmingRotate = true)}
-						>{t.newLink}</button
-					>
+					{/if}
 				{/if}
-			{/if}
-		{/if}
+			</div>
+		</div>
 	{:else if !loadFailure}
 		<p class="hint">{strings.auth.loading}</p>
 	{/if}
@@ -290,6 +295,32 @@
 	}
 	.matches {
 		margin-top: 12px;
+	}
+	/* A phone reads record, matches, then the account's links. From 1100px the record and the
+	   links share a left column and the matches fill the right one, in the same DOM order. */
+	@media (min-width: 1100px) {
+		.cols {
+			display: grid;
+			grid-template-columns: 22rem minmax(0, 1fr);
+			grid-template-rows: auto 1fr;
+			column-gap: 32px;
+			align-items: start;
+		}
+		.top {
+			grid-column: 1;
+			grid-row: 1;
+		}
+		.right {
+			grid-column: 2;
+			grid-row: 1 / span 2;
+		}
+		.rest {
+			grid-column: 1;
+			grid-row: 2;
+		}
+		.right .matches {
+			margin-top: 0;
+		}
 	}
 	.more,
 	.rotate {

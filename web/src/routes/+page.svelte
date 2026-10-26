@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { authMessage, listMyMatches } from '#lib/auth.ts';
+	import { homeEvents, listEvents } from '#lib/events.ts';
 	import { claimBadgeCount } from '#lib/linking.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { session } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
 	import { listRecent, scorerPath, type RecentMatch } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
-	import type { MyMatch } from '#lib/types.ts';
+	import type { EventSummary, MyMatch } from '#lib/types.ts';
 
 	let recent = $state<RecentMatch[]>([]);
 	$effect(() => {
@@ -49,11 +50,29 @@
 		};
 	});
 
+	// The wide layout's Events list; best effort, and hidden below 1100px.
+	let events = $state<EventSummary[]>([]);
+	$effect(() => {
+		if (!signedIn) return;
+		let live = true;
+		listEvents().then(
+			(list) => {
+				if (live) events = homeEvents(list);
+			},
+			() => {}
+		);
+		return () => {
+			live = false;
+		};
+	});
+
 	/** Only a session gets the tokens; without them there is no page to open. */
 	const openable = (m: MyMatch): m is MyMatch & { scorer_token: string } => typeof m.scorer_token === 'string';
 </script>
 
-<main>
+<main class:signed={signedIn} class:page-wide-desk={signedIn} class:page-narrow={!signedIn}>
+	<div class="cols">
+	<div class="col">
 	<h1>{strings.appName}</h1>
 	<p class="intro">{strings.homeIntro}</p>
 	<a class="primary" href="/new">{strings.newMatch}</a>
@@ -90,6 +109,27 @@
 		{/if}
 	{/if}
 
+	</div>
+	<div class="col">
+	{#if signedIn}
+		<section class="events">
+			<h2>{strings.nav.events}</h2>
+			{#if events.length === 0}
+				<p class="hint">{strings.events.none}</p>
+			{:else}
+				<ul aria-label={strings.nav.events}>
+					{#each events as ev (ev.id)}
+						<li>
+							<a href="/events/{encodeURIComponent(ev.id)}">
+								<span class="label">{ev.name}</span>
+								<span class="chip" class:run={ev.status === 'running'}>{strings.events.status[ev.status]}</span>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+	{/if}
 	<h2>{strings.recentMatches}</h2>
 	{#if recent.length === 0}
 		<p class="hint">{strings.noRecent}</p>
@@ -107,13 +147,14 @@
 			{/each}
 		</ul>
 	{/if}
+	</div>
+	</div>
 </main>
 
 <style>
 	main {
-		max-width: 28rem;
-		margin: 0 auto;
-		padding: 16px 16px 48px;
+		padding-top: 16px;
+		padding-bottom: 48px;
 	}
 	h1 {
 		margin: 0 0 8px;
@@ -169,6 +210,38 @@
 	}
 	.links .wide {
 		grid-column: 1 / -1;
+	}
+	.chip {
+		flex: none;
+		padding: 0 8px;
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		font-size: 12px;
+		font-weight: 650;
+		line-height: 22px;
+	}
+	.chip.run {
+		background: var(--a-soft);
+	}
+	.events {
+		display: none;
+	}
+	@media (min-width: 1100px) {
+		main.signed .cols {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 0 48px;
+			align-items: start;
+		}
+		main.signed .links {
+			display: none;
+		}
+		main.signed .events {
+			display: block;
+		}
+		main.signed .events h2 {
+			margin-top: 0;
+		}
 	}
 	.badge {
 		margin-left: 8px;

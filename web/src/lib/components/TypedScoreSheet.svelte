@@ -3,15 +3,15 @@
 	engine's verdict in words), the overtime game's winner when a level timed score needs one,
 	the winner shown before saving, and the server's refusal shown in place.
 
-	`onsubmit` saves the score. It throws to refuse: an ApiError `invalid_score` (with `reason`),
-	`conflict` or `locked` is explained here, anything else through `eventMessage`. A court phone
-	that gets an outcome instead of a throw (postFinal) throws the matching ApiError itself.
+	`onsubmit` saves the score. It throws to refuse: `resultRefusalText` explains an ApiError
+	`invalid_score` (with `reason`), `conflict` or `locked` in place, anything else through
+	`eventMessage`. A court phone that gets an outcome instead of a throw (postFinal) throws the
+	matching ApiError itself.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ApiError } from '#lib/api.ts';
 	import { engineReady, initEngine, validateFinal } from '#lib/engine.ts';
-	import { eventMessage, invalidScoreText, parsedErrorText, parseTypedScore, withOvertimeWinner } from '#lib/events.ts';
+	import { invalidScoreText, parsedErrorText, parseTypedScore, resultRefusalText, withOvertimeWinner } from '#lib/events.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { Format, Team, Teams, TypedScore } from '#lib/types.ts';
 
@@ -88,19 +88,10 @@
 		try {
 			await onsubmit(verdict.score);
 		} catch (e) {
-			failure = refusal(e);
+			failure = resultRefusalText(e);
 		} finally {
 			busy = false;
 		}
-	}
-
-	function refusal(e: unknown): string {
-		if (e instanceof ApiError) {
-			if (e.code === 'invalid_score' && e.reason !== undefined) return invalidScoreText(e.reason);
-			if (e.code === 'conflict') return t.conflict;
-			if (e.code === 'locked') return t.locked;
-		}
-		return eventMessage(e);
 	}
 </script>
 

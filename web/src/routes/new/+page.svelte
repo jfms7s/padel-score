@@ -116,6 +116,8 @@
 	<form onsubmit={start}>
 		<h1>{t.title}</h1>
 
+		<div class="cols">
+		<div class="col">
 		<div class="field" role="group" aria-labelledby="l-deuce">
 			<span class="label" id="l-deuce">{t.deuce}</span>
 			<div class="seg">
@@ -155,6 +157,8 @@
 			{#if oneSet}<p class="hint" id="h-deciding">{t.decidingHint}</p>{/if}
 		</div>
 
+		</div>
+		<div class="col">
 		<div class="field" role="group" aria-labelledby="l-teams">
 			<span class="label" id="l-teams">{t.teams}</span>
 			<div class="teams">
@@ -222,6 +226,8 @@
 		{/if}
 
 		<button class="primary" type="submit" disabled={busy}>{busy ? t.starting : t.start}</button>
+		</div>
+		</div>
 	</form>
 </main>
 
@@ -230,6 +236,23 @@
 		max-width: 28rem;
 		margin: 0 auto;
 		padding: 16px 16px 48px;
+	}
+	.cols,
+	.col {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+	@media (min-width: 1100px) {
+		main {
+			max-width: 60rem;
+		}
+		.cols {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 32px;
+			align-items: start;
+		}
 	}
 	.back {
 		display: inline-flex;
