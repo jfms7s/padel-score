@@ -19,6 +19,7 @@
 	import type { CourtState, MatchView, Start, TypedScore } from '#lib/types.ts';
 	import { keepAwake, type Awake } from '#lib/wakelock.ts';
 	import Fence from '#lib/components/Fence.svelte';
+	import KindCourtBanner from '#lib/components/events/KindCourtBanner.svelte';
 	import ServePicker from '#lib/components/ServePicker.svelte';
 	import TypedScoreSheet from '#lib/components/TypedScoreSheet.svelte';
 
@@ -245,6 +246,7 @@
 {#snippet banner()}
 	{#if court && current}
 		<div class="banner">
+			<KindCourtBanner {court} />
 			<p class="where"><strong>{court.court.name}</strong> · {current.label}</p>
 			{#if next}<p class="next">{t.next(courtMatchText(next))}</p>{/if}
 			{#if locked}<p class="locked" role="status">{t.locked}</p>{/if}
@@ -277,6 +279,7 @@
 	<Fence bind:this={fence} token={scorerToken} {banner} extraActions={typeFinal} finishedAction={nextAction} />
 {:else}
 	<main class="court-screen">
+		{#if court}<KindCourtBanner {court} />{/if}
 		{#if screen === 'gone'}
 			<div class="center">
 				<p class="big-text">{gone === 'finished' ? t.finished : t.replaced}</p>

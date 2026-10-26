@@ -34,6 +34,18 @@ export interface StreamDeps {
 	now?: () => number;
 }
 
+const reconnectListeners = new Set<() => void>();
+
+/**
+ * Hear any stream on the page come back: `'live'` after `'offline'` (not its first `'live'`).
+ * The non-stop's server clock re-syncs on it, as a phone that slept may have drifted. Returns
+ * the unsubscribe.
+ */
+export function onStreamReconnect(listener: () => void): () => void {
+	reconnectListeners.add(listener);
+	return () => reconnectListeners.delete(listener);
+}
+
 const defaultDeps = (): StreamDeps => ({
 	fetch: (...args) => globalThis.fetch(...args),
 	setTimeout: (f, ms) => globalThis.setTimeout(f, ms),
@@ -129,8 +141,10 @@ export function openSseStream<T>(
 
 	const report = (s: StreamStatus) => {
 		if (closed || status === s) return;
+		const back = s === 'live' && status === 'offline';
 		status = s;
 		onStatus(s);
+		if (back) for (const listener of reconnectListeners) listener();
 	};
 
 	const clearWatchdog = () => {

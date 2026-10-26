@@ -33,12 +33,12 @@ export interface GuardOptions {
 	strict?: boolean;
 }
 
-type Check = (v: unknown) => boolean;
+export type Check = (v: unknown) => boolean;
 
-const isObj = (v: unknown): v is Record<string, unknown> =>
+export const isObj = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
 
-type Shape = Record<string, Check>;
+export type Shape = Record<string, Check>;
 
 /** The `optional` keys that are present pass their checks (serde's `skip_serializing_if`). */
 const optionalOk = (v: Record<string, unknown>, optional: Shape) =>
@@ -57,7 +57,7 @@ const exactly =
 	};
 
 /** An object with at least these keys, each passing its check; others are ignored. */
-const atLeast =
+export const atLeast =
 	(shape: Shape, optional: Shape = {}): Check =>
 	(v) =>
 		isObj(v) &&
@@ -73,26 +73,26 @@ const tagged =
 		return keys.length === 1 && Object.hasOwn(variants, keys[0]!) && variants[keys[0]!]!(v[keys[0]!]);
 	};
 
-const oneOf =
+export const oneOf =
 	(...values: unknown[]): Check =>
 	(v) =>
 		values.includes(v);
-const either =
+export const either =
 	(...checks: Check[]): Check =>
 	(v) =>
 		checks.some((c) => c(v));
-const int: Check = (v) => Number.isInteger(v) && (v as number) >= 0;
+export const int: Check = (v) => Number.isInteger(v) && (v as number) >= 0;
 const bool: Check = (v) => typeof v === 'boolean';
-const str: Check = (v) => typeof v === 'string';
+export const str: Check = (v) => typeof v === 'string';
 const tuple =
 	(...items: Check[]): Check =>
 	(v) =>
 		Array.isArray(v) && v.length === items.length && items.every((c, i) => c(v[i]));
-const array =
+export const array =
 	(item: Check): Check =>
 	(v) =>
 		Array.isArray(v) && v.every(item);
-const nullable =
+export const nullable =
 	(c: Check): Check =>
 	(v) =>
 		v === null || c(v);

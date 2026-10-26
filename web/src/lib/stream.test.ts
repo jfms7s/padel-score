@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BACKOFF_MS, backoffDelay, openSseStream, openStream, sseParser, WATCHDOG_MS, type StreamStatus } from './stream';
+import {
+	BACKOFF_MS,
+	backoffDelay,
+	onStreamReconnect,
+	openSseStream,
+	openStream,
+	sseParser,
+	WATCHDOG_MS,
+	type StreamStatus
+} from './stream';
 import type { MatchView } from './types';
 import { asView } from './fixtures/load';
 import onePoint from './fixtures/view-one-point.json';
@@ -265,6 +274,32 @@ describe('openStream', () => {
 		expect(server.fetch).toHaveBeenCalledTimes(4);
 		await tick(1);
 		expect(server.fetch).toHaveBeenCalledTimes(5);
+	});
+
+	it('tells reconnect listeners when a stream is live again, not when it first goes live', async () => {
+		const server = fakeServer();
+		const heard = vi.fn();
+		const unsubscribe = onStreamReconnect(heard);
+		const { statuses, stream } = open(server);
+		await tick();
+		server.conns[0]?.push(KEEP_ALIVE);
+		await tick();
+		expect(statuses).toEqual(['live']);
+		expect(heard).not.toHaveBeenCalled();
+		server.conns[0]?.drop();
+		await tick(1000);
+		server.conns[1]?.push(KEEP_ALIVE);
+		await tick();
+		expect(statuses).toEqual(['live', 'offline', 'live']);
+		expect(heard).toHaveBeenCalledTimes(1);
+		unsubscribe();
+		server.conns[1]?.drop();
+		await tick(2000);
+		server.conns[2]?.push(KEEP_ALIVE);
+		await tick();
+		expect(statuses).toEqual(['live', 'offline', 'live', 'offline', 'live']);
+		expect(heard).toHaveBeenCalledTimes(1);
+		stream.close();
 	});
 
 	it('resets the backoff once the stream has stayed up 30 s', async () => {

@@ -9,6 +9,7 @@
 	import { strings } from '#lib/strings.ts';
 	import type { CourtState } from '#lib/types.ts';
 	import Viewer from '#lib/components/Viewer.svelte';
+	import KindCourtBanner from '#lib/components/events/KindCourtBanner.svelte';
 
 	const t = strings.court;
 	const token = $derived(page.params.token ?? '');
@@ -65,6 +66,7 @@
 {#snippet banner()}
 	{#if court && current}
 		<div class="banner">
+			<KindCourtBanner {court} viewer />
 			<p><strong>{court.court.name}</strong> · {current.label}</p>
 			{#if next}<p class="next">{t.next(courtMatchText(next))}</p>{/if}
 		</div>

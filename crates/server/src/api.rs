@@ -80,6 +80,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::events_api::routes())
         .merge(crate::court_api::routes())
         .merge(crate::tournament_api::routes())
+        .merge(crate::non_stop_api::routes())
 }
 
 #[derive(Debug)]

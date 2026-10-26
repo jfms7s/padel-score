@@ -141,17 +141,6 @@ pub struct TeamChange {
     pub players: Option<[String; 2]>,
 }
 
-/// Settings of a kind that has none yet: absent or `{}` gives `{}`, anything else is refused.
-pub(crate) fn empty_settings(
-    raw: Option<&serde_json::Value>,
-) -> Result<serde_json::Value, StoreError> {
-    match raw {
-        None => Ok(serde_json::json!({})),
-        Some(v) if v.as_object().is_some_and(serde_json::Map::is_empty) => Ok(v.clone()),
-        Some(_) => Err(StoreError::InvalidField("settings")),
-    }
-}
-
 /// Trim a name; blank or over 40 chars (not bytes) is `InvalidField(field)`.
 fn clean_name(raw: &str, field: &'static str) -> Result<String, StoreError> {
     let name = raw.trim();

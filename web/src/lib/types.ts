@@ -420,6 +420,8 @@ export type EventErrorCode =
 	| 'event_finished'
 	| 'too_few_teams'
 	| 'no_courts'
+	| 'odd_teams'
+	| 'schedule_too_big'
 	| 'too_many_teams'
 	| 'too_many_courts'
 	| 'player_in_team'

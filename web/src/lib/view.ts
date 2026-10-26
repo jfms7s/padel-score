@@ -136,7 +136,7 @@ function rulesLine(view: MatchView, inTieBreak: boolean, superTieBreak: boolean,
 	if (superTieBreak) return strings.superTieBreak;
 	const deuce = strings.deuceInLine[deuceRule(view.format)];
 	if ('timed' in view.format) {
-		return `${view.score.overtime ? strings.overtime : strings.nonStop}, ${deuce}`;
+		return `${view.score.overtime ? strings.overtime : strings.nonStopName}, ${deuce}`;
 	}
 	const set = strings.setNumber(Math.max(view.score.sets.length, 1));
 	return `${set}, ${inTieBreak ? strings.tieBreak : deuce}`;
