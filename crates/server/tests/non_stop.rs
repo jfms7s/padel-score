@@ -16,7 +16,10 @@ use padel_score_server::competitions::non_stop::clock::{
     mark_done_in, next_deadline_in, pending_time_up_in, went_in,
 };
 use padel_score_server::competitions::non_stop::standings::{Outcome, places_of, standings};
-use padel_score_server::competitions::{Audience, Competition, Kind, NewCompetition, kinds};
+use padel_score_server::competitions::places::{Place, write_placings_in};
+use padel_score_server::competitions::{
+    Audience, Competition, Kind, NewCompetition, kinds, teams_in,
+};
 use padel_score_server::db;
 use padel_score_server::store::{Store, StoreError};
 use padel_scoring::{DecidingSet, DeuceRule, FinalScore, Format, SetRules, SetsFormat, Team};
@@ -1196,4 +1199,101 @@ async fn runner_helpers_find_due_work() {
     assert!(due_go_in(&mut conn, T).await.unwrap().is_empty());
     assert!(pending_time_up_in(&mut conn).await.unwrap().is_empty());
     assert!(!any_running_non_stop_in(&mut conn).await.unwrap());
+}
+
+/// A non-stop as v0.5.0 (phase 6) left it: settings `{}`, running without `on_start`, so it has
+/// no slots and no scheduled matches. Its matches were made by hand.
+async fn legacy_running(s: &Store, pool: &SqlitePool) -> (Competition, Vec<String>, Vec<String>) {
+    let (ev, teams, courts) = event_with(s, None, 4, 1).await;
+    sqlx::query(
+        "UPDATE competitions SET settings = '{}', status = 'running', started_at = ? WHERE id = ?",
+    )
+    .bind(NOW)
+    .bind(&ev.id)
+    .execute(pool)
+    .await
+    .unwrap();
+    (refreshed(pool, &ev).await, teams, courts)
+}
+
+#[tokio::test]
+async fn legacy_running_standings_come_from_event_matches() {
+    let (s, pool) = setup().await;
+    let (ev, teams, courts) = legacy_running(&s, &pool).await;
+    let m1 = s
+        .create_event_match(A, &ev.id, &teams[0], &teams[1], None, Some(&courts[0]), NOW)
+        .await
+        .unwrap();
+    let m2 = s
+        .create_event_match(A, &ev.id, &teams[2], &teams[3], None, None, NOW)
+        .await
+        .unwrap();
+    type_result(&s, &m1.match_id, 5, 3, None).await;
+    type_result(&s, &m2.match_id, 6, 1, None).await;
+    let outs = outcomes(&pool, &ev).await;
+    assert_eq!(outs.len(), 2);
+    let kd = kind_data(&pool, &ev, Audience::Coordinator).await;
+    assert_eq!(
+        kd["standings"],
+        serde_json::to_value(standings(&teams, &outs)).unwrap()
+    );
+    let rows = kd["standings"].as_array().unwrap();
+    assert_eq!(rows[0]["team_id"], json!(teams[2]));
+    assert_eq!(rows[0]["points"], 3);
+    assert_eq!(rows[1]["team_id"], json!(teams[0]));
+    assert_eq!(rows[1]["points"], 3);
+    assert_eq!(
+        rows.iter()
+            .map(|r| r["played"].as_u64().unwrap())
+            .sum::<u64>(),
+        4
+    );
+    assert_eq!(kd["slots"], json!([]));
+}
+
+#[tokio::test]
+async fn legacy_finished_keeps_hand_placings_after_a_correction() {
+    let (s, pool) = setup().await;
+    let (ev, teams, courts) = legacy_running(&s, &pool).await;
+    let m = s
+        .create_event_match(A, &ev.id, &teams[0], &teams[1], None, Some(&courts[0]), NOW)
+        .await
+        .unwrap();
+    type_result(&s, &m.match_id, 5, 3, None).await;
+    // Finished as v0.5.0 did: the coordinator's typed places, which the standings would not give.
+    sqlx::query("UPDATE competitions SET status = 'finished', finished_at = ? WHERE id = ?")
+        .bind(NOW + 5)
+        .bind(&ev.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let ev = refreshed(&pool, &ev).await;
+    let hand = vec![
+        place(&teams[3], 1, 1),
+        place(&teams[2], 2, 2),
+        place(&teams[1], 3, 4),
+        place(&teams[0], 3, 4),
+    ];
+    let mut tx = s.begin().await.unwrap();
+    let event_teams = teams_in(&mut tx, &ev.id).await.unwrap();
+    write_placings_in(&mut tx, &ev, &event_teams, &hand, NOW + 5)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let before = placings(&pool, &ev).await;
+    assert_eq!(before.len(), 8);
+
+    // A typed correction on the finished event leaves the typed places alone.
+    type_result(&s, &m.match_id, 3, 5, None).await;
+    assert_eq!(placings(&pool, &ev).await, before);
+    let players = players_of(&pool, &ev).await;
+    assert_eq!(before[&players[&teams[3]][0]], (1, 1));
+}
+
+fn place(team: &str, place: u32, place_to: u32) -> Place {
+    Place {
+        team_id: team.to_owned(),
+        place,
+        place_to,
+    }
 }

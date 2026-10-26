@@ -203,7 +203,9 @@ pub async fn on_result(
     .bind(match_id)
     .execute(&mut **tx)
     .await?;
-    if ev.status == Status::Finished {
+    // An event started before the schedule existed (v0.5.0: no slots) keeps the places the
+    // coordinator typed at its Finish.
+    if ev.status == Status::Finished && has_slots_in(tx, &ev.id).await? {
         let teams = teams_in(tx, &ev.id).await?;
         let places = places_of(&standings_in(tx, &ev.id, &teams).await?);
         write_placings_in(tx, ev, &teams, &places, now).await?;
@@ -224,21 +226,35 @@ pub async fn computed_places(
     Ok(Some(places_of(&standings_in(conn, &ev.id, &teams).await?)))
 }
 
-/// The event's standings from its results so far (unplayed matches count for nothing).
+/// Whether the event has a schedule. A non-stop started under v0.5.0 (before phase 8) has none:
+/// its matches were made by hand and its places typed at Finish.
+async fn has_slots_in(conn: &mut SqliteConnection, event_id: &str) -> Result<bool, StoreError> {
+    let found: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM non_stop_slots WHERE event_id = ? LIMIT 1")
+            .bind(event_id)
+            .fetch_optional(conn)
+            .await?;
+    Ok(found.is_some())
+}
+
+/// The event's standings from its results so far (unplayed matches count for nothing). An event
+/// with a schedule counts its scheduled matches; one without (v0.5.0) counts all its matches.
 async fn standings_in(
     conn: &mut SqliteConnection,
     event_id: &str,
     teams: &[EventTeam],
 ) -> Result<Vec<StandingRow>, StoreError> {
-    let rows = sqlx::query(
+    let sql = if has_slots_in(conn, event_id).await? {
         "SELECT c.team_a_id, c.team_b_id, r.winner, r.score FROM match_results r \
          JOIN competition_matches c ON c.match_id = r.match_id \
          JOIN non_stop_matches n ON n.match_id = r.match_id \
-         WHERE n.event_id = ? ORDER BY c.ordinal",
-    )
-    .bind(event_id)
-    .fetch_all(conn)
-    .await?;
+         WHERE n.event_id = ? ORDER BY c.ordinal"
+    } else {
+        "SELECT c.team_a_id, c.team_b_id, r.winner, r.score FROM match_results r \
+         JOIN competition_matches c ON c.match_id = r.match_id \
+         WHERE c.event_id = ? ORDER BY c.ordinal"
+    };
+    let rows = sqlx::query(sql).bind(event_id).fetch_all(conn).await?;
     let mut outcomes = Vec::with_capacity(rows.len());
     for row in &rows {
         let score: FinalScore = serde_json::from_str(row.try_get::<&str, _>("score")?)
