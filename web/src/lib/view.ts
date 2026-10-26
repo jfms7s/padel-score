@@ -34,6 +34,8 @@ export interface SetDetail {
 export interface TeamModel {
 	/** "Ana / Rui". */
 	name: string;
+	/** The two players' names, as in `name`, for marking the serving one. */
+	players: [string, string];
 	/** The game call ("40", "AD") or, in a tie-break, the tie-break points. Empty once the match is over. */
 	points: string;
 	/** Games in the current set; for a timed match, the whole match, any overtime game included. */
@@ -45,6 +47,11 @@ export interface TeamModel {
 	setsWon: number;
 	/** Serves the next point. Never true once the match is over. */
 	serving: boolean;
+	/**
+	 * Which of `players` serves the next point, when shown by name: null unless this team serves
+	 * and `FenceModel.servingPlayerName` is set.
+	 */
+	servingIndex: 0 | 1 | null;
 }
 
 export interface FenceModel {
@@ -79,16 +86,20 @@ export function fenceModel(view: MatchView): FenceModel {
 	const finished = typeof score.status === 'object' ? score.status.finished : null;
 	const deuce = deuceRule(format);
 
+	const servingPlayerName = finished ? null : enteredName(view);
 	const team = (t: Team): TeamModel => {
 		const i = t === 'a' ? 0 : 1;
+		const serving = !finished && score.server.team === t;
 		return {
 			name: strings.teamName(...teams[t]),
+			players: [teams[t][0], teams[t][1]],
 			points: game ? pointLabel(game[t]) : tieBreak ? String(tieBreak[t]) : '',
 			games: score.games[i],
 			sets: score.sets.map((s) => s[t]),
 			setDetails: score.sets.map((s, n) => setDetail(s, t, n, n < score.sets.length - 1 || !!finished, format)),
 			setsWon: score.sets_won[i],
-			serving: !finished && score.server.team === t
+			serving,
+			servingIndex: serving && servingPlayerName !== null ? (score.server.index === 0 ? 0 : 1) : null
 		};
 	};
 
@@ -96,7 +107,7 @@ export function fenceModel(view: MatchView): FenceModel {
 		a: team('a'),
 		b: team('b'),
 		serveSide: finished ? null : score.side,
-		servingPlayerName: finished ? null : enteredName(view),
+		servingPlayerName,
 		callout: game?.deciding_point ? decidingCallout(deuce) : null,
 		changeEnds: score.change_ends,
 		inTieBreak: tieBreak !== null,

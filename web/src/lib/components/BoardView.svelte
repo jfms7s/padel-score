@@ -3,10 +3,11 @@
 	// the set scores on the left and the points as big as the screen allows. The tap buttons at
 	// the foot work as a remote.
 	import type { Snippet } from 'svelte';
-	import { changeEndsLine, pointButtonLabel } from '#lib/fence.ts';
+	import { ballPosition, changeEndsLine, pointButtonLabel } from '#lib/fence.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { Team } from '#lib/types.ts';
 	import type { FenceModel, SetDetail } from '#lib/view.ts';
+	import TeamNames from './TeamNames.svelte';
 
 	let {
 		model,
@@ -25,6 +26,8 @@
 
 	const f = strings.fence;
 	const timed = $derived(model.a.sets.length === 0);
+	// The serve ball sits on the serving team's points box, at the corner of the side served from.
+	const ball = $derived(ballPosition(model));
 
 	interface Column {
 		label: string;
@@ -69,13 +72,9 @@
 		{@const team = model[t]}
 		<section class="tb {t}" aria-label={team.name}>
 			<div class="name">
-				{#if team.serving}<span class="serve" role="img" aria-label={f.serving}></span>{/if}
-				<span class="team-name">{team.name}</span>
-				{#if team.serving && model.serveSide}<small>{(model.servingPlayerName ? f.sideFrom : f.servingFrom)[model.serveSide]}</small>{/if}
+				<span class="team-name"><TeamNames {team} /></span>
+				{#if team.serving && model.serveSide}<small>{f.servingFrom[model.serveSide]}</small>{/if}
 			</div>
-			{#if team.serving && model.servingPlayerName}
-				<p class="server">{f.playerServing(model.servingPlayerName)}</p>
-			{/if}
 			<div class="nums" style:--cols={columns.length}>
 				{#each columns as col (col.label)}
 					<div class="col">
@@ -84,7 +83,10 @@
 					</div>
 				{/each}
 				{#if !model.finished}
-					<div class="p num">{team.points}</div>
+					<div class="p num">
+						{team.points}
+						{#if ball && ball.team === t}<span class="ball {ball.side}" aria-hidden="true"></span>{/if}
+					</div>
 				{/if}
 			</div>
 		</section>
@@ -177,22 +179,6 @@
 		font-size: clamp(13px, 1.8vh, 18px);
 		text-align: right;
 	}
-	/* The serving player's name, under the team's and as large, lined up with the name. */
-	.server {
-		margin: 2px 0 0 22px;
-		font-weight: 750;
-		font-size: clamp(18px, 2.6vh, 26px);
-		line-height: 1.2;
-		overflow-wrap: anywhere;
-	}
-	.serve {
-		width: 14px;
-		height: 14px;
-		border-radius: 50%;
-		background: var(--ball);
-		box-shadow: 0 0 0 2px var(--ink);
-		flex: none;
-	}
 	.nums {
 		flex: 1;
 		display: grid;
@@ -232,6 +218,44 @@
 		color: var(--on-team);
 		border-radius: 14px;
 		padding: 12px 0 8px;
+		position: relative;
+	}
+	/*
+	 * The serve ball, as on the court: on the corner of the points box, half over its edge so it
+	 * stays clear of the figures. Team A's box is the top one, so its ball sits on the top edge;
+	 * team B's on the bottom edge. Right or left as served, the middle when the receiver picks.
+	 */
+	.ball {
+		position: absolute;
+		width: clamp(20px, 4.4vh, 36px);
+		height: clamp(20px, 4.4vh, 36px);
+		border-radius: 50%;
+		background: var(--ball);
+		box-shadow:
+			inset -3px -3px 0 rgba(0, 0, 0, 0.12),
+			0 0 0 3px rgba(255, 255, 255, 0.35);
+		--x: 0;
+		--y: -30%;
+		transform: translate(var(--x), var(--y));
+	}
+	.a .ball {
+		top: 0;
+	}
+	.b .ball {
+		bottom: 0;
+		--y: 30%;
+	}
+	.ball.right {
+		right: 0;
+		--x: 30%;
+	}
+	.ball.left {
+		left: 0;
+		--x: -30%;
+	}
+	.ball.centre {
+		left: 50%;
+		--x: -50%;
 	}
 	.a .p {
 		background: var(--a);

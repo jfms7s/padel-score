@@ -1,5 +1,8 @@
 // Every user-visible string in the app. English, sentence case, worded as in the mockup.
 
+/** Between a team's two names. */
+const TEAM_NAME_SEPARATOR = ' / ';
+
 export const strings = {
 	appName: 'Padel score',
 	appDescription: 'Score padel matches from the fence, a phone or a watch.',
@@ -21,7 +24,9 @@ export const strings = {
 	overtime: 'Overtime',
 	matchOver: 'Match over',
 
-	teamName: (first: string, second: string) => `${first} / ${second}`,
+	teamName: (first: string, second: string) => `${first}${TEAM_NAME_SEPARATOR}${second}`,
+	/** Between a team's two names, as in `teamName`. */
+	teamNameSeparator: TEAM_NAME_SEPARATOR,
 
 	// Who serves first: the pick on New match and on the court phone.
 	serve: {
@@ -91,18 +96,13 @@ export const strings = {
 		sets: 'Sets',
 		set: (n: number) => `Set ${n}`,
 		superTieBreakShort: 'STB',
-		serving: 'Serving',
 		servingFrom: {
 			right: 'serving from the right',
 			left: 'serving from the left',
 			receiver_chooses: 'receiver picks the side'
 		},
-		playerServing: (player: string) => `${player} serving`,
-		sideFrom: {
-			right: 'from the right',
-			left: 'from the left',
-			receiver_chooses: 'receiver picks the side'
-		},
+		/** Read after the serving player's name, where the racket shows: "Ana serving / Rui". */
+		servingMark: ' serving',
 		pointToServing: (team: string, player: string) => `Point to ${team}, ${player} serving`,
 		wins: (team: string) => `${team} win`,
 		draw: 'Draw',

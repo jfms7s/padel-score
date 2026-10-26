@@ -80,6 +80,34 @@ describe('fenceModel', () => {
 		expect(third.serveSide).toBe('left');
 	});
 
+	it('marks which player serves, by index into the team, only when named', () => {
+		const start = fenceModel(v(newMatch));
+		expect(start.a.players).toEqual(['Ana', 'Rui']);
+		expect(start.b.players).toEqual(['João', 'Marta']);
+		expect(start.a.servingIndex).toBe(0);
+		expect(start.b.servingIndex).toBeNull();
+
+		const next = fenceModel(v(changeEnds));
+		expect(next.a.servingIndex).toBeNull();
+		expect(next.b.servingIndex).toBe(0);
+
+		const third = fenceModel(v(thirdGame));
+		expect(third.a.servingIndex).toBe(1);
+
+		// No name entered: the team still serves, but no player is marked.
+		const unnamed = v(newMatch);
+		unnamed.teams = { a: ['Player 1', 'Player 2'], b: ['Player 3', 'Player 4'] };
+		const m = fenceModel(unnamed);
+		expect(m.a.serving).toBe(true);
+		expect(m.a.servingIndex).toBeNull();
+		expect(m.b.servingIndex).toBeNull();
+
+		// Nobody serves once the match is over.
+		const done = fenceModel(v(finished));
+		expect(done.a.servingIndex).toBeNull();
+		expect(done.b.servingIndex).toBeNull();
+	});
+
 	it('names the serving player only when a name was entered', () => {
 		const unnamed = v(newMatch);
 		unnamed.teams = { a: ['Player 1', 'Player 2'], b: ['Player 3', 'Player 4'] };

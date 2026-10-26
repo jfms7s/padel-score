@@ -7,6 +7,7 @@
 	import { strings } from '#lib/strings.ts';
 	import type { Team } from '#lib/types.ts';
 	import type { FenceModel } from '#lib/view.ts';
+	import TeamNames from './TeamNames.svelte';
 
 	let {
 		model,
@@ -53,12 +54,7 @@
 			onclick={onpoint ? () => onpoint(t) : undefined}
 		>
 			<span class="box-line" aria-hidden="true"></span>
-			<span class="team">
-				{team.name}
-				{#if team.serving && model.servingPlayerName}
-					<span class="server">{f.playerServing(model.servingPlayerName)}</span>
-				{/if}
-			</span>
+			<span class="team"><TeamNames {team} /></span>
 			<span class="pts num" aria-hidden={team.points === ''}>{team.points}</span>
 			<span class="tally">
 				{f.games} <b>{team.games}</b>
@@ -166,12 +162,6 @@
 		text-align: left;
 		line-height: 1.2;
 		overflow-wrap: anywhere;
-	}
-	/* The serving player's name, under the team's and as large, a little bolder. */
-	.server {
-		display: block;
-		margin-top: 0.15em;
-		font-weight: 750;
 	}
 	.b .team {
 		left: auto;
