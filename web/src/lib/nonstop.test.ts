@@ -3,6 +3,7 @@ import { ApiError } from './api';
 import {
 	beepsDue,
 	bestOffset,
+	clockButtons,
 	clockText,
 	countInMs,
 	createServerClock,
@@ -11,6 +12,7 @@ import {
 	markHorn,
 	nonStopCourtData,
 	nonStopData,
+	placeText,
 	playBeep,
 	playHorn,
 	postClock,
@@ -244,5 +246,22 @@ describe('postClock', () => {
 		);
 		await expect(postClock('e1', 'start', 3)).rejects.toMatchObject({ status: 409, code: 'clock_busy' });
 		await expect(postClock('e1', 'start', 3)).rejects.toBeInstanceOf(ApiError);
+	});
+});
+
+describe('clockButtons', () => {
+	it('clockButton_for_each_state', () => {
+		expect(clockButtons(clock({ state: 'ready' }))).toEqual(['start']);
+		expect(clockButtons(clock({ state: 'running' }))).toEqual(['pause', 'end']);
+		expect(clockButtons(clock({ state: 'paused' }))).toEqual(['resume', 'end']);
+		expect(clockButtons(clock({ state: 'done' }))).toEqual([]);
+		expect(clockButtons(null)).toEqual([]);
+	});
+});
+
+describe('placeText', () => {
+	it('shows_a_range_once_for_a_shared_place', () => {
+		expect(placeText({ place: 1, place_to: 1 })).toBe('1');
+		expect(placeText({ place: 2, place_to: 3 })).toBe('2–3');
 	});
 });

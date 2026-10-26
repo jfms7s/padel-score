@@ -855,7 +855,18 @@ export const strings = {
 			event_not_running: 'This event is not running.',
 			not_non_stop: 'This is not a non-stop event.'
 		},
-		clockFailed: 'Couldn’t change the clock. Try again.'
+		clockFailed: 'Couldn’t change the clock. Try again.',
+		slotText: (round: number, wave: number, waves: number) =>
+			waves > 1 ? `round ${round}, wave ${wave}` : `round ${round}`,
+		stateReady: 'Ready',
+		stateRunning: 'Running',
+		stateDone: 'Finished',
+		standings: 'Standings',
+		schedule: 'Schedule',
+		roundHeading: (r: number) => `Round ${r}`,
+		courtName: (name: string) => `Court: ${name}`,
+		noCourt: 'No court yet',
+		finishPreview: 'Final standings'
 	},
 
 	// Home, signed in.

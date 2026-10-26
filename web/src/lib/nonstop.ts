@@ -375,3 +375,26 @@ export function playHorn(ctx: AudioContext | null): void {
 		// No sound is better than a broken clock.
 	}
 }
+
+// ---- screen helpers ----------------------------------------------------------------------
+
+export type ClockButton = 'start' | 'pause' | 'resume' | 'end';
+
+/** The coordinator's buttons for a clock, in order; none once the slot is done or there is no clock. */
+export function clockButtons(clock: Clock | null): ClockButton[] {
+	switch (clock?.state) {
+		case 'ready':
+			return ['start'];
+		case 'running':
+			return ['pause', 'end'];
+		case 'paused':
+			return ['resume', 'end'];
+		default:
+			return [];
+	}
+}
+
+/** "2" for a place of its own, "2–3" for teams that share one. */
+export function placeText(row: Pick<StandingRow, 'place' | 'place_to'>): string {
+	return row.place_to > row.place ? `${row.place}–${row.place_to}` : String(row.place);
+}
