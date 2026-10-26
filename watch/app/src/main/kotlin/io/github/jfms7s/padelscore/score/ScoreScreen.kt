@@ -142,7 +142,8 @@ private fun visibleFeedback(ui: ScoreUi): Feedback {
     LaunchedEffect(id) {
         val shownFor = when (kind) {
             Feedback.Accepted -> ACCEPTED_FLASH_MS
-            Feedback.NotSent, Feedback.UndoConflict, Feedback.MatchOver, Feedback.NothingToUndo -> NOTICE_MS
+            Feedback.NotSent, Feedback.UndoConflict, Feedback.MatchOver, Feedback.NothingToUndo, Feedback.NotSaved ->
+                NOTICE_MS
             Feedback.None -> return@LaunchedEffect
         }
         delay(shownFor)
@@ -245,6 +246,7 @@ private fun Notice(feedback: Feedback, modifier: Modifier) {
         Feedback.MatchOver -> R.string.score_match_over
         Feedback.UndoConflict -> R.string.score_undo_conflict
         Feedback.NothingToUndo -> R.string.score_nothing_to_undo
+        Feedback.NotSaved -> R.string.local_not_saved
         Feedback.None, Feedback.Accepted -> return
     }
     Column(
