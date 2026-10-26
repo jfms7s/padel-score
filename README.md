@@ -93,7 +93,7 @@ cd watch && ./gradlew :app:assembleDebug
 
 The APK is `watch/app/build/outputs/apk/debug/app-debug.apk`. It has no server built in: on first launch it opens Server settings and asks for one. On an emulator, a server on the same machine is `http://10.0.2.2:8080`.
 
-**CI.** The `Watch` workflow (`.github/workflows/watch.yml`) runs the tests and lint, and uploads the APK as the `padel-score-watch-debug-<sha>` artifact. It runs on pushes to `main` and on pull requests only when `watch/`, the web fixtures it tests against or the workflow itself change; every `v*` tag builds. Once the signing secrets below are set, builds on pushes to `main` and on tags are signed with the owner's key; until then, and on pull requests, they use a throwaway debug key, so a PR build cannot update an install made from `main`.
+**CI.** The `Watch` workflow (`.github/workflows/watch.yml`) runs the tests and lint, and uploads the APK as an artifact: `padel-score-watch-release-<sha>` (signed, non-debuggable) on pushes to `main` and tags once the signing secrets below are set, otherwise `padel-score-watch-debug-<sha>`. It runs on pushes to `main` and on pull requests only when `watch/`, the web fixtures it tests against or the workflow itself change; every `v*` tag builds. Once the signing secrets below are set, builds on pushes to `main` and on tags are the release build, signed with the owner's key; until then, and on pull requests, they are the debug build with a throwaway debug key, so a PR build cannot update an install made from `main`.
 
 **Signing setup, once.** Make a keystore and add four repository secrets:
 
@@ -118,8 +118,10 @@ adb connect <ip>:<port>
 ```
 
 ```sh
-adb install -r app-debug.apk
+adb install -r app-release.apk
 ```
+
+Use the `app-release.apk` from the `padel-score-watch-release-<sha>` artifact (or `app-debug.apk` from a debug artifact or a local build). Moving an existing debug install to the release APK works with `adb install -r` and keeps the sign-in, because both are signed with the same key and the application id is the same. A debug APK from a pull request or a local build uses a different key, so installing it over a release one fails until you uninstall the app.
 
 **Sign in.** The watch shows a code. On the phone, while signed in, open `<server>/link` and enter it. The watch needs the server reachable from its own network: the paired phone's connection (including its VPN) or the watch's own Wi-Fi. Over the phone's Bluetooth link the watch gets DNS servers that only know the server's public address, so the app falls back to the LAN addresses set under Server settings when DNS gives no LAN answer; the certificate is still checked against the host name.
 
