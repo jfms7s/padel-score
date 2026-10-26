@@ -2,9 +2,6 @@
 //! (a mini-table over the matches among the level teams, re-applied to any smaller group it
 //! leaves level); still level, the teams share the place. Pure: no I/O, never panics.
 
-// Used from Task 4 (kind_data, computed_places).
-#![allow(dead_code)]
-
 use std::cmp::Reverse;
 use std::collections::HashMap;
 

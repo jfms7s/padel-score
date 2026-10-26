@@ -1,17 +1,24 @@
-//! The non-stop kind. Owned by phase 8: phase 7 never edits this file. The phase 6 stubs
-//! below do nothing; phase 8 fills them in.
+//! The non-stop kind. Owned by phase 8: phase 7 never edits this file. Every match is made at
+//! start (`schedule`), the clock runs one slot at a time (`clock`), and the standings are
+//! worked out on read from `match_results` (`standings`).
 
+pub mod clock;
 mod schedule;
-mod standings;
+pub mod standings;
 
+use padel_scoring::Team;
 use serde::{Deserialize, Serialize};
-use sqlx::SqliteConnection;
+use serde_json::json;
+use sqlx::{Row, SqliteConnection};
 
-use super::courts::{courts_in, create_event_match_in};
-use super::places::Place;
-use super::{Audience, Competition, EventTeam, teams_in};
+use super::courts::{courts_in, create_event_match_in, next_queued_in};
+use super::places::{Place, write_placings_in};
+use super::{Audience, Competition, EventTeam, Status, teams_in};
+use crate::results::FinalScore;
 use crate::store::{StoreError, Tx};
+use clock::{current_clock, slot_of_match_in, slots_in, system_now_ms};
 use schedule::{plan_slots, round_robin};
+use standings::{Outcome, StandingRow, places_of};
 
 pub const DEFAULT_MATCH_MINUTES: u32 = 15;
 pub const MAX_MATCH_MINUTES: u32 = 60;
@@ -178,33 +185,158 @@ pub async fn on_start(tx: &mut Tx<'_>, ev: &Competition, now: i64) -> Result<(),
     Ok(())
 }
 
+/// A match of a done slot that has lost (or never had) its result is flagged for the runner
+/// to call time on it again. On a finished event, the corrected standings rewrite the placings.
 pub async fn on_result(
-    _tx: &mut Tx<'_>,
-    _ev: &Competition,
-    _match_id: &str,
-    _now: i64,
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+    match_id: &str,
+    now: i64,
 ) -> Result<(), StoreError> {
+    sqlx::query(
+        "UPDATE non_stop_matches SET needs_time_up = 1 WHERE match_id = ? \
+         AND EXISTS (SELECT 1 FROM non_stop_slots s WHERE s.event_id = non_stop_matches.event_id \
+           AND s.slot = non_stop_matches.slot AND s.state = 'done') \
+         AND NOT EXISTS (SELECT 1 FROM match_results r WHERE r.match_id = ?)",
+    )
+    .bind(match_id)
+    .bind(match_id)
+    .execute(&mut **tx)
+    .await?;
+    if ev.status == Status::Finished {
+        let teams = teams_in(tx, &ev.id).await?;
+        let places = places_of(&standings_in(tx, &ev.id, &teams).await?);
+        write_placings_in(tx, ev, &teams, &places, now).await?;
+    }
     Ok(())
 }
 
 /// Whether this kind works out the final places itself (`computed_places` returns `Some`).
 pub fn computes_places() -> bool {
-    false
+    true
 }
 
 pub async fn computed_places(
-    _conn: &mut SqliteConnection,
-    _ev: &Competition,
+    conn: &mut SqliteConnection,
+    ev: &Competition,
 ) -> Result<Option<Vec<Place>>, StoreError> {
-    Ok(None)
+    let teams = teams_in(conn, &ev.id).await?;
+    Ok(Some(places_of(&standings_in(conn, &ev.id, &teams).await?)))
 }
 
+/// The event's standings from its results so far (unplayed matches count for nothing).
+async fn standings_in(
+    conn: &mut SqliteConnection,
+    event_id: &str,
+    teams: &[EventTeam],
+) -> Result<Vec<StandingRow>, StoreError> {
+    let rows = sqlx::query(
+        "SELECT c.team_a_id, c.team_b_id, r.winner, r.score FROM match_results r \
+         JOIN competition_matches c ON c.match_id = r.match_id \
+         JOIN non_stop_matches n ON n.match_id = r.match_id \
+         WHERE n.event_id = ? ORDER BY c.ordinal",
+    )
+    .bind(event_id)
+    .fetch_all(conn)
+    .await?;
+    let mut outcomes = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let score: FinalScore = serde_json::from_str(row.try_get::<&str, _>("score")?)
+            .map_err(|e| StoreError::Corrupt(format!("match result score: {e}")))?;
+        let winner = match row.try_get::<Option<&str>, _>("winner")? {
+            Some("a") => Some(Team::A),
+            Some("b") => Some(Team::B),
+            None => None,
+            Some(other) => return Err(StoreError::Corrupt(format!("result winner {other:?}"))),
+        };
+        outcomes.push(Outcome {
+            a: row.try_get("team_a_id")?,
+            b: row.try_get("team_b_id")?,
+            winner,
+            games: score.regulation_games,
+        });
+    }
+    let ids: Vec<String> = teams.iter().map(|t| t.id.clone()).collect();
+    Ok(standings::standings(&ids, &outcomes))
+}
+
+/// `(rounds, waves)`: the schedule's largest round and wave numbers (0 before start).
+async fn shape_in(conn: &mut SqliteConnection, event_id: &str) -> Result<(i64, i64), StoreError> {
+    Ok(sqlx::query_as(
+        "SELECT COALESCE(MAX(round), 0), COALESCE(MAX(wave), 0) FROM non_stop_slots \
+         WHERE event_id = ?",
+    )
+    .bind(event_id)
+    .fetch_one(conn)
+    .await?)
+}
+
+/// The non-stop's part of the event view: see the plan's wire shapes. The coordinator and
+/// spectators get the same (it holds no token); a court gets the clock of its match.
 pub async fn kind_data(
-    _conn: &mut SqliteConnection,
-    _ev: &Competition,
-    _audience: Audience,
+    conn: &mut SqliteConnection,
+    ev: &Competition,
+    audience: Audience,
 ) -> Result<Option<serde_json::Value>, StoreError> {
-    Ok(None)
+    let now_ms = system_now_ms();
+    let value = match audience {
+        Audience::Court { court_id } => {
+            let current: Option<Option<String>> = sqlx::query_scalar(
+                "SELECT current_match_id FROM courts WHERE id = ? AND event_id = ?",
+            )
+            .bind(&court_id)
+            .bind(&ev.id)
+            .fetch_optional(&mut *conn)
+            .await?;
+            let match_id = match current {
+                None => None,
+                Some(Some(id)) => Some(id),
+                Some(None) => next_queued_in(conn, &court_id).await?,
+            };
+            let clock = match match_id {
+                Some(id) => slot_of_match_in(conn, &id).await?.map(|s| s.clock(now_ms)),
+                None => None,
+            };
+            let (rounds, waves) = shape_in(conn, &ev.id).await?;
+            json!({ "clock": clock, "rounds": rounds, "waves": waves })
+        }
+        Audience::Coordinator | Audience::Spectator => {
+            let slots = slots_in(conn, &ev.id).await?;
+            let links: Vec<(i64, String)> = sqlx::query_as(
+                "SELECT n.slot, n.match_id FROM non_stop_matches n \
+                 JOIN competition_matches c ON c.match_id = n.match_id \
+                 WHERE n.event_id = ? ORDER BY c.ordinal",
+            )
+            .bind(&ev.id)
+            .fetch_all(&mut *conn)
+            .await?;
+            let slot_list: Vec<serde_json::Value> = slots
+                .iter()
+                .map(|s| {
+                    let matches: Vec<&str> = links
+                        .iter()
+                        .filter(|(slot, _)| *slot == i64::from(s.slot))
+                        .map(|(_, id)| id.as_str())
+                        .collect();
+                    json!({
+                        "slot": s.slot, "round": s.round, "wave": s.wave,
+                        "state": s.state, "matches": matches,
+                    })
+                })
+                .collect();
+            let teams = teams_in(conn, &ev.id).await?;
+            let standings = standings_in(conn, &ev.id, &teams).await?;
+            json!({
+                "settings": settings_of(ev)?,
+                "rounds": slots.iter().map(|s| s.round).max().unwrap_or(0),
+                "waves": slots.iter().map(|s| s.wave).max().unwrap_or(0),
+                "clock": current_clock(&slots).map(|s| s.clock(now_ms)),
+                "slots": slot_list,
+                "standings": standings,
+            })
+        }
+    };
+    Ok(Some(value))
 }
 
 #[cfg(test)]
