@@ -5,6 +5,8 @@ import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import java.io.File
 import java.nio.file.Files
 import java.security.GeneralSecurityException
@@ -52,6 +54,13 @@ private class TestCipher(private val key: SecretKey = newKey()) : TokenCipher {
     }
 }
 
+private const val SERVER_A = "https://a.example.test/"
+private const val SERVER_B = "https://b.example.test/"
+
+/** A store for the server at [origin]. */
+private fun tokenStore(dataStore: DataStore<Preferences>, cipher: TokenCipher, origin: String = SERVER_A) =
+    DataStoreTokenStore(dataStore, cipher, origin = origin)
+
 class TokenStoreTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     private lateinit var dir: File
@@ -65,7 +74,7 @@ class TokenStoreTest {
         dir = Files.createTempDirectory("tokenstore").toFile()
         file = File(dir, "token.preferences_pb")
         dataStore = PreferenceDataStoreFactory.create(scope = scope) { file }
-        store = DataStoreTokenStore(dataStore, cipher)
+        store = tokenStore(dataStore, cipher)
     }
 
     @After
@@ -95,7 +104,7 @@ class TokenStoreTest {
     @Test
     fun undecryptable_blob_clears_and_returns_null() = runTest {
         store.write("pdl_TEST_abc123")
-        val otherKey = DataStoreTokenStore(dataStore, TestCipher())
+        val otherKey = tokenStore(dataStore, TestCipher())
         assertNull(otherKey.read())
         assertFalse(store.signedIn.first())
     }
@@ -104,7 +113,7 @@ class TokenStoreTest {
     fun cipher_security_exception_clears_and_returns_null() = runTest {
         store.write("pdl_TEST_abc123")
         // A fresh instance, as after a process restart: nothing cached, so the cipher is used.
-        val restarted = DataStoreTokenStore(dataStore, cipher)
+        val restarted = tokenStore(dataStore, cipher)
         cipher.failDecrypt = GeneralSecurityException("key permanently invalidated")
         assertNull(restarted.read())
         assertFalse(restarted.signedIn.first())
@@ -123,7 +132,7 @@ class TokenStoreTest {
     @Test
     fun first_read_decrypts_once_then_caches() = runTest {
         store.write("pdl_TEST_abc123")
-        val restarted = DataStoreTokenStore(dataStore, cipher)
+        val restarted = tokenStore(dataStore, cipher)
         assertEquals("pdl_TEST_abc123", restarted.read())
         assertEquals("pdl_TEST_abc123", restarted.read())
         assertEquals(1, cipher.decrypts)
@@ -135,7 +144,7 @@ class TokenStoreTest {
         assertEquals("pdl_TEST_abc123", store.read())
         store.clear()
         // Another writer puts a new token in the file: a stale cache would still answer with the old one.
-        DataStoreTokenStore(dataStore, cipher).write("pdl_TEST_new")
+        tokenStore(dataStore, cipher).write("pdl_TEST_new")
         assertEquals("pdl_TEST_new", store.read())
         assertEquals(1, cipher.decrypts)
     }
@@ -143,11 +152,11 @@ class TokenStoreTest {
     @Test
     fun failed_read_caches_nothing() = runTest {
         store.write("pdl_TEST_abc123")
-        val restarted = DataStoreTokenStore(dataStore, cipher)
+        val restarted = tokenStore(dataStore, cipher)
         cipher.failDecrypt = GeneralSecurityException("key permanently invalidated")
         assertNull(restarted.read())
         cipher.failDecrypt = null
-        DataStoreTokenStore(dataStore, cipher).write("pdl_TEST_new")
+        tokenStore(dataStore, cipher).write("pdl_TEST_new")
         assertEquals("pdl_TEST_new", restarted.read())
     }
 
@@ -174,9 +183,56 @@ class TokenStoreTest {
             corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
             scope = scope,
         ) { file }
-        val recovering = DataStoreTokenStore(handled, cipher)
+        val recovering = tokenStore(handled, cipher)
         assertFalse(recovering.signedIn.first())
         recovering.write("pdl_TEST_abc123")
         assertEquals("pdl_TEST_abc123", recovering.read())
+    }
+
+    @Test
+    fun token_is_read_back_by_a_store_for_the_same_server() = runTest {
+        store.write("pdl_TEST_abc123")
+        val sameServer = tokenStore(dataStore, cipher, SERVER_A)
+        assertTrue(sameServer.signedIn.first())
+        assertEquals("pdl_TEST_abc123", sameServer.read())
+    }
+
+    @Test
+    fun token_from_another_server_reads_as_signed_out_and_is_dropped() = runTest {
+        store.write("pdl_TEST_abc123")
+        val otherServer = tokenStore(dataStore, cipher, SERVER_B)
+        assertFalse(otherServer.signedIn.first())
+        assertNull(otherServer.read())
+        // Dropped from the file, not just hidden: going back to server A doesn't bring it back.
+        assertNull(tokenStore(dataStore, cipher, SERVER_A).read())
+    }
+
+    @Test
+    fun late_write_by_the_old_servers_store_never_reaches_the_new_server() = runTest {
+        // A sign-in still running for server A when the watch switched to B gets its token afterwards.
+        val newServer = tokenStore(dataStore, cipher, SERVER_B)
+        assertFalse(newServer.signedIn.first())
+        tokenStore(dataStore, cipher, SERVER_A).write("pdl_TEST_for_A")
+        assertFalse(newServer.signedIn.first())
+        assertNull(newServer.read())
+    }
+
+    @Test
+    fun save_cut_short_leaves_no_token_for_the_new_server() = runTest {
+        // Signed in to A; the settings save wrote B but was swiped away before the token was cleared.
+        store.write("pdl_TEST_for_A")
+        val nextLaunch = tokenStore(dataStore, cipher, SERVER_B)
+        assertFalse(nextLaunch.signedIn.first())
+        assertNull(nextLaunch.read())
+    }
+
+    @Test
+    fun token_without_an_origin_is_dropped() = runTest {
+        // Saved by a build from before tokens were tied to their server: nothing says who issued it.
+        val blob = java.util.Base64.getEncoder().encodeToString(cipher.encrypt("pdl_TEST_old".toByteArray()))
+        dataStore.edit { it[stringPreferencesKey("device_token")] = blob }
+        assertFalse(store.signedIn.first())
+        assertNull(store.read())
+        assertNull(dataStore.data.first()[stringPreferencesKey("device_token")])
     }
 }

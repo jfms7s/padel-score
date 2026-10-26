@@ -1,13 +1,42 @@
 package io.github.jfms7s.padelscore
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
+import io.github.jfms7s.padelscore.settings.FirstRunSettings
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private var restarting = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val container = (application as PadelApp).container
-        setContent { WatchApp(container) }
+        val host = application as ContainerHost
+        val container = host.container
+        setContent {
+            // No server set yet (a fresh install): the settings are all there is until one is.
+            if (container == null) {
+                FirstRunSettings(host.settingsStore, onApplied = ::restart)
+            } else {
+                WatchApp(container, onSettingsApplied = ::restart)
+            }
+        }
+    }
+
+    /**
+     * New server settings: rebuild the container, then swap this activity for a fresh one. Finishing
+     * clears this activity's ViewModelStore, so every screen's model (and any sign-in still polling
+     * the old server) is cancelled, and the new activity starts from scratch on the new container.
+     */
+    private fun restart() {
+        if (restarting) return
+        restarting = true
+        lifecycleScope.launch {
+            (application as ContainerHost).reload()
+            startActivity(Intent(this@MainActivity, MainActivity::class.java))
+            finish()
+        }
     }
 }

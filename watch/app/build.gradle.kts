@@ -10,8 +10,6 @@ val ciSigningEnv = listOf("WATCH_KEYSTORE_PATH", "WATCH_KEYSTORE_PASSWORD", "WAT
     .associateWith { providers.environmentVariable(it).orNull?.takeIf(String::isNotEmpty) }
 val hasCiSigning = ciSigningEnv.values.all { it != null }
 
-val serverUrl = providers.gradleProperty("padelServerUrl").get()
-
 android {
     namespace = "io.github.jfms7s.padelscore"
     compileSdk = 37
@@ -23,7 +21,6 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
     }
 
     signingConfigs {
@@ -45,7 +42,6 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true
     }
 
     compileOptions {
@@ -84,6 +80,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.datastore.preferences)
+    implementation(libs.wear.input)
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
     implementation(libs.compose.ui.tooling.preview)

@@ -44,6 +44,8 @@ class KeystoreTokenStoreTest {
     private fun newStore() = DataStoreTokenStore(
         PreferenceDataStoreFactory.create(scope = scope) { file },
         KeystoreCipher(alias),
+        origin = "https://example.test/",
+        legacyOrigin = "https://example.test/",
     )
 
     @Test

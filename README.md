@@ -91,11 +91,7 @@ Event matches show in history and on player pages as "Sunday cup · Match 1".
 cd watch && ./gradlew :app:assembleDebug
 ```
 
-The APK is `watch/app/build/outputs/apk/debug/app-debug.apk`. The server URL it talks to defaults to the one in `watch/gradle.properties`. To point an emulator at a server on the same machine:
-
-```sh
-./gradlew :app:assembleDebug -PpadelServerUrl=http://10.0.2.2:8080
-```
+The APK is `watch/app/build/outputs/apk/debug/app-debug.apk`. It has no server built in: on first launch it opens Server settings and asks for one. On an emulator, a server on the same machine is `http://10.0.2.2:8080`.
 
 **CI.** The `Watch` workflow (`.github/workflows/watch.yml`) runs the tests and lint, and uploads the APK as the `padel-score-watch-debug-<sha>` artifact. It runs on pushes to `main` and on pull requests only when `watch/`, the web fixtures it tests against or the workflow itself change; every `v*` tag builds. Once the signing secrets below are set, builds on pushes to `main` and on tags are signed with the owner's key; until then, and on pull requests, they use a throwaway debug key, so a PR build cannot update an install made from `main`.
 
@@ -125,7 +121,9 @@ adb connect <ip>:<port>
 adb install -r app-debug.apk
 ```
 
-**Sign in.** The watch shows a code. On the phone, while signed in, open `<server>/link` and enter it. The watch needs the server reachable from its own network: the paired phone's connection (including its VPN) or the watch's own Wi-Fi.
+**Sign in.** The watch shows a code. On the phone, while signed in, open `<server>/link` and enter it. The watch needs the server reachable from its own network: the paired phone's connection (including its VPN) or the watch's own Wi-Fi. Over the phone's Bluetooth link the watch gets DNS servers that only know the server's public address, so the app falls back to the LAN addresses set under Server settings when DNS gives no LAN answer; the certificate is still checked against the host name.
+
+**Server settings.** The server URL and the LAN addresses are set on the watch, never in the build: the first launch opens Server settings, and afterwards they are under Server settings on the sign-in screen or at the bottom of the match list. Set the server first, then its LAN addresses. Changing the server signs the watch out and clears the LAN addresses; changing only the LAN addresses keeps the sign-in.
 
 **Signed out.** The watch returns to the sign-in screen when its device is revoked on the web Account page, when the user's password is changed, an admin resets it or the account is disabled (all device tokens are revoked), or when you pick "Sign out" in the watch's list. That last item only forgets the sign-in on the watch; it does not revoke the device on the server.
 

@@ -12,12 +12,17 @@ import io.github.jfms7s.padelscore.auth.deviceNameOf
 import io.github.jfms7s.padelscore.haptics.Haptics
 import io.github.jfms7s.padelscore.haptics.VibratorHaptics
 import io.github.jfms7s.padelscore.net.HttpPadelApi
+import io.github.jfms7s.padelscore.net.LanFallbackDns
 import io.github.jfms7s.padelscore.net.MatchView
 import io.github.jfms7s.padelscore.net.MyMatch
 import io.github.jfms7s.padelscore.net.PadelApi
 import io.github.jfms7s.padelscore.net.StreamItem
 import io.github.jfms7s.padelscore.net.WireJson
 import io.github.jfms7s.padelscore.net.sseFlow
+import io.github.jfms7s.padelscore.settings.DataStoreSettingsStore
+import io.github.jfms7s.padelscore.settings.ServerSettings
+import io.github.jfms7s.padelscore.settings.SettingsStore
+import io.github.jfms7s.padelscore.settings.originKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl
@@ -26,7 +31,10 @@ import java.time.Duration
 
 /** What the screens need; [WatchApp] takes it so tests can hand in fakes. */
 interface AppContainer {
-    val serverUrl: HttpUrl
+    /** The settings this container was built with. */
+    val settings: ServerSettings
+    val serverUrl: HttpUrl get() = settings.serverUrl
+    val settingsStore: SettingsStore
     val api: PadelApi
     val tokens: TokenStore
     val haptics: Haptics
@@ -39,6 +47,16 @@ interface AppContainer {
     fun matchStream(matchId: String): Flow<StreamItem<MatchView>>
 }
 
+/** Holds the process's [AppContainer]; the [MainActivity] asks it for a new one after the settings change. */
+interface ContainerHost {
+    /** Null until a server is set on the watch. */
+    val container: AppContainer?
+    val settingsStore: SettingsStore
+
+    /** Replaces [container] with one built on the stored settings. */
+    suspend fun reload(): AppContainer?
+}
+
 // DataStore allows one active instance per file, so the delegate keeps it process-wide.
 // A corrupt file reads as empty, which means signed out.
 private val Context.authDataStore by preferencesDataStore(
@@ -46,11 +64,28 @@ private val Context.authDataStore by preferencesDataStore(
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
 )
 
-/** Manual dependency injection: one instance per process, built by [PadelApp]. */
-class DefaultAppContainer(context: Context, override val serverUrl: HttpUrl) : AppContainer {
+private val Context.settingsDataStore by preferencesDataStore(
+    name = "server_settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
+
+/** The process-wide store of the server settings set on the watch. */
+fun settingsStoreOf(context: Context): SettingsStore = DataStoreSettingsStore(context.applicationContext.settingsDataStore)
+
+/**
+ * Manual dependency injection, built by [PadelApp]: one instance per process until the server
+ * settings change, then [PadelApp.reload] replaces it.
+ */
+class DefaultAppContainer(
+    context: Context,
+    override val settings: ServerSettings,
+    override val settingsStore: SettingsStore,
+) : AppContainer {
     private val appContext: Context = context.applicationContext
 
+    // The stream client below is derived from this one, so it shares the LAN fallback.
     private val http: OkHttpClient = OkHttpClient.Builder()
+        .dns(LanFallbackDns(settings.serverUrl.host, settings.fallback))
         .connectTimeout(Duration.ofSeconds(5))
         .callTimeout(Duration.ofSeconds(8))
         .retryOnConnectionFailure(false)
@@ -62,7 +97,11 @@ class DefaultAppContainer(context: Context, override val serverUrl: HttpUrl) : A
         .readTimeout(Duration.ofSeconds(20))
         .build()
 
-    override val tokens: TokenStore = DataStoreTokenStore(appContext.authDataStore, KeystoreCipher())
+    override val tokens: TokenStore = DataStoreTokenStore(
+        appContext.authDataStore,
+        KeystoreCipher(),
+        origin = originKey(settings.serverUrl),
+    )
 
     override val api: PadelApi = HttpPadelApi(serverUrl, http, WireJson, token = { tokens.read() })
 

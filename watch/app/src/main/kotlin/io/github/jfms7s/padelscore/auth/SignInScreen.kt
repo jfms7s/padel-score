@@ -1,9 +1,10 @@
 package io.github.jfms7s.padelscore.auth
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -18,34 +19,55 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
+import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
 import io.github.jfms7s.padelscore.R
 
 @Composable
-fun SignInScreen(model: SignInModel, onSignedIn: () -> Unit) {
+fun SignInScreen(model: SignInModel, onSignedIn: () -> Unit, onSettings: () -> Unit) {
     val state by model.state.collectAsState()
     LaunchedEffect(state) {
         if (state == SignInState.SignedIn) onSignedIn()
     }
-    SignInContent(state, onNewCode = model::restart)
+    SignInContent(state, onNewCode = model::restart, onSettings = onSettings)
 }
 
+private val MinTarget = 48.dp
+
+/** Scrolls, so the code, the link and the settings button all fit on a small round screen. */
 @Composable
-internal fun SignInContent(state: SignInState, onNewCode: () -> Unit) {
+internal fun SignInContent(state: SignInState, onNewCode: () -> Unit, onSettings: () -> Unit) {
     MaterialTheme {
-        Box(
-            Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                when (state) {
-                    SignInState.Starting, SignInState.SignedIn -> Plain(stringResource(R.string.sign_in_starting))
-                    is SignInState.ShowCode -> Code(state)
-                    SignInState.Expired -> Retry(stringResource(R.string.sign_in_expired), onNewCode)
-                    SignInState.Denied -> Retry(stringResource(R.string.sign_in_denied), onNewCode)
-                    is SignInState.Failed -> Retry(stringResource(state.kind.message()), onNewCode)
+        val listState = rememberTransformingLazyColumnState()
+        ScreenScaffold(scrollState = listState) { padding ->
+            TransformingLazyColumn(
+                state = listState,
+                contentPadding = padding,
+                verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                item {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        when (state) {
+                            SignInState.Starting, SignInState.SignedIn -> Plain(stringResource(R.string.sign_in_starting))
+                            is SignInState.ShowCode -> Code(state)
+                            SignInState.Expired -> Retry(stringResource(R.string.sign_in_expired), onNewCode)
+                            SignInState.Denied -> Retry(stringResource(R.string.sign_in_denied), onNewCode)
+                            is SignInState.Failed -> Retry(stringResource(state.kind.message()), onNewCode)
+                        }
+                    }
+                }
+                item {
+                    Button(
+                        onClick = onSettings,
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = MinTarget),
+                    ) { Text(stringResource(R.string.settings_title)) }
                 }
             }
         }
@@ -87,7 +109,7 @@ private fun Code(state: SignInState.ShowCode) {
 @Composable
 private fun Retry(message: String, onNewCode: () -> Unit) {
     Plain(message)
-    Button(onClick = onNewCode, modifier = Modifier.padding(top = 8.dp)) {
+    Button(onClick = onNewCode, modifier = Modifier.padding(top = 8.dp).heightIn(min = MinTarget)) {
         Text(stringResource(R.string.sign_in_new_code))
     }
 }
