@@ -94,6 +94,16 @@ impl Layout {
         })
     }
 
+    /// How many teams the bracket is for.
+    pub fn teams(&self) -> u32 {
+        self.teams
+    }
+
+    /// Whether every place is played for.
+    pub fn full_placement(&self) -> bool {
+        self.full_placement
+    }
+
     /// Whether the draw `(place_from, size)` exists in this bracket and is played.
     fn played(&self, place_from: u32, size: u32) -> bool {
         let shape_ok = size >= 2
@@ -433,6 +443,23 @@ impl Bracket {
             .collect()
     }
 
+    /// The team `node` sends to its loser's place: the node's team that is not in its winner's
+    /// target slot, when that slot holds one of its teams; else its result's loser. They differ
+    /// after "Keep as played": the result was corrected but the team that played on stays in
+    /// the later match, so the bracket as played decides who shares the place.
+    pub fn placed_loser(&self, node: &Node) -> Option<String> {
+        if let Target::Slot(t, side) = self.layout.winner_target(node.pos)
+            && let Some(went_on) = self.node(t).and_then(|n| n.team(side))
+        {
+            for s in [Side::A, Side::B] {
+                if node.team(s) == Some(went_on) {
+                    return node.team(s.other()).cloned();
+                }
+            }
+        }
+        node.outcome().1
+    }
+
     /// The final places once every match of every played draw has a winner and nothing is
     /// held; `None` before.
     pub fn places(&self) -> Option<Vec<Place>> {
@@ -442,10 +469,10 @@ impl Bracket {
             if node.held || node.winner.is_none() {
                 return None;
             }
-            let (winner, loser) = node.outcome();
+            let (winner, _) = node.outcome();
             for (target, team) in [
                 (self.layout.winner_target(p), winner),
-                (self.layout.loser_target(p), loser),
+                (self.layout.loser_target(p), self.placed_loser(node)),
             ] {
                 if let Target::Place { place, place_to } = target {
                     out.push(Place {
@@ -1015,6 +1042,35 @@ mod tests {
             places.iter().find(|p| p.place == 1).unwrap().team_id,
             team(0)
         );
+    }
+
+    #[test]
+    fn kept_as_played_places_follow_the_bracket() {
+        // Off mode: QF1 is corrected to t1 after SF1 started with t0, and the coordinator
+        // keeps it as played. t0 played on, so t1 is the one sharing 5th.
+        let mut sim = Sim::new(8, false);
+        sim.play(&[(QF1, Side::A), (QF2, Side::A)]);
+        sim.node_mut(SF1).started = true;
+        sim.result(QF1, Some(Side::B));
+        assert!(sim.node(QF1).held);
+        sim.node_mut(QF1).held = false;
+        play_out(&mut sim, || Side::A);
+        tally(&sim, 8);
+        let places = sim.b.places().unwrap();
+        let of = |t: String| places.iter().find(|p| p.team_id == t).unwrap().clone();
+        assert_eq!((of(team(1)).place, of(team(1)).place_to), (5, 8));
+        assert_eq!((of(team(0)).place, of(team(0)).place_to), (1, 1));
+    }
+
+    #[test]
+    fn placed_loser_falls_back_to_the_result() {
+        // A winner's slot holding neither of the node's teams (or empty) leaves the result's
+        // loser.
+        let mut sim = Sim::new(8, false);
+        sim.play(&[(QF1, Side::B)]);
+        assert_eq!(sim.b.placed_loser(sim.node(QF1)), Some(team(0)));
+        sim.node_mut(SF1).teams[0] = Some(team(7));
+        assert_eq!(sim.b.placed_loser(sim.node(QF1)), Some(team(0)));
     }
 
     #[test]
