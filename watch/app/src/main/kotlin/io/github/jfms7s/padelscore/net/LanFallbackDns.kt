@@ -105,7 +105,10 @@ private fun ipv6Words(part: String, mayEndInIpv4: Boolean): List<Int>? {
     return words
 }
 
-/** RFC 1918 / link-local / loopback, plus IPv6 unique-local (fc00::/7). */
+/**
+ * RFC 1918 / link-local, plus IPv6 unique-local (fc00::/7). Not loopback: that's what a DNS sinkhole
+ * answers, and the server is never on the watch itself.
+ */
 internal fun InetAddress.isPrivate(): Boolean =
-    isSiteLocalAddress || isLinkLocalAddress || isLoopbackAddress ||
+    isSiteLocalAddress || isLinkLocalAddress ||
         (this is Inet6Address && (address[0].toInt() and 0xFE) == 0xFC)

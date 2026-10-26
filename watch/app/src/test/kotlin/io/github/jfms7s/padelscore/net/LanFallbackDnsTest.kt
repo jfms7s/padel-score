@@ -33,6 +33,14 @@ class LanFallbackDnsTest {
     }
 
     @Test
+    fun loopback_answer_is_not_taken_for_the_lan() {
+        // A DNS sinkhole on the phone answering 127.0.0.1 must not stop the fallback.
+        val loopback = InetAddress.getByName("127.0.0.1")
+        val result = dns(FakeDns { listOf(loopback) }).lookup(host)
+        assertEquals(lan + loopback, result)
+    }
+
+    @Test
     fun public_only_answer_puts_the_lan_addresses_first() {
         val result = dns(FakeDns { listOf(publicIp) }).lookup(host)
         assertEquals(lan + publicIp, result)
@@ -92,9 +100,9 @@ class LanFallbackDnsTest {
 
     @Test
     fun private_ranges() {
-        listOf("10.1.2.3", "172.16.0.1", "192.168.50.231", "169.254.1.1", "127.0.0.1", "fd00::1", "fe80::1")
+        listOf("10.1.2.3", "172.16.0.1", "192.168.50.231", "169.254.1.1", "fd00::1", "fe80::1")
             .forEach { assertTrue(it, InetAddress.getByName(it).isPrivate()) }
-        listOf("203.0.113.7", "8.8.8.8", "2001:db8::1", "172.32.0.1")
+        listOf("203.0.113.7", "8.8.8.8", "2001:db8::1", "172.32.0.1", "127.0.0.1", "::1")
             .forEach { assertTrue(it, !InetAddress.getByName(it).isPrivate()) }
     }
 
