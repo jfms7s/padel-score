@@ -149,11 +149,13 @@ fun LocalOtherServerScreen(model: LocalMatchModel, onNext: (LocalSetup) -> Unit)
     val notSaved = ui.feedbackSince(opened) == Feedback.NotSaved
     val otherTeam = if (draft.firstServer?.team == Team.A) Team.B else Team.A
     val players = listOf(Player(otherTeam, 0), Player(otherTeam, 1))
+    // The last pick counts only while the serving pair is the same one it was then.
+    val last = ui.lastSetup?.start?.takeIf { it.firstServer.team == draft.firstServer?.team }
     ChoiceScreen(
         title = stringResource(R.string.local_other_title),
         hint = null,
         options = players.map { playerName(it) },
-        highlighted = null,
+        highlighted = last?.otherFirstServer,
         onPick = { index -> model.pickOtherServer(index)?.let(onNext) },
         notice = if (notSaved) stringResource(R.string.local_not_saved) else null,
     )

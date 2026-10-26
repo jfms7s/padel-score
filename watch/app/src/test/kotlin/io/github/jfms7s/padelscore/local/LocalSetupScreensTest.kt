@@ -115,6 +115,32 @@ class LocalSetupScreensTest {
     }
 
     @Test
+    fun other_server_highlights_the_last_pick_for_the_same_serving_pair() {
+        val last = LocalSetup(
+            SetRules(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET),
+            Start(Player(Team.A, 0), 1),
+        )
+        val model = model(last)
+        model.pickFirstServer(Player(Team.A, 1))
+        compose.setContent { LocalOtherServerScreen(model) {} }
+        compose.waitForIdle()
+        compose.onNodeWithTag(CHOICE_SELECTED_TAG).assert(hasText("Green 2"))
+    }
+
+    @Test
+    fun other_server_highlights_nothing_when_the_serving_pair_changed() {
+        val last = LocalSetup(
+            SetRules(DeuceRule.ADVANTAGE, SetsFormat.ONE, DecidingSet.FULL_SET),
+            Start(Player(Team.A, 0), 1),
+        )
+        val model = model(last)
+        model.pickFirstServer(Player(Team.B, 0))
+        compose.setContent { LocalOtherServerScreen(model) {} }
+        compose.waitForIdle()
+        compose.onNodeWithTag(CHOICE_SELECTED_TAG).assertDoesNotExist()
+    }
+
+    @Test
     fun other_server_with_a_missing_pick_does_not_finish() {
         val model = model()
         model.pickFirstServer(Player(Team.A, 0))
