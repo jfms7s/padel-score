@@ -269,6 +269,16 @@ impl Ctx {
         loop {
             self.advance_all().await;
             let d = self.detail().await;
+            let final_match = node_at(&d, 1, 2, 0)["match_id"].as_str().map(str::to_owned);
+            if let Some(f) = final_match.filter(|f| match_in(&d, f)["court_id"] != Value::Null) {
+                for m in d["matches"].as_array().unwrap() {
+                    assert!(
+                        m["id"] == json!(f) || m["court_id"] != Value::Null,
+                        "the final is on a court before {}",
+                        m["label"]
+                    );
+                }
+            }
             let mut live: Vec<(u64, i64, String)> = d["courts"]
                 .as_array()
                 .unwrap()
@@ -491,7 +501,7 @@ fn place_of(places: &Value, place: u64) -> &str {
         .unwrap()
 }
 
-/// The final is the last bracket match to be made.
+/// The final is the last bracket match to be made (and, in `play_out`, the last onto a court).
 fn assert_final_is_last_made(d: &Value) {
     let final_match = node_at(d, 1, 2, 0)["match_id"].as_str().unwrap();
     let final_ordinal = match_in(d, final_match)["ordinal"].as_i64().unwrap();

@@ -566,13 +566,21 @@ pub async fn withdraw_in(
 /// Put waiting bracket matches (created, unfinished, on no court) onto free courts, one per
 /// court, in `ordinal` order. A court is free when its current match is finished or absent and
 /// nothing is queued on it; courts are taken in `position` order. A match already on a court,
-/// by hand or by an earlier fill, is never moved.
+/// by hand or by an earlier fill, is never moved. The final (place 1, size 2) is the last match
+/// onto a court: it is skipped while any other bracket position has no match yet or has an
+/// unfinished match on no court, since a 5th/7th-place match can be made after the final.
 pub async fn fill_courts_in(tx: &mut Tx<'_>, ev: &Competition) -> Result<(), StoreError> {
     let mut waiting: std::collections::VecDeque<String> = sqlx::query_scalar(
         "SELECT cm.match_id FROM competition_matches cm \
          JOIN bracket_matches b ON b.match_id = cm.match_id \
          WHERE cm.event_id = ? AND cm.court_id IS NULL \
          AND NOT EXISTS (SELECT 1 FROM match_results r WHERE r.match_id = cm.match_id) \
+         AND NOT (b.place_from = 1 AND b.size = 2 AND EXISTS ( \
+           SELECT 1 FROM bracket_matches o LEFT JOIN competition_matches ocm \
+             ON ocm.match_id = o.match_id \
+           WHERE o.event_id = cm.event_id AND NOT (o.place_from = 1 AND o.size = 2) \
+           AND (o.match_id IS NULL OR (ocm.court_id IS NULL AND NOT EXISTS ( \
+             SELECT 1 FROM match_results orr WHERE orr.match_id = o.match_id))))) \
          ORDER BY cm.ordinal",
     )
     .bind(&ev.id)
