@@ -1,6 +1,8 @@
 //! The non-stop kind. Owned by phase 8: phase 7 never edits this file. The phase 6 stubs
 //! below do nothing; phase 8 fills them in.
 
+mod schedule;
+
 use sqlx::SqliteConnection;
 
 use super::places::Place;
