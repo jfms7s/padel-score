@@ -14,9 +14,11 @@ import io.github.jfms7s.padelscore.net.Team
 import io.github.jfms7s.padelscore.score.FakeHaptics
 import io.github.jfms7s.padelscore.score.Feedback
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -107,15 +109,45 @@ class LocalMatchModelTest {
         val m = model(store)
         val gate = CompletableDeferred<Unit>()
         store.gate = gate
+        val shown = mutableListOf<Int>()
+        val watching = CoroutineScope(UnconfinedTestDispatcher(scheduler)).launch {
+            m.ui.collect { shown += it.match?.points?.size ?: -1 }
+        }
         m.point(Team.A)
         m.point(Team.B)
         scheduler.advanceUntilIdle()
         assertTrue(store.saved.isEmpty())
         gate.complete(Unit)
         scheduler.advanceUntilIdle()
+        watching.cancel()
         assertEquals(listOf(listOf(Team.A), listOf(Team.A, Team.B)), store.saved.map { it.points })
         assertEquals(listOf(Team.A, Team.B), m.ui.value.match?.points)
         assertEquals(listOf("accepted", "accepted"), haptics.calls)
+        assertEquals("the shown score never goes backwards", shown.sorted(), shown)
+    }
+
+    @Test
+    fun a_tap_during_a_later_write_builds_on_every_earlier_point() {
+        val store = stored(emptyList())
+        val m = model(store)
+        val first = CompletableDeferred<Unit>()
+        val second = CompletableDeferred<Unit>()
+        store.gate = first
+        m.point(Team.A)
+        m.point(Team.B)
+        scheduler.advanceUntilIdle()
+        store.gate = second
+        first.complete(Unit)
+        scheduler.advanceUntilIdle()
+        m.point(Team.A)
+        scheduler.advanceUntilIdle()
+        second.complete(Unit)
+        scheduler.advanceUntilIdle()
+        assertEquals(
+            listOf(listOf(Team.A), listOf(Team.A, Team.B), listOf(Team.A, Team.B, Team.A)),
+            store.saved.map { it.points },
+        )
+        assertEquals(listOf(Team.A, Team.B, Team.A), m.ui.value.match?.points)
     }
 
     @Test

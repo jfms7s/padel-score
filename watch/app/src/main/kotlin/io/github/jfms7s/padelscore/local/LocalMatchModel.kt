@@ -17,6 +17,7 @@ import io.github.jfms7s.padelscore.score.Feedback
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -65,8 +66,9 @@ class LocalMatchModel(
 
     private val writes = Mutex()
 
+    // The model is the store's only writer: it loads once, and each write then updates ui itself.
     init {
-        viewModelScope.launch { store.state.collect { writes.withLock { onStored(it) } } }
+        viewModelScope.launch { writes.withLock { load(store.state.first()) } }
     }
 
     /** A finished match takes no more points, but undo stays available (it may reopen the match). */
@@ -86,6 +88,7 @@ class LocalMatchModel(
         save(LocalMatch(match.setup, match.points.dropLast(1)), onSaved = ::accepted)
     }
 
+    /** An invalid setup is ignored. */
     fun start(setup: LocalSetup) = write { save(LocalMatch(setup, emptyList())) }
 
     /** A new match with the current one's rules and serve choice. */
@@ -124,7 +127,7 @@ class LocalMatchModel(
         return LocalSetup(rules, start).takeIf { it.valid }
     }
 
-    private suspend fun onStored(state: LocalStoreState) {
+    private suspend fun load(state: LocalStoreState) {
         val match = state.match
         val score = match?.let { replay(it.setup.rules, it.setup.start, it.points) }
         if (match != null && score == null) {
