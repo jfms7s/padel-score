@@ -73,6 +73,7 @@ export type TileSide = { names: string; point: string; games: number; sets: numb
 export type CourtTileData =
 	| { state: 'live'; label: string; a: TileSide; b: TileSide; server: Team }
 	| { state: 'finished'; label: string; a: TileSide; b: TileSide; winner: Team | null; nextLabel: string | null }
+	| { state: 'ready'; label: string; a: string; b: string; nextLabel: string | null }
 	| { state: 'idle'; nextLabel: string | null };
 
 function points(score: Score): [string, string] {
@@ -82,7 +83,10 @@ function points(score: Score): [string, string] {
 	return [String(c.tie_break.a), String(c.tie_break.b)];
 }
 
-/** What a court tile shows: the live game, the match just finished, or an idle court. */
+/**
+ * What a court tile shows: the live game, the match just finished, the match on court that
+ * hasn't started (waiting, or live with no score yet), or an idle court.
+ */
 export function courtTile(
 	court: { current: string | null; queue: string[] },
 	matches: (EventMatch | EventViewMatch)[],
@@ -113,5 +117,5 @@ export function courtTile(
 		const side = (i: 0 | 1): TileSide => ({ names: names[i], point: '', games: games[i], sets: r.timed ? null : won(i === 0 ? 'a' : 'b') });
 		return { state: 'finished', label: m.label, a: side(0), b: side(1), winner: m.winner, nextLabel };
 	}
-	return { state: 'idle', nextLabel };
+	return { state: 'ready', label: m.label, a: names[0], b: names[1], nextLabel };
 }

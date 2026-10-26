@@ -912,6 +912,7 @@ export const strings = {
 		live: 'Live',
 		finished: 'Finished',
 		won: 'Won',
+		ready: 'Up next',
 		idle: 'No match on this court',
 		next: (label: string) => `Next: ${label}`,
 		nextMatch: 'Next match',

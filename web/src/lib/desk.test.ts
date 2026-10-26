@@ -138,6 +138,16 @@ describe('courtTile', () => {
 		expect(t).toMatchObject({ state: 'finished', winner: 'a', nextLabel: null, a: { games: 6, sets: 2 }, b: { games: 2, sets: 1 } });
 	});
 
+	it('is ready with a waiting match on court', () => {
+		const t = courtTile({ current: 'm1', queue: ['m2'] }, [match('m1'), match('m2')], teams);
+		expect(t).toEqual({ state: 'ready', label: 'Match m1', a: 'Ana / Marta', b: 'Rui / Joao', nextLabel: 'Match m2' });
+	});
+
+	it('is ready with a live match that has no score yet', () => {
+		const t = courtTile({ current: 'm1', queue: [] }, [match('m1', { state: 'live', live: null })], teams);
+		expect(t).toEqual({ state: 'ready', label: 'Match m1', a: 'Ana / Marta', b: 'Rui / Joao', nextLabel: null });
+	});
+
 	it('is idle with a queued match', () => {
 		const t = courtTile({ current: null, queue: ['m2'] }, [match('m2')], teams);
 		expect(t).toEqual({ state: 'idle', nextLabel: 'Match m2' });

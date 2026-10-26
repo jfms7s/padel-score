@@ -1,6 +1,7 @@
 <!--
 	A court seen from above: the live score as two halves around a net, the serve ball in the
-	server's half. Finished: faded halves and a bar with the next match. Idle: a quiet panel.
+	server's half. Ready (a match on court that hasn't started): the halves with the names only.
+	Finished: faded halves and a bar with the next match. Idle: a quiet panel.
 -->
 <script lang="ts">
 	import { courtTile } from '#lib/desk.ts';
@@ -25,7 +26,7 @@
 
 	const t = strings.desk;
 	const tile = $derived(courtTile(court, matches, teams));
-	const sides = $derived(tile.state === 'idle' ? [] : ([['a', tile.a], ['b', tile.b]] as const));
+	const sides = $derived(tile.state === 'live' || tile.state === 'finished' ? ([['a', tile.a], ['b', tile.b]] as const) : []);
 	const watchHref = $derived(`/cv/${encodeURIComponent(court.spectator_token)}`);
 	const phones = $derived('phones' in court ? court.phones : null);
 </script>
@@ -35,12 +36,17 @@
 		<b>{court.name}</b>
 		{#if tile.state === 'live'}<span class="chip live">{t.live}</span>{/if}
 		{#if tile.state === 'finished'}<span class="chip">{t.finished}</span>{/if}
+		{#if tile.state === 'ready'}<span class="chip ready">{t.ready}</span>{/if}
 	</div>
 	{#if tile.state !== 'idle'}<div class="label">{tile.label}</div>{/if}
 
 	<div class="pitch">
 		{#if tile.state === 'idle'}
 			<span class="none">{t.idle}</span>
+		{:else if tile.state === 'ready'}
+			<div class="s a"><span class="who">{tile.a}</span></div>
+			<div class="net" aria-hidden="true"></div>
+			<div class="s b"><span class="who">{tile.b}</span></div>
 		{:else}
 			{#each sides as [team, s], i (team)}
 				{#if i === 1}<div class="net" aria-hidden="true"></div>{/if}
@@ -110,6 +116,11 @@
 		white-space: nowrap;
 		background: var(--a-soft);
 		color: var(--ink);
+	}
+	.chip.ready {
+		background: transparent;
+		border: 1px dashed var(--line);
+		color: var(--muted);
 	}
 	.chip.live::before {
 		content: '';
@@ -296,6 +307,18 @@
 		background: #0b2236;
 		color: #fff;
 		font-weight: 700;
+	}
+	/* A narrow tile puts the next match's label on its own line, above the buttons. */
+	.compact .foot.next {
+		flex-wrap: wrap;
+	}
+	.compact .foot.next .grow {
+		flex-basis: 100%;
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+	.compact .foot.next .watch {
+		margin-left: auto;
 	}
 	.foot.next .watch {
 		border-color: #0b2236;
