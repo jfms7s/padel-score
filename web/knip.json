@@ -1,4 +1,4 @@
 {
-  "entry": ["src/routes/**/+*.{ts,svelte}", "src/service-worker/index.ts", "src/app.html"],
-  "ignoreUnresolved": ["^\\$app/"]
+	"entry": ["src/routes/**/+*.{ts,svelte}", "src/service-worker/index.ts", "src/app.html"],
+	"ignoreUnresolved": ["^\\$app/"]
 }

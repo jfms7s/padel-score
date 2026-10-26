@@ -97,9 +97,7 @@ export function suggest(players: Player[], query: string, taken: string[]): Sugg
 	const exact = key === '' ? null : (found.find((p) => nameKey(p.name) === key) ?? null);
 	const matches = (exact ? [exact, ...found.filter((p) => p !== exact)] : found).slice(0, MAX_SUGGESTIONS);
 	const canAdd =
-		key !== '' &&
-		Array.from(query.trim()).length <= MAX_NAME_LENGTH &&
-		!active.some((p) => nameKey(p.name) === key);
+		key !== '' && Array.from(query.trim()).length <= MAX_NAME_LENGTH && !active.some((p) => nameKey(p.name) === key);
 	return { matches, exact, canAdd };
 }
 

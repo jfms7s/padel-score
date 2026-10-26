@@ -296,15 +296,18 @@ pub async fn decide_in(
             }
             let plan = bracket.replay(pos);
             let mut withdrawn = apply_plan_in(tx, ev, &bracket, &plan, now).await?;
+            // Only applying a plan changes the rows, so reload after one and not per position.
+            let mut current = load_in(tx, ev).await?;
             for p in bracket.layout.positions() {
-                let Some(bracket) = load_in(tx, ev).await? else {
+                let Some(bracket) = current.as_ref() else {
                     break;
                 };
                 if !bracket.node(p).is_some_and(|n| n.held) {
                     continue;
                 }
                 let plan = bracket.on_result(p);
-                withdrawn.extend(apply_plan_in(tx, ev, &bracket, &plan, now).await?);
+                withdrawn.extend(apply_plan_in(tx, ev, bracket, &plan, now).await?);
+                current = load_in(tx, ev).await?;
             }
             Ok(withdrawn)
         }

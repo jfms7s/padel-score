@@ -7,7 +7,10 @@ import historyPage from './fixtures/history-page.json';
 import myMatches from './fixtures/my-matches.json';
 
 const withExtras = () => {
-	const v = structuredClone(onePoint) as Record<string, unknown> & { score: Record<string, unknown>; events: Record<string, unknown>[] };
+	const v = structuredClone(onePoint) as Record<string, unknown> & {
+		score: Record<string, unknown>;
+		events: Record<string, unknown>[];
+	};
 	v.created_at = '2026-10-25T00:00:00Z';
 	v.score.extra = 1;
 	v.events[0]!.at = 3;
@@ -25,7 +28,9 @@ describe('runtime guards', () => {
 	it('strict mode refuses unknown keys, as the fixture tests need', () => {
 		expect(isMatchView(onePoint, { strict: true })).toBe(true);
 		expect(isMatchView(withExtras(), { strict: true })).toBe(false);
-		expect(isFormat({ timed: { deuce: 'advantage', draws_allowed: true, new_field: 'x' } }, { strict: true })).toBe(false);
+		expect(isFormat({ timed: { deuce: 'advantage', draws_allowed: true, new_field: 'x' } }, { strict: true })).toBe(
+			false
+		);
 	});
 
 	it('lenient mode still needs every required key with its type', () => {

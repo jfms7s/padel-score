@@ -60,9 +60,7 @@ const exactly =
 export const atLeast =
 	(shape: Shape, optional: Shape = {}): Check =>
 	(v) =>
-		isObj(v) &&
-		Object.entries(shape).every(([k, c]) => Object.hasOwn(v, k) && c(v[k])) &&
-		optionalOk(v, optional);
+		isObj(v) && Object.entries(shape).every(([k, c]) => Object.hasOwn(v, k) && c(v[k])) && optionalOk(v, optional);
 
 /** A serde externally tagged variant: an object with one key. */
 const tagged =
@@ -134,16 +132,19 @@ function build(exact: (shape: Shape, optional?: Shape) => Check) {
 		status: either(oneOf('in_progress'), tagged({ finished: exact({ winner: nullable(team) }) }))
 	});
 
-	const matchView = exact({
-		id: str,
-		format,
-		start,
-		teams: exact({ a: tuple(str, str), b: tuple(str, str) }),
-		revision: int,
-		head_seq: int,
-		events: array(exact({ seq: int, event })),
-		score
-	}, { locked: bool });
+	const matchView = exact(
+		{
+			id: str,
+			format,
+			start,
+			teams: exact({ a: tuple(str, str), b: tuple(str, str) }),
+			revision: int,
+			head_seq: int,
+			events: array(exact({ seq: int, event })),
+			score
+		},
+		{ locked: bool }
+	);
 
 	// Accounts. Times are Unix seconds.
 	const me = exact({ id: str, email: str, display_name: str, is_admin: bool });

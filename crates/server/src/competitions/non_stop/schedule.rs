@@ -92,6 +92,7 @@ pub fn plan_slots(rounds: &[Vec<Pairing>], courts: usize) -> Vec<SlotPlan> {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
@@ -168,6 +169,103 @@ mod tests {
             assert_eq!(s.wave, 1);
             let courts: Vec<usize> = s.matches.iter().map(|(_, c)| *c).collect();
             assert_eq!(courts, vec![0, 1]);
+        }
+    }
+
+    fn sides(rounds: &[Vec<Pairing>]) -> Vec<Vec<(usize, usize)>> {
+        rounds
+            .iter()
+            .map(|r| r.iter().map(|p| (p.a, p.b)).collect())
+            .collect()
+    }
+
+    #[test]
+    fn four_teams_exact_pairings_with_team_zero_alternating() {
+        assert_eq!(
+            sides(&round_robin(4, 1)),
+            vec![
+                vec![(0, 3), (1, 2)],
+                vec![(2, 0), (3, 1)],
+                vec![(0, 1), (2, 3)],
+            ]
+        );
+        // The second leg is the same rounds with every side swapped.
+        assert_eq!(
+            sides(&round_robin(4, 2))[3..],
+            [
+                vec![(3, 0), (2, 1)],
+                vec![(0, 2), (1, 3)],
+                vec![(1, 0), (3, 2)],
+            ]
+        );
+    }
+
+    #[test]
+    fn team_zero_alternates_sides_round_by_round() {
+        for n in evens() {
+            let rounds = round_robin(n, 1);
+            for (r, round) in rounds.iter().enumerate() {
+                let first = round[0];
+                // Pairing 1 always holds team 0; it is side A on even rounds, B on odd ones.
+                if r % 2 == 0 {
+                    assert_eq!(first.a, 0, "n={n} round={r}");
+                } else {
+                    assert_eq!(first.b, 0, "n={n} round={r}");
+                }
+                assert!(
+                    round[1..].iter().all(|p| p.a != 0 && p.b != 0),
+                    "n={n} round={r}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn team_zero_alternates_again_in_the_second_leg() {
+        let rounds = round_robin(6, 2);
+        let zero_side_a: Vec<bool> = rounds.iter().map(|r| r[0].a == 0).collect();
+        assert_eq!(
+            zero_side_a,
+            [
+                true, false, true, false, true, // leg 1
+                false, true, false, true, false, // leg 2: every side swapped
+            ]
+        );
+    }
+
+    #[test]
+    fn uneven_last_wave_is_short_and_on_the_first_court() {
+        // 6 teams: 3 matches a round, 2 courts: a wave of two, then a wave of one.
+        let rounds = round_robin(6, 1);
+        let slots = plan_slots(&rounds, 2);
+        assert_eq!(slots.len(), 10);
+        for (r, pair) in slots.chunks(2).enumerate() {
+            let (full, short) = (&pair[0], &pair[1]);
+            assert_eq!((full.round, full.wave), (r as u32 + 1, 1));
+            assert_eq!((short.round, short.wave), (r as u32 + 1, 2));
+            assert_eq!(full.slot, 2 * r as u32 + 1);
+            assert_eq!(short.slot, 2 * r as u32 + 2);
+            let courts = |s: &SlotPlan| s.matches.iter().map(|(_, c)| *c).collect::<Vec<_>>();
+            assert_eq!(courts(full), [0, 1]);
+            assert_eq!(courts(short), [0]);
+            let idx = |s: &SlotPlan| s.matches.iter().map(|(p, _)| p.index).collect::<Vec<_>>();
+            assert_eq!(idx(full), [1, 2]);
+            assert_eq!(idx(short), [3]);
+            assert_eq!(short.matches[0].0, rounds[r][2]);
+        }
+    }
+
+    #[test]
+    fn uneven_waves_with_eight_teams_on_three_courts() {
+        // 4 matches a round on 3 courts: waves of 3 and 1, in every round.
+        let slots = plan_slots(&round_robin(8, 1), 3);
+        assert_eq!(slots.len(), 14);
+        let sizes: Vec<usize> = slots.iter().map(|s| s.matches.len()).collect();
+        assert_eq!(sizes, [3, 1].repeat(7));
+        assert!(slots.iter().all(|s| s.wave == 2 - (s.slot % 2)));
+        for short in slots.iter().skip(1).step_by(2) {
+            assert_eq!(short.matches[0].1, 0);
+            assert_eq!(short.matches[0].0.index, 4);
         }
     }
 

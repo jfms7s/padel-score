@@ -304,3 +304,29 @@ impl Sse {
         }
     }
 }
+
+/// The bracket labels of an 8-team tournament with full placement, from the server's own
+/// `Layout::label` rather than a copy of its wording.
+fn bracket_label(place_from: u32, size: u32, idx: u32) -> String {
+    use padel_score_server::competitions::tournament::bracket::{Layout, Pos};
+    Layout::new(8, true).unwrap().label(Pos {
+        place_from,
+        size,
+        idx,
+    })
+}
+
+/// Quarter-final `n` (1-based).
+pub fn qf(n: u32) -> String {
+    bracket_label(1, 8, n - 1)
+}
+
+/// Semi-final `n` (1-based).
+pub fn sf(n: u32) -> String {
+    bracket_label(1, 4, n - 1)
+}
+
+/// Placement semi `n` (1-based), for places 5 to 8.
+pub fn ps(n: u32) -> String {
+    bracket_label(5, 4, n - 1)
+}

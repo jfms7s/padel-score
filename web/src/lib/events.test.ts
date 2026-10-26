@@ -233,7 +233,9 @@ describe('requests', () => {
 
 	it('a refused result carries the engine reason', async () => {
 		stubFetch(422, { error: 'invalid_score', reason: { impossible_set: { index: 0 } } });
-		const err = await postEventResult('e1', 'm1', { client_id: 'c', score: { sets: [set(6, 5)] } }).catch((e: unknown) => e);
+		const err = await postEventResult('e1', 'm1', { client_id: 'c', score: { sets: [set(6, 5)] } }).catch(
+			(e: unknown) => e
+		);
 		expect(err).toBeInstanceOf(ApiError);
 		expect(err).toMatchObject({ status: 422, code: 'invalid_score', reason: { impossible_set: { index: 0 } } });
 	});
@@ -311,8 +313,17 @@ describe('coordinator screens', () => {
 			status: 'in_progress'
 		};
 		expect(liveScoreText(base)).toBe('6-4 2-1, 30-15');
-		expect(liveScoreText({ ...base, sets: [set(6, 6)], current: { tie_break: { a: 3, b: 2, super_tiebreak: false } } })).toBe('6-6, 3-2');
-		expect(liveScoreText({ ...base, sets: [], games: [4, 3], current: { game: { a: 'love', b: 'forty', deuces: 0, deciding_point: false } } })).toBe('4-3, 0-40');
+		expect(
+			liveScoreText({ ...base, sets: [set(6, 6)], current: { tie_break: { a: 3, b: 2, super_tiebreak: false } } })
+		).toBe('6-6, 3-2');
+		expect(
+			liveScoreText({
+				...base,
+				sets: [],
+				games: [4, 3],
+				current: { game: { a: 'love', b: 'forty', deuces: 0, deciding_point: false } }
+			})
+		).toBe('4-3, 0-40');
 		expect(liveScoreText({ ...base, sets: [], games: [4, 3], current: 'none' })).toBe('4-3');
 	});
 
@@ -323,7 +334,9 @@ describe('coordinator screens', () => {
 		expect(eventMessage(new ApiError(409, 'schedule_too_big', 'x'))).toBe(
 			'That’s too many matches: use fewer teams or legs.'
 		);
-		expect(eventMessage(new ApiError(422, 'validation', 'x', false, { field: 'name' }))).toBe(strings.events.fields.name);
+		expect(eventMessage(new ApiError(422, 'validation', 'x', false, { field: 'name' }))).toBe(
+			strings.events.fields.name
+		);
 		expect(eventMessage(new ApiError(0, 'network', 'x'))).toBe(strings.networkError);
 		expect(eventMessage(new Error('boom'))).toBe(strings.networkError);
 	});
@@ -334,7 +347,9 @@ describe('coordinator screens', () => {
 		expect(unfinishedCount([match('m1', 't1', 't2'), live, done])).toBe(2);
 		expect(unfinishedCount([done])).toBe(0);
 		expect(unfinishedCount([])).toBe(0);
-		expect(strings.events.unfinishedWarning(2)).toBe("2 matches aren’t finished. Their court phones will stop working.");
+		expect(strings.events.unfinishedWarning(2)).toBe(
+			'2 matches aren’t finished. Their court phones will stop working.'
+		);
 		expect(strings.events.unfinishedWarning(1)).toBe('1 match isn’t finished. Its court phone will stop working.');
 	});
 

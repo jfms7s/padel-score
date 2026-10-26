@@ -465,6 +465,29 @@ async fn advance_rotates_old_scorer_token() {
     assert!(matches!(err, StoreError::NotFound), "{err:?}");
 }
 
+/// Contract: advancing a court only moves the court's current pointer. A finished match that
+/// was advanced past keeps its `court_id` (and `court_seq`), so the bracket and history views
+/// still show where it was played. `tournament_e2e.rs` relies on this.
+#[tokio::test]
+async fn advanced_past_finished_match_keeps_its_court() {
+    let (s, pool) = setup().await;
+    let (ev, teams) = running(&s, &pool).await;
+    let court = s.add_court(A, &ev.id, None).await.unwrap();
+    let first = new_match(&s, &ev, &teams, 0, 1, Some(&court.id)).await;
+    let second = new_match(&s, &ev, &teams, 2, 3, Some(&court.id)).await;
+    finish(&s, &first.match_id).await;
+    let done = s.advance_court(A, &ev.id, &court.id).await.unwrap();
+    assert_eq!(done.rotated.as_deref(), Some(first.match_id.as_str()));
+    assert_eq!(current_of(&pool, &court.id).await, Some(second.match_id));
+    let mut conn = pool.acquire().await.unwrap();
+    let rows = padel_score_server::competitions::courts::event_matches_in(&mut conn, &ev.id)
+        .await
+        .unwrap();
+    let kept = rows.iter().find(|r| r.match_id == first.match_id).unwrap();
+    assert_eq!(kept.court_id.as_deref(), Some(court.id.as_str()));
+    assert_eq!(kept.court_seq, first.court_seq);
+}
+
 #[tokio::test]
 async fn moving_current_match_rotates_and_promotes_next() {
     let (s, pool) = setup().await;

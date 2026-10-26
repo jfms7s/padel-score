@@ -168,9 +168,9 @@ describe('api', () => {
 	])('treats any %i on a command as retryable: client_id makes the resend safe', async (status, body) => {
 		vi.stubGlobal('fetch', async () => new Response(body, { status }));
 		await expect(postCommands('tok', REQ)).rejects.toMatchObject({ status, code: 'network', retryable: true });
-		await expect(
-			replace('tok', { client_id: 'c', base_revision: 1, base_seq: 1, commands: [] })
-		).rejects.toMatchObject({ status, code: 'network', retryable: true });
+		await expect(replace('tok', { client_id: 'c', base_revision: 1, base_seq: 1, commands: [] })).rejects.toMatchObject(
+			{ status, code: 'network', retryable: true }
+		);
 	});
 
 	describe('timeouts', () => {

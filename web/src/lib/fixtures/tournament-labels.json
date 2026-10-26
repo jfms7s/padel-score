@@ -1,0 +1,482 @@
+[
+  {
+    "idx": 0,
+    "label": "Round of 32, match 1",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 1,
+    "label": "Round of 32, match 2",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 2,
+    "label": "Round of 32, match 3",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 3,
+    "label": "Round of 32, match 4",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 4,
+    "label": "Round of 32, match 5",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 5,
+    "label": "Round of 32, match 6",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 6,
+    "label": "Round of 32, match 7",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 7,
+    "label": "Round of 32, match 8",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 8,
+    "label": "Round of 32, match 9",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 9,
+    "label": "Round of 32, match 10",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 10,
+    "label": "Round of 32, match 11",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 11,
+    "label": "Round of 32, match 12",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 12,
+    "label": "Round of 32, match 13",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 13,
+    "label": "Round of 32, match 14",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 14,
+    "label": "Round of 32, match 15",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 15,
+    "label": "Round of 32, match 16",
+    "place_from": 1,
+    "size": 32
+  },
+  {
+    "idx": 0,
+    "label": "Round of 16, match 1",
+    "place_from": 1,
+    "size": 16
+  },
+  {
+    "idx": 1,
+    "label": "Round of 16, match 2",
+    "place_from": 1,
+    "size": 16
+  },
+  {
+    "idx": 2,
+    "label": "Round of 16, match 3",
+    "place_from": 1,
+    "size": 16
+  },
+  {
+    "idx": 3,
+    "label": "Round of 16, match 4",
+    "place_from": 1,
+    "size": 16
+  },
+  {
+    "idx": 4,
+    "label": "Round of 16, match 5",
+    "place_from": 1,
+    "size": 16
+  },
+  {
+    "idx": 5,
+    "label": "Round of 16, match 6",
+    "place_from": 1,
+    "size": 16
+  },
+  {
+    "idx": 6,
+    "label": "Round of 16, match 7",
+    "place_from": 1,
+    "size": 16
+  },
+  {
+    "idx": 7,
+    "label": "Round of 16, match 8",
+    "place_from": 1,
+    "size": 16
+  },
+  {
+    "idx": 0,
+    "label": "Placement R16 1 (17th–32nd)",
+    "place_from": 17,
+    "size": 16
+  },
+  {
+    "idx": 1,
+    "label": "Placement R16 2 (17th–32nd)",
+    "place_from": 17,
+    "size": 16
+  },
+  {
+    "idx": 2,
+    "label": "Placement R16 3 (17th–32nd)",
+    "place_from": 17,
+    "size": 16
+  },
+  {
+    "idx": 3,
+    "label": "Placement R16 4 (17th–32nd)",
+    "place_from": 17,
+    "size": 16
+  },
+  {
+    "idx": 4,
+    "label": "Placement R16 5 (17th–32nd)",
+    "place_from": 17,
+    "size": 16
+  },
+  {
+    "idx": 5,
+    "label": "Placement R16 6 (17th–32nd)",
+    "place_from": 17,
+    "size": 16
+  },
+  {
+    "idx": 6,
+    "label": "Placement R16 7 (17th–32nd)",
+    "place_from": 17,
+    "size": 16
+  },
+  {
+    "idx": 7,
+    "label": "Placement R16 8 (17th–32nd)",
+    "place_from": 17,
+    "size": 16
+  },
+  {
+    "idx": 0,
+    "label": "Quarter-final 1",
+    "place_from": 1,
+    "size": 8
+  },
+  {
+    "idx": 1,
+    "label": "Quarter-final 2",
+    "place_from": 1,
+    "size": 8
+  },
+  {
+    "idx": 2,
+    "label": "Quarter-final 3",
+    "place_from": 1,
+    "size": 8
+  },
+  {
+    "idx": 3,
+    "label": "Quarter-final 4",
+    "place_from": 1,
+    "size": 8
+  },
+  {
+    "idx": 0,
+    "label": "Placement QF 1 (9th–16th)",
+    "place_from": 9,
+    "size": 8
+  },
+  {
+    "idx": 1,
+    "label": "Placement QF 2 (9th–16th)",
+    "place_from": 9,
+    "size": 8
+  },
+  {
+    "idx": 2,
+    "label": "Placement QF 3 (9th–16th)",
+    "place_from": 9,
+    "size": 8
+  },
+  {
+    "idx": 3,
+    "label": "Placement QF 4 (9th–16th)",
+    "place_from": 9,
+    "size": 8
+  },
+  {
+    "idx": 0,
+    "label": "Placement QF 1 (17th–24th)",
+    "place_from": 17,
+    "size": 8
+  },
+  {
+    "idx": 1,
+    "label": "Placement QF 2 (17th–24th)",
+    "place_from": 17,
+    "size": 8
+  },
+  {
+    "idx": 2,
+    "label": "Placement QF 3 (17th–24th)",
+    "place_from": 17,
+    "size": 8
+  },
+  {
+    "idx": 3,
+    "label": "Placement QF 4 (17th–24th)",
+    "place_from": 17,
+    "size": 8
+  },
+  {
+    "idx": 0,
+    "label": "Placement QF 1 (25th–32nd)",
+    "place_from": 25,
+    "size": 8
+  },
+  {
+    "idx": 1,
+    "label": "Placement QF 2 (25th–32nd)",
+    "place_from": 25,
+    "size": 8
+  },
+  {
+    "idx": 2,
+    "label": "Placement QF 3 (25th–32nd)",
+    "place_from": 25,
+    "size": 8
+  },
+  {
+    "idx": 3,
+    "label": "Placement QF 4 (25th–32nd)",
+    "place_from": 25,
+    "size": 8
+  },
+  {
+    "idx": 0,
+    "label": "Semi-final 1",
+    "place_from": 1,
+    "size": 4
+  },
+  {
+    "idx": 1,
+    "label": "Semi-final 2",
+    "place_from": 1,
+    "size": 4
+  },
+  {
+    "idx": 0,
+    "label": "Placement semi 1 (5th–8th)",
+    "place_from": 5,
+    "size": 4
+  },
+  {
+    "idx": 1,
+    "label": "Placement semi 2 (5th–8th)",
+    "place_from": 5,
+    "size": 4
+  },
+  {
+    "idx": 0,
+    "label": "Placement semi 1 (9th–12th)",
+    "place_from": 9,
+    "size": 4
+  },
+  {
+    "idx": 1,
+    "label": "Placement semi 2 (9th–12th)",
+    "place_from": 9,
+    "size": 4
+  },
+  {
+    "idx": 0,
+    "label": "Placement semi 1 (13th–16th)",
+    "place_from": 13,
+    "size": 4
+  },
+  {
+    "idx": 1,
+    "label": "Placement semi 2 (13th–16th)",
+    "place_from": 13,
+    "size": 4
+  },
+  {
+    "idx": 0,
+    "label": "Placement semi 1 (17th–20th)",
+    "place_from": 17,
+    "size": 4
+  },
+  {
+    "idx": 1,
+    "label": "Placement semi 2 (17th–20th)",
+    "place_from": 17,
+    "size": 4
+  },
+  {
+    "idx": 0,
+    "label": "Placement semi 1 (21st–24th)",
+    "place_from": 21,
+    "size": 4
+  },
+  {
+    "idx": 1,
+    "label": "Placement semi 2 (21st–24th)",
+    "place_from": 21,
+    "size": 4
+  },
+  {
+    "idx": 0,
+    "label": "Placement semi 1 (25th–28th)",
+    "place_from": 25,
+    "size": 4
+  },
+  {
+    "idx": 1,
+    "label": "Placement semi 2 (25th–28th)",
+    "place_from": 25,
+    "size": 4
+  },
+  {
+    "idx": 0,
+    "label": "Placement semi 1 (29th–32nd)",
+    "place_from": 29,
+    "size": 4
+  },
+  {
+    "idx": 1,
+    "label": "Placement semi 2 (29th–32nd)",
+    "place_from": 29,
+    "size": 4
+  },
+  {
+    "idx": 0,
+    "label": "Final",
+    "place_from": 1,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "3rd place",
+    "place_from": 3,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "5th place",
+    "place_from": 5,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "7th place",
+    "place_from": 7,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "9th place",
+    "place_from": 9,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "11th place",
+    "place_from": 11,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "13th place",
+    "place_from": 13,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "15th place",
+    "place_from": 15,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "17th place",
+    "place_from": 17,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "19th place",
+    "place_from": 19,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "21st place",
+    "place_from": 21,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "23rd place",
+    "place_from": 23,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "25th place",
+    "place_from": 25,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "27th place",
+    "place_from": 27,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "29th place",
+    "place_from": 29,
+    "size": 2
+  },
+  {
+    "idx": 0,
+    "label": "31st place",
+    "place_from": 31,
+    "size": 2
+  }
+]

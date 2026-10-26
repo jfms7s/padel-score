@@ -84,7 +84,7 @@
 		{:else}
 			<p class="big time" role="timer" aria-live="off">{clockText(left)}</p>
 			{#if clock.state === 'paused'}
-				<p class="status">{beforeGo ? `${t.paused} · ${t.waitingForClock}` : t.paused}</p>
+				<p class="status">{beforeGo ? t.pausedBeforeGo : t.paused}</p>
 			{/if}
 		{/if}
 		{#if beforeGo}<p class="note">{t.practiceNote}</p>{/if}
