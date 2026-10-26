@@ -894,7 +894,18 @@ export const strings = {
 	// API failures.
 	signedOutPlayers: "You've been signed out. Sign in again to use your players.",
 	networkError: "Can't reach the server.",
-	serverError: (status: number) => `The server answered ${status}.`
+	serverError: (status: number) => `The server answered ${status}.`,
+
+	// App navigation rail.
+	nav: {
+		label: 'Main',
+		home: 'Home',
+		events: 'Events',
+		players: 'Players',
+		history: 'History',
+		results: 'My results',
+		account: 'Account'
+	}
 } as const;
 
 /** 1st, 2nd, 3rd, 4th, 11th, 21st. */

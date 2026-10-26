@@ -286,3 +286,43 @@ button {
 	border: 1px solid var(--warn);
 	color: var(--warn);
 }
+
+/* Page widths. Narrow is the phone column (forms, account pages); wide fills a desktop up to a
+   cap. Gutters grow at tablet width and again on a desktop. */
+.page-narrow,
+.page-wide {
+	margin: 0 auto;
+	padding-left: 16px;
+	padding-right: 16px;
+}
+.page-narrow {
+	max-width: 28rem;
+}
+.page-wide {
+	max-width: 90rem;
+}
+@media (min-width: 700px) {
+	.page-narrow,
+	.page-wide {
+		padding-left: 24px;
+		padding-right: 24px;
+	}
+}
+@media (min-width: 1100px) {
+	.page-wide {
+		padding-left: 32px;
+		padding-right: 32px;
+	}
+}
+
+/* Cards that fill the row: one column on a phone, as many as fit of --min from tablet width. */
+.grid-auto {
+	display: grid;
+	gap: 8px;
+	grid-template-columns: 1fr;
+}
+@media (min-width: 700px) {
+	.grid-auto {
+		grid-template-columns: repeat(auto-fill, minmax(var(--min, 320px), 1fr));
+	}
+}
