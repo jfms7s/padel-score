@@ -1,10 +1,11 @@
 package io.github.jfms7s.padelscore.local.engine
 
 import io.github.jfms7s.padelscore.net.Team
-import io.github.jfms7s.padelscore.net.WireJson
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -22,13 +23,20 @@ private data class EngineVector(
 @Serializable
 private data class EngineVectors(val vectors: List<EngineVector>)
 
+// WireJson minus its leniency: a field the Rust Score gains must fail here until the port has it.
+private val StrictJson = Json {
+    ignoreUnknownKeys = false
+    classDiscriminator = "kind"
+    explicitNulls = false
+}
+
 // The Rust engine's own outputs (crates/scoring/tests/engine_vectors.rs): the port must match every step.
 class EngineVectorsTest {
     private val vectors: List<EngineVector> by lazy {
         val text = checkNotNull(javaClass.classLoader?.getResource("engine-vectors.json")) {
             "missing test resource engine-vectors.json"
         }.readText()
-        WireJson.decodeFromString(EngineVectors.serializer(), text).vectors
+        StrictJson.decodeFromString(EngineVectors.serializer(), text).vectors
     }
 
     @Test
@@ -42,11 +50,12 @@ class EngineVectorsTest {
                 val step = v.steps[i]
                 if (step is JsonObject && "error" in step) {
                     val before = m.score()
+                    assertEquals("${v.name}[$i]", JsonPrimitive("match_over"), step["error"])
                     assertFalse("${v.name}[$i]", m.apply(team))
                     assertEquals("${v.name}[$i]", before, m.score())
                 } else {
                     assertTrue("${v.name}[$i]", m.apply(team))
-                    assertEquals("${v.name}[$i]", WireJson.decodeFromJsonElement(EngineScore.serializer(), step), m.score())
+                    assertEquals("${v.name}[$i]", StrictJson.decodeFromJsonElement(EngineScore.serializer(), step), m.score())
                 }
             }
         }
