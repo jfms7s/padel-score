@@ -548,4 +548,10 @@
 	.sheet-wrap :global(.sheet) {
 		background: var(--panel);
 	}
+	@media (min-width: 700px) {
+		.center,
+		.serve {
+			max-width: 32rem;
+		}
+	}
 </style>
