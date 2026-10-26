@@ -14,6 +14,7 @@ import {
 	playBeep,
 	playHorn,
 	postClock,
+	msToEnd,
 	remainingMs,
 	shouldHorn,
 	type Clock
@@ -64,6 +65,27 @@ describe('server time', () => {
 		}
 	});
 
+	it('server_clock_times_out_a_hung_sample_and_runs_a_queued_sync', async () => {
+		vi.useFakeTimers();
+		try {
+			let calls = 0;
+			const c = createServerClock(
+				() => (++calls === 1 ? new Promise<number>(() => {}) : Promise.resolve(1000)),
+				() => 0
+			);
+			const first = c.sync();
+			const second = c.sync(); // asked for while the first runs
+			await vi.advanceTimersByTimeAsync(3000);
+			await first;
+			await second;
+			expect(calls).toBe(1 + 4 + 5); // hung + 4 good, then a second pass
+			expect(c.now()).toBe(1000);
+			c.stop();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('server_clock_survives_a_failed_sync', async () => {
 		const c = createServerClock(async () => Promise.reject(new Error('down')), () => 5);
 		await c.sync();
@@ -80,6 +102,15 @@ describe('countdown', () => {
 		expect(remainingMs(c, server)).toBe(0);
 		expect(remainingMs(c, server - 60_000)).toBe(60_000);
 		expect(remainingMs(c, local)).toBe(120_000); // the unsynced local time would be wrong
+	});
+
+	it('resume_count_in_shows_what_was_left', () => {
+		const c = clock({ starts_at_ms: 100_000, ends_at_ms: 502_000, remaining_ms: 402_000 });
+		expect(remainingMs(c, 97_000)).toBe(402_000);
+		expect(remainingMs(c, 100_000)).toBe(402_000);
+		expect(remainingMs(c, 160_000)).toBe(342_000);
+		expect(msToEnd(c, 600_000)).toBe(-98_000);
+		expect(msToEnd(clock({ state: 'paused' }), 0)).toBe(0);
 	});
 
 	it('clockText_rounds_up', () => {

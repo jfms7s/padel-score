@@ -843,7 +843,7 @@ export const strings = {
 		lost: 'L',
 		games: 'Games',
 		points: 'Pts',
-		standingsHint: 'Win 3 points, draw 1, loss 0. Level teams are split by games won, then by their own match.',
+		standingsHint: 'Win 3, draw 1, loss 0. Level teams are split by games won, then by their match against each other.',
 		afterRound: (r: number) => `After round ${r}`,
 		computedPlacesHint: 'The final places come from the standings. Level teams share a place.',
 		clockErrors: {

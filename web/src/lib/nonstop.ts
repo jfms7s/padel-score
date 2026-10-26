@@ -161,6 +161,7 @@ export function bestOffset(samples: readonly TimeSample[]): number | null {
 
 const SAMPLES = 5;
 const RESYNC_MS = 10 * 60_000;
+const SAMPLE_TIMEOUT_MS = 3000;
 
 export interface ServerClock {
 	/** Server time in unix ms; the local time until the first sync lands. */
@@ -177,13 +178,25 @@ export function createServerClock(
 	let offset = 0;
 	let timer: ReturnType<typeof setInterval> | null = null;
 	let syncing: Promise<void> | null = null;
+	let again = false;
+
+	/** One sample, given up on after SAMPLE_TIMEOUT_MS so a hung fetch can't block later syncs. */
+	function sample(): Promise<number> {
+		return new Promise((resolve, reject) => {
+			const t = setTimeout(() => reject(new Error('time sample timed out')), SAMPLE_TIMEOUT_MS);
+			fetchTime().then(
+				(v) => (clearTimeout(t), resolve(v)),
+				(e) => (clearTimeout(t), reject(e))
+			);
+		});
+	}
 
 	async function measure(): Promise<void> {
 		const samples: TimeSample[] = [];
 		for (let i = 0; i < SAMPLES; i++) {
 			const t0 = now();
 			try {
-				const server = await fetchTime();
+				const server = await sample();
 				samples.push({ t0, t1: now(), server });
 			} catch {
 				// A lost sample just leaves fewer to choose from.
@@ -193,15 +206,29 @@ export function createServerClock(
 		if (best !== null) offset = best;
 	}
 
+	function sync(): Promise<void> {
+		timer ??= setInterval(() => void sync(), RESYNC_MS);
+		if (syncing !== null) {
+			// A sync asked for while one runs (a reconnect) measures once more afterwards.
+			again = true;
+			return syncing;
+		}
+		syncing = (async () => {
+			try {
+				do {
+					again = false;
+					await measure();
+				} while (again);
+			} finally {
+				syncing = null;
+			}
+		})();
+		return syncing;
+	}
+
 	return {
 		now: () => now() + offset,
-		sync() {
-			timer ??= setInterval(() => void this.sync(), RESYNC_MS);
-			syncing ??= measure().finally(() => {
-				syncing = null;
-			});
-			return syncing;
-		},
+		sync,
 		stop() {
 			if (timer !== null) clearInterval(timer);
 			timer = null;
@@ -228,14 +255,24 @@ export function countInMs(clock: Clock, serverNow: number): number {
 export function remainingMs(clock: Clock, serverNow: number): number {
 	switch (clock.state) {
 		case 'running':
+			// Clamp to this run's length (a resume runs only what was left), so the count-in
+			// shows the time the run will have, not the full match.
 			return clock.ends_at_ms === null
 				? clock.remaining_ms
-				: Math.min(clock.duration_ms, Math.max(0, clock.ends_at_ms - serverNow));
+				: Math.min(
+						clock.starts_at_ms === null ? clock.remaining_ms : clock.ends_at_ms - clock.starts_at_ms,
+						Math.max(0, clock.ends_at_ms - serverNow)
+					);
 		case 'done':
 			return 0;
 		default:
 			return clock.remaining_ms;
 	}
+}
+
+/** Unclamped time to the deadline (negative once past it); 0 unless running. For `shouldHorn`. */
+export function msToEnd(clock: Clock, serverNow: number): number {
+	return clock.state === 'running' && clock.ends_at_ms !== null ? clock.ends_at_ms - serverNow : 0;
 }
 
 /** `mm:ss`, the seconds rounded up so the clock reads 00:00 only at zero. */
@@ -284,7 +321,7 @@ const hornKey = (clock: Clock, eventId: string) => `${eventId}:${clock.slot}`;
 
 /**
  * Whether to sound the horn: once per `eventId:slot`, when the clock has just reached zero
- * (`remaining` is `ends_at_ms − serverNow`, not clamped: 0 down to −3 s counts, a reload later
+ * (`remaining` is `msToEnd(clock, serverNow)`, not the clamped `remainingMs`: 0 down to −3 s counts, a reload later
  * stays quiet), or when a frame turns the slot `done` while `remaining` (the last local value)
  * still had time on it (End now).
  */
