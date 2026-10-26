@@ -674,6 +674,8 @@ export const strings = {
 			event_finished: 'The event is finished.',
 			too_few_teams: 'Add at least two teams first.',
 			no_courts: 'Add a court first.',
+			odd_teams: 'A non-stop needs an even number of teams.',
+			schedule_too_big: 'That’s too many matches: use fewer teams or legs.',
 			too_many_teams: 'An event can have at most 64 teams.',
 			too_many_courts: 'An event can have at most 16 courts.',
 			player_in_team: 'One of these players is already in a team.',

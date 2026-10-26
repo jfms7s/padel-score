@@ -319,6 +319,10 @@ describe('coordinator screens', () => {
 	it('event_message', () => {
 		expect(eventMessage(new ApiError(409, 'too_few_teams', 'x'))).toBe(strings.events.errors.too_few_teams);
 		expect(eventMessage(new ApiError(409, 'no_courts', 'x'))).toBe(strings.events.errors.no_courts);
+		expect(eventMessage(new ApiError(409, 'odd_teams', 'x'))).toBe('A non-stop needs an even number of teams.');
+		expect(eventMessage(new ApiError(409, 'schedule_too_big', 'x'))).toBe(
+			'That’s too many matches: use fewer teams or legs.'
+		);
 		expect(eventMessage(new ApiError(422, 'validation', 'x', false, { field: 'name' }))).toBe(strings.events.fields.name);
 		expect(eventMessage(new ApiError(0, 'network', 'x'))).toBe(strings.networkError);
 		expect(eventMessage(new Error('boom'))).toBe(strings.networkError);

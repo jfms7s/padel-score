@@ -63,7 +63,10 @@ export async function deleteEvent(id: string): Promise<void> {
 	await accountRequest(event(id), { ...signedIn, method: 'DELETE', ok: 204 });
 }
 
-/** Needs two teams and a court (409 `too_few_teams`, `no_courts`). */
+/**
+ * Needs two teams and a court (409 `too_few_teams`, `no_courts`); a non-stop also an even
+ * number of teams and a schedule that is not too big (409 `odd_teams`, `schedule_too_big`).
+ */
 export function startEvent(id: string): Promise<EventDetail> {
 	return accountRequest(event(id, '/start'), { ...signedIn, method: 'POST' });
 }
