@@ -1,9 +1,6 @@
 //! The non-stop schedule: a round robin by the circle method, split into waves of at most
 //! `courts` matches. Pure: no I/O, no clock, never panics (bad input gives an empty plan).
 
-// Used from Task 3 (on_start).
-#![allow(dead_code)]
-
 /// One match of the schedule. `a` and `b` index the team list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pairing {
