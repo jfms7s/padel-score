@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::accounts_store::User;
-use crate::linked_history::LinkedEntry;
+use crate::linked_history::{LinkedEntry, LinkedPlacing};
 use crate::store::{Store, StoreError};
 use crate::tokens::new_token;
 
@@ -84,21 +84,35 @@ pub async fn viewer_of(
     Ok(None)
 }
 
-/// Clear what `viewer` may not see of `entry`: the teams, the coordinator's name and the match
-/// link. The player sees all of their own, and a coordinator all of their own events.
-pub fn redact(mut entry: LinkedEntry, viewer: &Viewer) -> LinkedEntry {
-    let sees_all = match viewer {
+/// Whether `viewer` sees in full what `owner_user_id` coordinated: the player sees all of their
+/// own, and a coordinator all of their own matches and events.
+fn sees_all(viewer: &Viewer, owner_user_id: &str) -> bool {
+    match viewer {
         Viewer::Own => true,
-        Viewer::Coordinator { id } => *id == entry.owner_user_id,
+        Viewer::Coordinator { id } => id == owner_user_id,
         Viewer::Public => false,
-    };
-    if !sees_all {
+    }
+}
+
+/// Clear what `viewer` may not see of `entry`: the teams, the coordinator's name, the match
+/// link, and all of an event match's event but its kind.
+pub fn redact(mut entry: LinkedEntry, viewer: &Viewer) -> LinkedEntry {
+    if !sees_all(viewer, &entry.owner_user_id) {
         entry.teams = None;
         entry.coordinator_name = None;
         entry.spectator_token = None;
+        entry.event = entry.event.map(|e| e.redacted());
         entry.redacted = true;
     }
     entry
+}
+
+/// Clear the event's name from a placing `viewer` may not see in full.
+pub fn redact_placing(mut placing: LinkedPlacing, viewer: &Viewer) -> LinkedPlacing {
+    if !sees_all(viewer, &placing.owner_user_id) {
+        placing.event_name = None;
+    }
+    placing
 }
 
 impl Store {

@@ -9,6 +9,7 @@ mod support;
 
 use axum::http::{Method, StatusCode};
 use padel_score_server::accounts_store::NewUser;
+use padel_score_server::competitions::{Kind, NewCompetition};
 use padel_score_server::db;
 use padel_score_server::linking::{ClaimPreview, preview_in};
 use padel_score_server::players::PlayerSlots;
@@ -282,6 +283,106 @@ async fn overlapping_through_an_event_cannot_both_link() {
     padel_score_server::linking::link_in(&mut tx, &other, &u, 12)
         .await
         .unwrap();
+}
+
+/// A new event of `owner`'s with one team per pair of players: the event id.
+async fn event_with_teams(s: &Store, owner: &str, teams: &[[&str; 2]]) -> String {
+    let ev = s
+        .create_competition(
+            owner,
+            NewCompetition {
+                name: "Cup".into(),
+                kind: Kind::Tournament,
+                format: format(),
+                settings: None,
+            },
+            1,
+        )
+        .await
+        .unwrap();
+    for [p1, p2] in teams {
+        s.add_team(owner, &ev.id, [(*p1).to_owned(), (*p2).to_owned()], None, 1)
+            .await
+            .unwrap();
+    }
+    ev.id
+}
+
+#[tokio::test]
+async fn overlapping_through_an_event_team_cannot_both_link() {
+    let (s, _pool) = setup().await;
+    let ana = user(&s, "ana@example.com", "Ana").await;
+    let u = user(&s, "u@example.com", "U").await;
+    let rui = player(&s, &ana, "Rui").await;
+    let rui_s = player(&s, &ana, "Rui S.").await;
+    let marta = player(&s, &ana, "Marta").await;
+    let marta_s = player(&s, &ana, "Marta S.").await;
+    let x = player(&s, &ana, "X").await;
+    let y = player(&s, &ana, "Y").await;
+    let solo = player(&s, &ana, "Solo").await;
+    // Opposing teams of one event (it has not started, so there are no placings).
+    event_with_teams(&s, &ana, &[[&rui, &x], [&rui_s, &y]]).await;
+    // Partners in one team of another event.
+    event_with_teams(&s, &ana, &[[&marta, &marta_s]]).await;
+    // A team of a third event shares nothing with the others.
+    event_with_teams(&s, &ana, &[[&solo, &x]]).await;
+    let mut tx = s.begin().await.unwrap();
+    padel_score_server::linking::link_in(&mut tx, &rui, &u, 10)
+        .await
+        .unwrap();
+    let err = padel_score_server::linking::link_in(&mut tx, &rui_s, &u, 11)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("link_overlaps")),
+        "{err:?}"
+    );
+    padel_score_server::linking::link_in(&mut tx, &marta, &u, 12)
+        .await
+        .unwrap();
+    let err = padel_score_server::linking::link_in(&mut tx, &marta_s, &u, 13)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("link_overlaps")),
+        "{err:?}"
+    );
+    padel_score_server::linking::link_in(&mut tx, &solo, &u, 14)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn preview_counts_events_from_teams_once() {
+    let (s, pool) = setup().await;
+    let ana = user(&s, "ana@example.com", "Ana").await;
+    let rui = player(&s, &ana, "Rui").await;
+    let x = player(&s, &ana, "X").await;
+    // A running event: a team, no placing yet.
+    let running = event_with_teams(&s, &ana, &[[&rui, &x]]).await;
+    sqlx::query("UPDATE competitions SET status = 'running', started_at = 400 WHERE id = ?")
+        .bind(&running)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let p = preview(&pool, &rui).await.unwrap();
+    assert_eq!((p.matches, p.events), (0, 1));
+    assert_eq!((p.first_at, p.last_at), (Some(400), Some(400)));
+
+    // A finished event: its team and its placing are one event.
+    let finished = event_with_teams(&s, &ana, &[[&x, &rui]]).await;
+    sqlx::query(
+        "UPDATE competitions SET status = 'finished', started_at = 100, finished_at = 200 \
+         WHERE id = ?",
+    )
+    .bind(&finished)
+    .execute(&pool)
+    .await
+    .unwrap();
+    placing(&pool, &rui, &finished, 200).await;
+    let p = preview(&pool, &rui).await.unwrap();
+    assert_eq!((p.matches, p.events), (0, 2));
+    assert_eq!((p.first_at, p.last_at), (Some(100), Some(400)));
 }
 
 #[tokio::test]
