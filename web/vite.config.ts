@@ -20,7 +20,26 @@ export default defineConfig({
 		}
 	},
 	test: {
-		include: ['src/**/*.{test,spec}.ts'],
-		environment: 'node'
+		projects: [
+			{
+				extends: true,
+				test: {
+					name: 'node',
+					include: ['src/**/*.{test,spec}.ts'],
+					exclude: ['src/**/*.svelte.test.ts'],
+					environment: 'node'
+				}
+			},
+			{
+				// Rune tests take Svelte's client runtime, so their effects actually run.
+				extends: true,
+				resolve: { conditions: ['browser'] },
+				test: {
+					name: 'runes',
+					include: ['src/**/*.svelte.test.ts'],
+					environment: './vitest-client-env.ts'
+				}
+			}
+		]
 	}
 });
