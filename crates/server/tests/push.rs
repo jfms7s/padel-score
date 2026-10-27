@@ -133,6 +133,22 @@ async fn vapid_keys_are_made_once_and_kept() {
 }
 
 #[tokio::test]
+async fn a_second_vapid_read_does_not_write() {
+    let (state, pool, ..) = with_admin().await;
+    let first = vapid_keys(&state.store).await.unwrap().public_b64();
+    // From here any insert into push_keys aborts, even an `INSERT OR IGNORE`.
+    sqlx::query(
+        "CREATE TRIGGER no_key_writes BEFORE INSERT ON push_keys \
+         BEGIN SELECT RAISE(ABORT, 'push_keys written'); END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let second = vapid_keys(&state.store).await.unwrap().public_b64();
+    assert_eq!(first, second);
+}
+
+#[tokio::test]
 async fn public_key_is_a_65_byte_uncompressed_point() {
     let (state, _pool, app, ..) = with_admin().await;
     let key = vapid_keys(&state.store).await.unwrap().public_b64();
@@ -191,6 +207,10 @@ async fn subscription_endpoint_must_be_https_public_host() {
         "https://localhost/x",
         "https://a.localhost/x",
         "https://2130706433/x",
+        "https://router/x",
+        "https://router./x",
+        "https://push.example.test:8443/x",
+        "https://push.example.test:22/x",
         "https://user@push.example.test/x",
         "not a url",
         long.as_str(),
@@ -226,6 +246,12 @@ async fn subscription_endpoint_must_be_https_public_host() {
         StatusCode::NO_CONTENT
     );
     assert_eq!(devices(&state, &app, &raw).await, 1);
+    // The default port, written out, is fine.
+    let explicit = subscription("https://push.example.test:443/def");
+    assert_eq!(
+        subscribe(&state, &app, &raw, explicit).await,
+        StatusCode::NO_CONTENT
+    );
 }
 
 #[tokio::test]
@@ -482,4 +508,83 @@ async fn test_route_queues_a_test_notice() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].0, admin);
     assert_eq!(rows[0].1, r#"{"kind":"test","url":"/account"}"#);
+}
+
+#[tokio::test]
+async fn test_route_is_limited_to_five_per_ten_minutes_per_user() {
+    let (state, pool, app, _admin, raw) = with_admin().await;
+    for i in 0..5 {
+        let res = send(
+            &app,
+            as_session(&state, &raw, Method::POST, "/api/me/push/test", None),
+        )
+        .await;
+        assert_eq!(res.status, StatusCode::ACCEPTED, "call {i}");
+    }
+    let res = send(
+        &app,
+        as_session(&state, &raw, Method::POST, "/api/me/push/test", None),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(res.body["error"], json!("too_many_requests"));
+    let retry = res.body["retry_after_secs"].as_u64().unwrap();
+    assert!((1..=600).contains(&retry), "{retry}");
+    assert_eq!(
+        res.headers[axum::http::header::RETRY_AFTER]
+            .to_str()
+            .unwrap(),
+        retry.to_string()
+    );
+    // The refused call queued nothing.
+    assert_eq!(outbox(&pool).await.len(), 5);
+}
+
+/// Answers only once both devices of a row are in flight at the same time; a sender that goes one
+/// device at a time never gets the second request out, and the wait times out.
+struct MeetingTransport {
+    barrier: tokio::sync::Barrier,
+}
+
+impl PushTransport for MeetingTransport {
+    fn send(&self, _req: http::Request<Vec<u8>>) -> BoxFuture<'_, Result<u16, String>> {
+        Box::pin(async move {
+            let met =
+                tokio::time::timeout(std::time::Duration::from_secs(5), self.barrier.wait()).await;
+            met.map(|_| 201).map_err(|_| "not concurrent".to_owned())
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_rows_devices_are_attempted_together() {
+    let (mut state, _pool, _app, admin, _raw) = with_admin().await;
+    let transport: Arc<dyn PushTransport> = Arc::new(MeetingTransport {
+        barrier: tokio::sync::Barrier::new(2),
+    });
+    state.push = Arc::new(Pusher::new(transport));
+    for endpoint in [
+        "https://push.example.test/one",
+        "https://push.example.test/two",
+    ] {
+        state
+            .store
+            .save_push_subscription(&admin, &typed(endpoint), 1_000)
+            .await
+            .unwrap();
+    }
+    state
+        .store
+        .queue(&[test_notice(&admin, None)], 1_000)
+        .await
+        .unwrap();
+    let report = send_pending(&state, 1_010).await;
+    assert_eq!(
+        report,
+        SendReport {
+            sent: 2,
+            gone: 0,
+            failed: 0
+        }
+    );
 }

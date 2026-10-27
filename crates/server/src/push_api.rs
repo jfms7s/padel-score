@@ -6,7 +6,8 @@
 //! - `POST /api/me/push` with a browser `PushSubscription` is 204. An endpoint that is not an
 //!   `https` public host, or keys of the wrong size, is `422 validation` on `endpoint`.
 //! - `DELETE /api/me/push` `{endpoint}` is 204, also when it is not subscribed.
-//! - `POST /api/me/push/test` is 202: it queues a test notice to the caller.
+//! - `POST /api/me/push/test` is 202: it queues a test notice to the caller. Limited to 5 per 10
+//!   minutes per user (`429 too_many_requests`).
 //!
 //! The `/api/me/*` routes take a signed-in session; a device token is 403.
 
@@ -92,6 +93,11 @@ async fn test(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
 ) -> Result<StatusCode, ApiError> {
+    state
+        .limits
+        .push_test
+        .try_acquire(&user.user.id, now())
+        .map_err(|retry_after| ApiError::TooMany { retry_after })?;
     let notice = Notice {
         user_id: user.user.id,
         payload: Payload {

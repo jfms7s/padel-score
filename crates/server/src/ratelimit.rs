@@ -182,7 +182,7 @@ impl RateLimiter {
     }
 }
 
-/// The named limiters the account routes use. All windows are one minute.
+/// The named limiters the account routes use. Windows are one minute, except `push_test`.
 #[derive(Debug)]
 pub struct Limits {
     /// Login failures per client address (reserve, then refund on success) ([`crate::client_ip::rate_key`]): 60 a minute.
@@ -204,6 +204,8 @@ pub struct Limits {
     pub device_token: RateLimiter,
     /// Link-code lookups and accepts, and claim previews and creates, per user id: 20 a minute.
     pub claims: RateLimiter,
+    /// `POST /api/me/push/test` per user id: 5 per 10 minutes.
+    pub push_test: RateLimiter,
 }
 
 impl Limits {
@@ -217,6 +219,7 @@ impl Limits {
             device_lookup: RateLimiter::new(30, 60),
             device_token: RateLimiter::new(300, 60),
             claims: RateLimiter::new(20, 60),
+            push_test: RateLimiter::new(5, 600),
         }
     }
 
@@ -231,6 +234,7 @@ impl Limits {
             &self.device_lookup,
             &self.device_token,
             &self.claims,
+            &self.push_test,
         ] {
             limiter.sweep(now);
         }
@@ -292,6 +296,8 @@ mod tests {
             assert_eq!(limiter.limit, limit);
             assert_eq!(limiter.window_secs, 60);
         }
+        assert_eq!(limits.push_test.limit, 5);
+        assert_eq!(limits.push_test.window_secs, 600);
     }
 
     #[tokio::test]
