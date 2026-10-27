@@ -3,7 +3,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./api', () => ({ accountRequest: vi.fn() }));
 
 import { accountRequest } from './api';
-import { disablePush, enablePush, pushSupport, sendTestPush, urlBase64ToBytes, type PushEnv } from './push';
+import {
+	disablePush,
+	enablePush,
+	leavePush,
+	pushSupport,
+	sendTestPush,
+	syncPush,
+	urlBase64ToBytes,
+	type PushEnv
+} from './push';
 
 const env = (over: Partial<PushEnv> = {}): PushEnv => ({
 	hasServiceWorker: true,
@@ -124,6 +133,87 @@ describe('the device calls', () => {
 		request.mockRejectedValueOnce(new Error('offline'));
 		await expect(disablePush()).rejects.toThrow();
 		expect(unsubscribe).not.toHaveBeenCalled();
+	});
+
+	function memory() {
+		const data = new Map<string, string>();
+		vi.stubGlobal('localStorage', {
+			getItem: (k: string) => data.get(k) ?? null,
+			setItem: (k: string, v: string) => void data.set(k, v),
+			removeItem: (k: string) => void data.delete(k)
+		});
+		return data;
+	}
+
+	it('re-posts the browser subscription so the signed-in user owns it', async () => {
+		const json = { endpoint: 'https://push.example.test/a', keys: { p256dh: 'p', auth: 'a' } };
+		browser('granted', { endpoint: json.endpoint, toJSON: () => json });
+		request.mockResolvedValueOnce(undefined);
+		expect(await syncPush()).toBe(true);
+		expect(request).toHaveBeenCalledWith('/api/me/push', { method: 'POST', body: json, ok: 204, signedIn: true });
+	});
+
+	it('does not claim On when there is no subscription or the server refuses it', async () => {
+		browser('granted');
+		expect(await syncPush()).toBe(false);
+		expect(request).not.toHaveBeenCalled();
+		const json = { endpoint: 'https://push.example.test/a', keys: { p256dh: 'p', auth: 'a' } };
+		browser('granted', { endpoint: json.endpoint, toJSON: () => json });
+		request.mockRejectedValueOnce(new Error('offline'));
+		expect(await syncPush()).toBe(false);
+	});
+
+	it('still tells the server to drop a remembered endpoint the browser has lost', async () => {
+		const data = memory();
+		data.set('push-endpoint', 'https://push.example.test/old');
+		browser('granted');
+		request.mockResolvedValueOnce(undefined);
+		await disablePush();
+		expect(request).toHaveBeenCalledWith('/api/me/push', {
+			method: 'DELETE',
+			body: { endpoint: 'https://push.example.test/old' },
+			ok: 204,
+			signedIn: true
+		});
+		expect(data.has('push-endpoint')).toBe(false);
+	});
+
+	it('does nothing when no endpoint is known anywhere', async () => {
+		memory();
+		browser('granted');
+		await disablePush();
+		expect(request).not.toHaveBeenCalled();
+	});
+
+	it('remembers the endpoint it told the server about', async () => {
+		const data = memory();
+		const json = { endpoint: 'https://push.example.test/a', keys: { p256dh: 'p', auth: 'a' } };
+		browser('granted', { endpoint: json.endpoint, toJSON: () => json });
+		request.mockResolvedValueOnce(undefined);
+		await syncPush();
+		expect(data.get('push-endpoint')).toBe(json.endpoint);
+	});
+
+	it('leaving removes the device from the server and the browser', async () => {
+		const unsubscribe = vi.fn().mockResolvedValue(true);
+		browser('granted', { endpoint: 'https://push.example.test/a', unsubscribe });
+		request.mockResolvedValueOnce(undefined);
+		await leavePush();
+		expect(request).toHaveBeenCalledWith('/api/me/push', {
+			method: 'DELETE',
+			body: { endpoint: 'https://push.example.test/a' },
+			ok: 204,
+			signedIn: true
+		});
+		expect(unsubscribe).toHaveBeenCalled();
+	});
+
+	it('leaving still drops the browser subscription when the server cannot be reached, and never throws', async () => {
+		const unsubscribe = vi.fn().mockResolvedValue(true);
+		browser('granted', { endpoint: 'https://push.example.test/a', unsubscribe });
+		request.mockRejectedValueOnce(new Error('offline'));
+		await expect(leavePush()).resolves.toBeUndefined();
+		expect(unsubscribe).toHaveBeenCalled();
 	});
 
 	it('asks for a test notice', async () => {

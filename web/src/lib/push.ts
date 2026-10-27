@@ -2,6 +2,7 @@
 // The server routes are crates/server/src/push_api.rs; the text of a push is #lib/notice.ts.
 
 import { accountRequest } from './api';
+import { safeStorage } from './storage';
 
 export type PushSupport = 'unsupported' | 'ios-needs-home-screen' | 'denied' | 'available';
 
@@ -67,6 +68,54 @@ export async function devicePushOn(): Promise<boolean> {
 	}
 }
 
+// The endpoint this device last told the server about, so turning notifications off (or signing
+// out) can still ask the server to drop it when the browser has already lost its subscription.
+const ENDPOINT_KEY = 'push-endpoint';
+
+function remember(endpoint: string | null): void {
+	try {
+		if (endpoint) safeStorage().setItem(ENDPOINT_KEY, endpoint);
+		else safeStorage().removeItem(ENDPOINT_KEY);
+	} catch {
+		// Storage is only a convenience.
+	}
+}
+
+function remembered(): string | null {
+	try {
+		return safeStorage().getItem(ENDPOINT_KEY);
+	} catch {
+		return null;
+	}
+}
+
+async function tellServer(sub: PushSubscription): Promise<void> {
+	await accountRequest<void>('/api/me/push', {
+		method: POST,
+		body: sub.toJSON(),
+		ok: 204,
+		signedIn: true
+	});
+	remember(sub.endpoint);
+}
+
+/**
+ * For a signed-in page: if the browser holds a subscription, tell the server it is this account's
+ * (an idempotent upsert that moves a device left by someone else to the signed-in user and
+ * restores a row the server dropped). True only once the server has it, so "On" is never shown
+ * for a device the server does not push to.
+ */
+export async function syncPush(): Promise<boolean> {
+	try {
+		const sub = await subscription();
+		if (!sub) return false;
+		await tellServer(sub);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Asks for permission, subscribes this device and tells the server. Any failure past the
  * permission prompt is `failed`; the browser's subscription is dropped so the switch stays off.
@@ -81,12 +130,7 @@ export async function enablePush(): Promise<'on' | 'denied' | 'failed'> {
 			userVisibleOnly: true,
 			applicationServerKey: urlBase64ToBytes(key)
 		});
-		await accountRequest<void>('/api/me/push', {
-			method: POST,
-			body: sub.toJSON(),
-			ok: 204,
-			signedIn: true
-		});
+		await tellServer(sub);
 		return 'on';
 	} catch {
 		await sub?.unsubscribe().catch(() => false);
@@ -97,15 +141,35 @@ export async function enablePush(): Promise<'on' | 'denied' | 'failed'> {
 /** Unsubscribes this device and removes it from the server. */
 export async function disablePush(): Promise<void> {
 	const sub = await subscription();
-	if (!sub) return;
+	const endpoint = sub?.endpoint ?? remembered();
+	if (!endpoint) return;
 	// The server first: if it fails the device stays subscribed and the switch stays on.
 	await accountRequest<void>('/api/me/push', {
 		method: DELETE,
-		body: { endpoint: sub.endpoint },
+		body: { endpoint },
 		ok: 204,
 		signedIn: true
 	});
-	await sub.unsubscribe();
+	remember(null);
+	await sub?.unsubscribe();
+}
+
+/**
+ * Before signing out: stop this device's pushes for the account that is leaving, while its
+ * session can still ask the server. Best effort and never throws; if the server cannot be
+ * reached the browser subscription is dropped anyway (a leftover server row dies on its first 410).
+ */
+export async function leavePush(): Promise<void> {
+	try {
+		await disablePush();
+	} catch {
+		remember(null);
+		try {
+			await (await subscription())?.unsubscribe();
+		} catch {
+			// Nothing more to do.
+		}
+	}
 }
 
 /** Asks the server to push a test notice to this account's devices. */

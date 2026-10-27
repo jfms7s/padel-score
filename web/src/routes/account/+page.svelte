@@ -12,7 +12,17 @@
 		revokeInvite,
 		shortDate
 	} from '#lib/auth.ts';
-	import { currentPushEnv, devicePushOn, disablePush, enablePush, pushSupport, sendTestPush, type PushSupport } from '#lib/push.ts';
+	import {
+		currentPushEnv,
+		devicePushOn,
+		disablePush,
+		enablePush,
+		leavePush,
+		pushSupport,
+		sendTestPush,
+		syncPush,
+		type PushSupport
+	} from '#lib/push.ts';
 	import LinkCode from '#lib/components/LinkCode.svelte';
 	import { requireSignedIn, session, signedOut } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
@@ -52,7 +62,6 @@
 	onMount(() => {
 		origin = location.origin;
 		support = pushSupport(currentPushEnv());
-		if (support === 'available') void devicePushOn().then((on) => (pushOn = on));
 		void load();
 	});
 
@@ -60,6 +69,8 @@
 		const s = await requireSignedIn();
 		if (s.status === 'unavailable') loadFailure = strings.networkError;
 		if (s.status !== 'signed_in') return;
+		// Show On only once the server has this device under this account.
+		if (support === 'available') void syncPush().then((on) => (pushOn = on));
 		// Each section loads on its own, so one failing leaves the rest usable.
 		const [inv, dev] = await Promise.allSettled([listInvites(), listDevices()]);
 		if (inv.status === 'fulfilled') {
@@ -189,6 +200,7 @@
 	const signOut = () =>
 		act(
 			async () => {
+				await leavePush();
 				await logout();
 				signedOut();
 				await goto('/');
