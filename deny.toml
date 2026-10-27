@@ -1,0 +1,7 @@
+# cargo-deny configuration; CI runs `cargo deny check advisories`.
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "rsa is pulled in by jwt-simple (superboring); padel-score signs VAPID with ES256 only and never uses RSA. No patched rsa release exists." },
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 is pinned by elliptic-curve 0.13 (p256, k256, p384) under web-push-native and jwt-simple; the fix (>=0.7.6) needs elliptic-curve 0.14, which no web-push crate supports yet. It only touches the VAPID signing key, used for ES256 signatures. Revisit when web-push-native or jwt-simple moves to RustCrypto 0.14." },
+]
