@@ -60,6 +60,8 @@ struct LinkBody {
     display_name: String,
     linked_at: i64,
     is_me: bool,
+    /// Linked by a game or sign-up and not yet approved: privacy ignores it.
+    automatic: bool,
 }
 
 impl LinkBody {
@@ -68,6 +70,7 @@ impl LinkBody {
             display_name: link.display_name.clone(),
             linked_at: link.linked_at,
             is_me: link.user_id == caller,
+            automatic: link.automatic,
         }
     }
 }

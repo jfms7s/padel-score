@@ -364,6 +364,8 @@ export const strings = {
 	linking: {
 		/** On a player's page, unlinked. */
 		linkToAccount: 'Link to an account',
+		/** On a player linked by a game or sign-up and not yet approved. */
+		automatic: 'Linked automatically: their history stays private until they accept a link code',
 		linkHint: 'Show this code to the player. They scan it signed in and confirm that it is them. It works once.',
 		linkCodeTitle: (name: string) => `Link code for ${name}`,
 		hideCode: 'Hide the code',

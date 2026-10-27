@@ -75,8 +75,10 @@ describe('previewText', () => {
 
 describe('linkLabel', () => {
 	it('link_label_me_linked_none', () => {
-		expect(linkLabel(player({ display_name: 'Rui Costa', linked_at: 1, is_me: true }))).toBe('You');
-		expect(linkLabel(player({ display_name: 'Rui Costa', linked_at: 1, is_me: false }))).toBe('Linked · Rui Costa');
+		expect(linkLabel(player({ display_name: 'Rui Costa', linked_at: 1, is_me: true, automatic: false }))).toBe('You');
+		expect(linkLabel(player({ display_name: 'Rui Costa', linked_at: 1, is_me: false, automatic: false }))).toBe(
+			'Linked · Rui Costa'
+		);
 		expect(linkLabel(player(null))).toBeNull();
 	});
 });

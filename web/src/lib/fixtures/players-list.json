@@ -15,7 +15,7 @@
 			"archived": true,
 			"created_at": 1761400100,
 			"record": { "wins": 0, "losses": 0, "draws": 0 },
-			"link": { "display_name": "Rui Costa", "linked_at": 1761400200, "is_me": false },
+			"link": { "display_name": "Rui Costa", "linked_at": 1761400200, "is_me": false, "automatic": false },
 			"pending_claims": 0
 		}
 	]

@@ -177,6 +177,45 @@ async fn player_by_key_in(
     Ok(row.as_ref().map(player_from_row).transpose()?)
 }
 
+/// [`Store::create_or_get_player`] inside the caller's transaction.
+pub(crate) async fn create_or_get_player_in(
+    tx: &mut Tx<'_>,
+    owner: &str,
+    raw_name: &str,
+    now: i64,
+) -> Result<(Player, bool), StoreError> {
+    let name = normalize_name(raw_name)?;
+    let key = name_key(&name);
+    if let Some(mut existing) = player_by_key_in(tx, owner, &key).await? {
+        if existing.archived {
+            sqlx::query("UPDATE players SET archived_at = NULL WHERE id = ?")
+                .bind(&existing.id)
+                .execute(&mut **tx)
+                .await?;
+            existing.archived = false;
+        }
+        return Ok((existing, false));
+    }
+    let player = Player {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
+        archived: false,
+        created_at: now,
+    };
+    sqlx::query(
+        "INSERT INTO players (id, owner_user_id, name, name_key, archived_at, created_at) \
+         VALUES (?, ?, ?, ?, NULL, ?)",
+    )
+    .bind(&player.id)
+    .bind(owner)
+    .bind(&player.name)
+    .bind(&key)
+    .bind(now)
+    .execute(&mut **tx)
+    .await?;
+    Ok((player, true))
+}
+
 impl Store {
     /// The owner's player named `raw_name`, creating it if there is none. The flag is `true` when
     /// created. An existing player (matched on [`name_key`]) is returned as is, and un-archived
@@ -187,39 +226,10 @@ impl Store {
         raw_name: &str,
         now: i64,
     ) -> Result<(Player, bool), StoreError> {
-        let name = normalize_name(raw_name)?;
-        let key = name_key(&name);
         let mut tx = self.begin().await?;
-        if let Some(mut existing) = player_by_key_in(&mut tx, owner, &key).await? {
-            if existing.archived {
-                sqlx::query("UPDATE players SET archived_at = NULL WHERE id = ?")
-                    .bind(&existing.id)
-                    .execute(&mut *tx)
-                    .await?;
-                existing.archived = false;
-            }
-            tx.commit().await?;
-            return Ok((existing, false));
-        }
-        let player = Player {
-            id: uuid::Uuid::new_v4().to_string(),
-            name,
-            archived: false,
-            created_at: now,
-        };
-        sqlx::query(
-            "INSERT INTO players (id, owner_user_id, name, name_key, archived_at, created_at) \
-             VALUES (?, ?, ?, ?, NULL, ?)",
-        )
-        .bind(&player.id)
-        .bind(owner)
-        .bind(&player.name)
-        .bind(&key)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
+        let out = create_or_get_player_in(&mut tx, owner, raw_name, now).await?;
         tx.commit().await?;
-        Ok((player, true))
+        Ok(out)
     }
 
     /// Every player of the owner, archived included, ordered by name key.
