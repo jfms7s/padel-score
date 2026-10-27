@@ -20,10 +20,13 @@ pub mod owned;
 pub mod players;
 pub mod players_api;
 pub mod privacy;
+pub mod push;
+pub mod push_api;
 pub mod ratelimit;
 pub mod results;
 pub mod retention;
 pub mod store;
+pub mod tick;
 pub mod tokens;
 pub mod tournament_api;
 pub mod web;
@@ -70,6 +73,8 @@ pub struct AppState {
     pub court_phones: Arc<hub::CourtPhones>,
     /// Wakes the non-stop clock runner ([`non_stop_api::run_clock`]) after a clock change.
     pub clock_wake: Arc<tokio::sync::Notify>,
+    /// The web push sender's transport and wake-up; tests replace it with a fake transport.
+    pub push: Arc<push::Pusher>,
 }
 
 /// The default [`AppState::credential_recheck`].
@@ -89,6 +94,7 @@ impl AppState {
             list_streams: Arc::new(owned::ListStreams::new()),
             court_phones: Arc::new(hub::CourtPhones::new()),
             clock_wake: Arc::new(tokio::sync::Notify::new()),
+            push: Arc::new(push::Pusher::new(Arc::new(push::ReqwestTransport::new()))),
         }
     }
 }
