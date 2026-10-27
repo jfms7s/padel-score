@@ -96,6 +96,7 @@
 		padding: 0;
 		border: 0;
 		border-radius: 0;
+		background: var(--court);
 		color: var(--on-team);
 		overflow: hidden;
 		touch-action: manipulation;
@@ -104,10 +105,10 @@
 		-webkit-tap-highlight-color: transparent;
 	}
 	.side.a {
-		background: var(--a);
+		--court: var(--a);
 	}
 	.side.b {
-		background: var(--b);
+		--court: var(--b);
 	}
 	button.side:active:not(:disabled) {
 		filter: brightness(1.08);
@@ -119,7 +120,7 @@
 		outline: 4px solid var(--ball);
 		outline-offset: -8px;
 	}
-	/* The service line, 30% of the half from the net. */
+	/* The service line, 6.95 m from the net on a 10 m half, as on a real court. */
 	.side::before {
 		content: '';
 		position: absolute;
@@ -129,17 +130,17 @@
 		background: rgba(255, 255, 255, 0.55);
 	}
 	.side.a::before {
-		right: 30%;
+		right: 69.5%;
 	}
 	.side.b::before {
-		left: 30%;
+		left: 69.5%;
 	}
 	/* The centre service line, from the service line to the net. */
 	.box-line {
 		position: absolute;
 		top: 50%;
 		height: 2px;
-		width: 30%;
+		width: 69.5%;
 		background: rgba(255, 255, 255, 0.55);
 	}
 	.a .box-line {
@@ -169,9 +170,19 @@
 		text-align: right;
 	}
 	.pts {
+		/* Above the court lines, which stop short of it: the outline is the team colour. */
+		position: relative;
 		/* 168px on the mockup's 300px-high phone: 56% of the height, capped by the width. */
 		font-size: clamp(64px, min(58vh, 25vw), 520px);
 		letter-spacing: -0.02em;
+		-webkit-text-stroke: 0.1em var(--court);
+		paint-order: stroke fill;
+	}
+	/* The names and tally cut the court lines the same way. */
+	.team,
+	.tally {
+		background: var(--court);
+		box-shadow: 0 0 0 0.3em var(--court);
 	}
 	.tally {
 		position: absolute;
