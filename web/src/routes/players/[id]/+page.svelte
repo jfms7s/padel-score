@@ -76,7 +76,7 @@
 				placings = p.placings;
 				items = p.items;
 				next = p.next;
-				if (p.player.link) void loadWider(wanted);
+				if (p.player.link && !p.player.link.automatic) void loadWider(wanted);
 			} catch (e) {
 				if (live) loadFailure = playerMessage(e);
 			}
@@ -123,7 +123,7 @@
 			widerNext = null;
 			widerPhase = 'none';
 			linkDone = message;
-			if (p.player.link) void loadWider(wanted);
+			if (p.player.link && !p.player.link.automatic) void loadWider(wanted);
 		} catch (e) {
 			if (wanted === id) linkFailure = linkMessage(e);
 		} finally {
@@ -168,6 +168,18 @@
 	}
 </script>
 
+{#snippet codeBlock(name: string)}
+	{#if code}
+		<LinkCode
+			url={origin + code.url}
+			title={l.linkCodeTitle(name)}
+			hint={l.linkHint}
+			deadline={codeUntil}
+			onexpire={newCode}
+		/>
+	{/if}
+{/snippet}
+
 <main class="acct page-wide-desk">
 	<a class="back" href="/players">{t.backToPlayers}</a>
 	{#if loadFailure}
@@ -183,6 +195,18 @@
 		<section class="link" aria-label={l.linkToAccount}>
 			{#if label}
 				<p class="label"><strong>{label}</strong></p>
+				{#if player.link?.automatic}
+					<p class="hint">{l.automatic}</p>
+					<div class="actions">
+						<button
+							class="primary"
+							type="button"
+							disabled={busy}
+							onclick={() => (code ? (code = null) : void newCode())}>{code ? l.hideCode : l.linkToAccount}</button
+						>
+					</div>
+					{@render codeBlock(player.name)}
+				{/if}
 				{#if confirmingUnlink}
 					<p>{l.unlinkConfirm(player.name)}</p>
 					<div class="actions">
@@ -208,15 +232,7 @@
 						>{l.thisIsMe}</button
 					>
 				</div>
-				{#if code}
-					<LinkCode
-						url={origin + code.url}
-						title={l.linkCodeTitle(player.name)}
-						hint={l.linkHint}
-						deadline={codeUntil}
-						onexpire={newCode}
-					/>
-				{/if}
+				{@render codeBlock(player.name)}
 			{/if}
 			{#if linkFailure}<p class="error" role="alert">{linkFailure}</p>{/if}
 			{#if linkDone}<p class="ok" role="status">{linkDone}</p>{/if}
@@ -262,7 +278,7 @@
 			{/if}
 		{/if}
 
-		{#if player.link}
+		{#if player.link && !player.link.automatic}
 			<h2>{l.allMatches}</h2>
 			{#if widerPhase === 'private'}
 				<p class="hint">{l.private}</p>

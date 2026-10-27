@@ -116,11 +116,12 @@ pub fn redact_placing(mut placing: LinkedPlacing, viewer: &Viewer) -> LinkedPlac
 }
 
 impl Store {
-    /// Whether `coordinator` owns at least one entry linked to `user_id`.
+    /// Whether `coordinator` owns at least one entry linked to `user_id` that counts: an automatic
+    /// link (made by a game or sign-up, not yet approved) does not.
     async fn coordinates(&self, coordinator: &str, user_id: &str) -> Result<bool, StoreError> {
         Ok(sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM players \
-             WHERE owner_user_id = ? AND linked_user_id = ?)",
+             WHERE owner_user_id = ? AND linked_user_id = ? AND link_auto = 0)",
         )
         .bind(coordinator)
         .bind(user_id)

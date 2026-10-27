@@ -379,12 +379,14 @@ impl Store {
         let (player_id, owner) = resolve_target_in(&mut tx, target)
             .await?
             .ok_or(StoreError::NotFound)?;
-        let linked: Option<String> =
-            sqlx::query_scalar("SELECT linked_user_id FROM players WHERE id = ?")
+        let (linked, automatic): (Option<String>, bool) =
+            sqlx::query_as("SELECT linked_user_id, link_auto FROM players WHERE id = ?")
                 .bind(&player_id)
                 .fetch_one(&mut *tx)
                 .await?;
         match linked {
+            // An automatic link is not yours yet: the claim is how you approve it.
+            Some(u) if u == user_id && automatic => {}
             Some(u) if u == user_id => return Err(StoreError::Conflict("already_yours")),
             Some(_) => return Err(StoreError::Conflict("player_linked")),
             None => {}
@@ -451,7 +453,8 @@ impl Store {
              FROM player_claims c JOIN players p ON p.id = c.player_id \
              JOIN users u ON u.id = c.claimant_user_id \
              WHERE c.owner_user_id = ? AND c.status = 'pending' AND u.disabled_at IS NULL \
-               AND p.linked_user_id IS NULL \
+               AND (p.linked_user_id IS NULL \
+                    OR (p.linked_user_id = c.claimant_user_id AND p.link_auto = 1)) \
              ORDER BY c.created_at, c.id",
         )
         .bind(owner)
@@ -562,7 +565,8 @@ impl Store {
              JOIN users u ON u.id = c.claimant_user_id \
              JOIN players p ON p.id = c.player_id \
              WHERE c.owner_user_id = ? AND c.status = 'pending' AND u.disabled_at IS NULL \
-               AND p.linked_user_id IS NULL \
+               AND (p.linked_user_id IS NULL \
+                    OR (p.linked_user_id = c.claimant_user_id AND p.link_auto = 1)) \
              GROUP BY c.player_id",
         )
         .bind(owner)

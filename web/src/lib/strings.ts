@@ -364,6 +364,8 @@ export const strings = {
 	linking: {
 		/** On a player's page, unlinked. */
 		linkToAccount: 'Link to an account',
+		/** On a player linked by a game or sign-up and not yet approved. */
+		automatic: 'Linked automatically: their history stays private until they accept a link code',
 		linkHint: 'Show this code to the player. They scan it signed in and confirm that it is them. It works once.',
 		linkCodeTitle: (name: string) => `Link code for ${name}`,
 		hideCode: 'Hide the code',
@@ -921,6 +923,31 @@ export const strings = {
 		history: 'History',
 		results: 'My results',
 		account: 'Account'
+	},
+
+	// Notifications on this device (Account page).
+	push: {
+		title: 'Notifications on this device',
+		switchLabel: 'Notifications on this device',
+		hint: 'Game and event updates, even when the app is closed.',
+		on: 'On',
+		off: 'Off',
+		sendTest: 'Send a test',
+		testSent: 'Test sent',
+		unsupported: 'Not available in this browser',
+		denied: 'Notifications are blocked for this site in the browser settings',
+		iosNeedsHomeScreen: 'On iPhone, add padel-score to your home screen first; notifications only work from there.',
+		failed: "Couldn't turn on notifications."
+	},
+
+	// Push notification text, made on the phone by the service worker (#lib/notice.ts).
+	notices: {
+		appName: 'Padel score',
+		fallback: 'Something changed — tap to see',
+		test: {
+			title: 'Notifications are on',
+			body: "You'll get game and event updates on this device."
+		}
 	},
 
 	// A new version was deployed while this page was open.
