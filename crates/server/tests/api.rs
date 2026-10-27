@@ -796,3 +796,60 @@ async fn set_start_only_before_first_point() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+// Deleting a match started by mistake.
+
+async fn delete(app: &Router, path: &str) -> (StatusCode, Value) {
+    let (status, _, body) = send(app, Request::delete(path).body(Body::empty()).unwrap()).await;
+    (status, body)
+}
+
+#[tokio::test]
+async fn delete_unfinished_match_ends_its_streams() {
+    let (app, state) = setup().await;
+    let m = create(&app).await;
+    let point = live("c1", json!([{ "kind": "point", "team": "a" }]));
+    assert_eq!(command(&app, &m.scorer, &point).await.0, StatusCode::OK);
+    let mut stream = Stream::open(&app, &format!("/api/view/{}/stream", m.spectator)).await;
+    assert_eq!(stream.state().await["revision"], 1);
+
+    let path = format!("/api/score/{}", m.scorer);
+    assert_eq!(
+        delete(&app, &path).await,
+        (StatusCode::NO_CONTENT, Value::Null)
+    );
+    while stream.frame().await.is_some() {}
+    assert!(!state.hub.is_watched(&m.id));
+    assert_eq!(get(&app, &path).await.0, StatusCode::NOT_FOUND);
+    let view = format!("/api/view/{}", m.spectator);
+    assert_eq!(get(&app, &view).await.0, StatusCode::NOT_FOUND);
+    // A second delete finds nothing.
+    assert_eq!(delete(&app, &path).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_finished_match_is_409_and_keeps_it() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    let body = typed_body("f1", 0, json!([{ "a": 6, "b": 4, "tiebreak": null }]));
+    assert_eq!(final_score(&app, &m.scorer, &body).await.0, StatusCode::OK);
+
+    let path = format!("/api/score/{}", m.scorer);
+    assert_eq!(
+        delete(&app, &path).await,
+        (StatusCode::CONFLICT, json!({ "error": "finished" }))
+    );
+    let (status, _, view) = get(&app, &path).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(view["revision"], 1);
+}
+
+#[tokio::test]
+async fn delete_by_spectator_token_is_404() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    let path = format!("/api/score/{}", m.spectator);
+    assert_eq!(delete(&app, &path).await.0, StatusCode::NOT_FOUND);
+    let (status, _, _) = get(&app, &format!("/api/score/{}", m.scorer)).await;
+    assert_eq!(status, StatusCode::OK);
+}

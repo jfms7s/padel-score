@@ -820,3 +820,33 @@ async fn owner_commands_ignore_lock() {
     assert_eq!(res.body["score"]["status"], json!("in_progress"));
     assert_eq!(res.body["locked"], json!(true));
 }
+
+#[tokio::test]
+async fn deleting_a_match_takes_it_off_the_list_stream() {
+    let (state, _, app, _, admin) = with_admin().await;
+    let keep = create_as(&state, &app, &admin, default_body()).await;
+    let mut stream = Sse::open(
+        &app,
+        as_session(&state, &admin, Method::GET, "/api/me/matches/stream", None),
+    )
+    .await;
+    assert_eq!(
+        ids(&stream.next("matches").await),
+        std::slice::from_ref(&keep.id)
+    );
+    let gone = create_as(&state, &app, &admin, default_body()).await;
+    assert_eq!(stream.next("matches").await.as_array().unwrap().len(), 2);
+
+    let res = send(
+        &app,
+        req(
+            Method::DELETE,
+            &format!("/api/score/{}", gone.scorer),
+            None,
+            &[],
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT, "{}", res.body);
+    assert_eq!(ids(&stream.next("matches").await), [keep.id]);
+}

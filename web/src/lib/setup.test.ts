@@ -3,6 +3,7 @@ import {
 	LAST_SETUP_KEY,
 	RECENT_KEY,
 	addRecent,
+	removeRecent,
 	defaultSetup,
 	listRecent,
 	loadLastSetup,
@@ -192,6 +193,16 @@ describe('recent matches', () => {
 		addRecent(st, { scorer_token: 't5', label: 'again', created_at: 99 });
 		expect(listRecent(st)[0].label).toBe('again');
 		expect(listRecent(st).filter((r) => r.scorer_token === 't5')).toHaveLength(1);
+	});
+
+	it('removes one match by its scorer token', () => {
+		const st = fakeStorage();
+		for (const t of ['a', 'b', 'c']) addRecent(st, { scorer_token: t, label: t, created_at: 1 });
+		removeRecent(st, 'b');
+		expect(listRecent(st).map((r) => r.scorer_token)).toEqual(['c', 'a']);
+		removeRecent(st, 'missing');
+		expect(listRecent(st)).toHaveLength(2);
+		expect(() => removeRecent(throwing, 'a')).not.toThrow();
 	});
 
 	it('survives corrupt or unavailable storage', () => {

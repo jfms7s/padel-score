@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { authMessage, listMyMatches } from '#lib/auth.ts';
+	import DeleteMatchSheet from '#lib/components/DeleteMatchSheet.svelte';
 	import { homeEvents, listEvents } from '#lib/events.ts';
 	import { claimBadgeCount } from '#lib/linking.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { session } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
-	import { listRecent, scorerPath, type RecentMatch } from '#lib/setup.ts';
+	import { listRecent, removeRecent, scorerPath, type RecentMatch } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
 	import type { EventSummary, MyMatch } from '#lib/types.ts';
 
@@ -66,9 +67,35 @@
 		};
 	});
 
+	// The match whose delete sheet is open. Once it is gone (or kept as finished) it leaves both
+	// lists: the same match can be in each.
+	let deleting = $state<{ label: string; scorerToken: string } | null>(null);
+	function closeDelete(removed: boolean) {
+		const token = deleting?.scorerToken;
+		deleting = null;
+		if (!removed || token === undefined) return;
+		const storage = safeStorage();
+		removeRecent(storage, token);
+		recent = listRecent(storage);
+		if (mine) mine = mine.filter((m) => m.scorer_token !== token);
+	}
+
 	/** Only a session gets the tokens; without them there is no page to open. */
 	const openable = (m: MyMatch): m is MyMatch & { scorer_token: string } => typeof m.scorer_token === 'string';
 </script>
+
+{#snippet deleteButton(label: string, scorerToken: string)}
+	<button
+		class="delete"
+		type="button"
+		aria-label={strings.deleteMatch.button(label)}
+		onclick={() => (deleting = { label, scorerToken })}
+	>
+		<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+			<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+		</svg>
+	</button>
+{/snippet}
 
 <main class:signed={signedIn} class:page-wide-desk={signedIn} class:page-narrow={!signedIn}>
 	<div class="cols">
@@ -103,6 +130,9 @@
 								{new Date(match.last_activity_at * 1000).toLocaleDateString()}
 							</time>
 						</a>
+						{#if !match.context}
+							{@render deleteButton(match.label, match.scorer_token)}
+						{/if}
 					</li>
 				{/each}
 			</ul>
@@ -143,6 +173,7 @@
 							{new Date(match.created_at).toLocaleDateString()}
 						</time>
 					</a>
+					{@render deleteButton(match.label, match.scorer_token)}
 				</li>
 			{/each}
 		</ul>
@@ -150,6 +181,10 @@
 	</div>
 	</div>
 </main>
+
+{#if deleting}
+	<DeleteMatchSheet label={deleting.label} scorerToken={deleting.scorerToken} onclose={closeDelete} />
+{/if}
 
 <style>
 	main {
@@ -259,7 +294,13 @@
 		display: grid;
 		gap: 8px;
 	}
+	li {
+		display: flex;
+		gap: 8px;
+	}
 	li a {
+		flex: 1;
+		min-width: 0;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
@@ -271,6 +312,17 @@
 		background: var(--panel);
 		color: var(--ink);
 		text-decoration: none;
+	}
+	.delete {
+		flex: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: var(--tap);
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		background: var(--panel);
+		color: var(--muted);
 	}
 	.label {
 		font-weight: 650;

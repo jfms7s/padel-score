@@ -1,7 +1,7 @@
 //! The match store: matches, the append-only event log, and stored command results.
 //!
 //! The store keeps events, never engine state. Undo, replace and discard mark rows; they never
-//! delete them. The clock is never read here: callers pass `now` in unix seconds.
+//! delete them. Only deleting a whole match ([`delete_match_in`]) or the retention purge does. The clock is never read here: callers pass `now` in unix seconds.
 //!
 //! Commands run inside a transaction from [`Store::begin`], which takes SQLite's write lock up
 //! front so two commands on one match cannot interleave. Reads that belong to a command (the
@@ -378,6 +378,29 @@ pub async fn lock_result(tx: &mut Tx<'_>, match_id: &str, now: i64) -> Result<()
 }
 
 /// Replace the match's `start`. The caller checks that the log is empty.
+/// Whether the match belongs to an event (the coordinator's, not the scorer's to delete).
+pub async fn is_event_match_in(tx: &mut Tx<'_>, match_id: &str) -> Result<bool, StoreError> {
+    let found: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM competition_matches WHERE match_id = ?")
+            .bind(match_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    Ok(found.is_some())
+}
+
+/// Delete the match. Its events, stored command results, players and result row go with it
+/// (`ON DELETE CASCADE`).
+pub async fn delete_match_in(tx: &mut Tx<'_>, match_id: &str) -> Result<(), StoreError> {
+    let done = sqlx::query("DELETE FROM matches WHERE id = ?")
+        .bind(match_id)
+        .execute(&mut **tx)
+        .await?;
+    if done.rows_affected() != 1 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
 pub async fn set_start_in(
     tx: &mut Tx<'_>,
     match_id: &str,

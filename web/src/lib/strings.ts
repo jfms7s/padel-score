@@ -894,6 +894,19 @@ export const strings = {
 	myMatches: 'My matches',
 	noMyMatches: 'Matches you start while signed in show up here, on any device.',
 
+	// Deleting a match started by mistake, from a home list.
+	deleteMatch: {
+		button: (label: string) => `Delete ${label}`,
+		title: 'Delete this match?',
+		hint: 'Its score and links stop working, and it won’t be in your history.',
+		delete: 'Delete',
+		deleting: 'Deleting…',
+		cancel: 'Cancel',
+		close: 'Close',
+		finished: 'This match has finished, so it stays in your history. It’s gone from this list.',
+		eventMatch: 'This is an event’s match. Its coordinator manages it from the event.'
+	},
+
 	// API failures.
 	signedOutPlayers: "You've been signed out. Sign in again to use your players.",
 	networkError: "Can't reach the server.",
