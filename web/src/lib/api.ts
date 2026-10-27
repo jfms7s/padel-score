@@ -333,6 +333,18 @@ export async function putStart(token: string, start: Start): Promise<StartOutcom
 	throw failure(status, body);
 }
 
+/**
+ * Delete a match started by mistake. `deleted` once it is gone (a match already gone counts);
+ * `finished` when it is kept because it has a result. An event's match throws an ApiError
+ * `event_match`.
+ */
+export async function deleteMatch(token: string): Promise<'deleted' | 'finished'> {
+	const { status, body } = await call(`/api/score/${enc(token)}`, { method: 'DELETE' }, REQUEST_TIMEOUT_MS);
+	if (status === 204 || status === 404) return 'deleted';
+	if (status === 409 && (body as ApiErrorBody | null)?.error === 'finished') return 'finished';
+	throw failure(status, body);
+}
+
 /** A court link's API path: `/api/court/{token}`, then `rest` (say `/advance`). */
 export function courtUrl(token: string, rest = ''): string {
 	return `/api/court/${enc(token)}${rest}`;

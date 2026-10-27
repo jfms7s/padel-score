@@ -647,3 +647,22 @@ async fn assign_reaches_waiting_court_phone() {
     assert_eq!(frame["current"]["id"], json!(m));
     assert!(frame["current"]["scorer_token"].is_string());
 }
+
+#[tokio::test]
+async fn event_match_cannot_be_deleted_by_its_scorer_token() {
+    let (state, pool, app, _, admin) = with_admin().await;
+    let ev = running_event(&state, &pool, &app, &admin).await;
+    let scorer: String = sqlx::query_scalar("SELECT scorer_token FROM matches WHERE id = ?")
+        .bind(&ev.first)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let path = format!("/api/score/{scorer}");
+    let res = anon(&app, Method::DELETE, &path, None).await;
+    assert_eq!(res.status, StatusCode::CONFLICT, "{}", res.body);
+    assert_eq!(res.body, json!({ "error": "event_match" }));
+    assert_eq!(
+        anon(&app, Method::GET, &path, None).await.status,
+        StatusCode::OK
+    );
+}

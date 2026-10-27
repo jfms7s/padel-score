@@ -189,6 +189,16 @@ export function addRecent(storage: StorageLike, entry: RecentMatch): void {
 	}
 }
 
+/** Forget a recent match on this device. */
+export function removeRecent(storage: StorageLike, scorerToken: string): void {
+	try {
+		const rest = listRecent(storage).filter((r) => r.scorer_token !== scorerToken);
+		storage.setItem(RECENT_KEY, JSON.stringify(rest));
+	} catch {
+		// As above.
+	}
+}
+
 /** The spectator token remembered for a scorer token, if this device started the match. */
 export function recentSpectator(storage: StorageLike, scorerToken: string): string | null {
 	return listRecent(storage).find((r) => r.scorer_token === scorerToken)?.spectator_token ?? null;

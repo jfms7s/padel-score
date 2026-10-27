@@ -167,6 +167,7 @@ export type ApiErrorBody =
 			error: 'not_found' | 'bad_request' | 'method_not_allowed' | 'payload_too_large' | 'internal';
 	  }
 	| { error: 'validation'; field: string }
+	| { error: 'finished' | 'event_match' }
 	| { error: 'too_many_requests'; retry_after_secs: number }
 	| { error: AccountErrorCode }
 	| { error: EventErrorCode };

@@ -3,6 +3,7 @@ import {
 	ApiError,
 	courtUrl,
 	createMatch,
+	deleteMatch,
 	getScore,
 	getView,
 	postCommands,
@@ -270,5 +271,33 @@ describe('typed results and the serve choice', () => {
 	it('courtUrl', () => {
 		expect(courtUrl('a b')).toBe('/api/court/a%20b');
 		expect(courtUrl('t', '/advance')).toBe('/api/court/t/advance');
+	});
+
+	describe('deleteMatch', () => {
+		it('deletes by the scorer token', async () => {
+			const calls: Call[] = [];
+			vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+				calls.push({ url, init });
+				return new Response(null, { status: 204 });
+			});
+			expect(await deleteMatch('s/1')).toBe('deleted');
+			expect(calls[0]?.url).toBe('/api/score/s%2F1');
+			expect(calls[0]?.init?.method).toBe('DELETE');
+		});
+
+		it('counts a match already gone as deleted', async () => {
+			serve(404, notFound);
+			expect(await deleteMatch('s1')).toBe('deleted');
+		});
+
+		it('reports a finished match as kept', async () => {
+			serve(409, { error: 'finished' });
+			expect(await deleteMatch('s1')).toBe('finished');
+		});
+
+		it("throws for an event's match", async () => {
+			serve(409, { error: 'event_match' });
+			await expect(deleteMatch('s1')).rejects.toMatchObject({ status: 409, code: 'event_match' });
+		});
 	});
 });

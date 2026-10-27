@@ -7,6 +7,8 @@
 //! - `POST /api/score/{token}/commands`, `/replace` and `/final` (a typed final score) run the
 //!   command rules; their status and body come from [`CommandOutcome::to_http`] alone.
 //! - `PUT /api/score/{token}/start` chooses who serves first, while the log is empty.
+//! - `DELETE /api/score/{token}` deletes a match started by mistake: 204, or 409 `finished` /
+//!   `event_match` ([`delete_unfinished`]). Its streams end and the owner's list drops it.
 //! - The coordinator's `/api/events*` routes are in [`crate::events_api`].
 //! - `GET /api/score/{token}/stream` and `/api/view/{token}/stream` are SSE: the current view as
 //!   event `state` at once, then one per applied command.
@@ -38,7 +40,7 @@ use crate::AppState;
 use crate::auth::OptionalUser;
 use crate::commands::{
     Authority, CommandOutcome, CommandRequest, FinalRequest, MatchView, ReplaceRequest,
-    apply_command, record_final, replace_from, set_start, view_of,
+    apply_command, delete_unfinished, record_final, replace_from, set_start, view_of,
 };
 use crate::competitions::view::event_id_of_match;
 use crate::hub::Subscription;
@@ -64,7 +66,7 @@ pub fn now() -> i64 {
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/matches", post(create_match))
-        .route("/api/score/{token}", get(score))
+        .route("/api/score/{token}", get(score).delete(delete_match))
         .route("/api/view/{token}", get(view))
         .route("/api/score/{token}/commands", post(commands))
         .route("/api/score/{token}/replace", post(replace))
@@ -327,6 +329,27 @@ async fn score(
 ) -> Result<Json<MatchView>, ApiError> {
     let m = by_scorer(&state.store, &token).await?;
     Ok(Json(current_view(&state.store, &m.id).await?))
+}
+
+/// Delete the match, then end its streams and tell the owner's list streams. Spawned, like
+/// [`run_detached`], so a client that goes away after the commit cannot skip the clean-up.
+async fn delete_match(
+    State(state): State<AppState>,
+    ApiPath(token): ApiPath<String>,
+) -> Result<StatusCode, ApiError> {
+    let m = by_scorer(&state.store, &token).await?;
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        delete_unfinished(&task_state.store, &m).await?;
+        task_state.hub.close(&m.id);
+        if let Some(owner) = &m.owner_user_id {
+            task_state.hub.notify_user(owner);
+        }
+        Ok::<_, StoreError>(())
+    })
+    .await
+    .map_err(internal)??;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn view(

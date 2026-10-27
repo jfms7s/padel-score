@@ -22,15 +22,16 @@
 //! the match ([`Authority::Owner`]); a locked match refuses every scorer-token change.
 
 use padel_scoring::{
-    ErrorKind, Event, FinalScore, Format, ReplayError, Score, Start, Team, events_for_final, replay,
+    ErrorKind, Event, FinalScore, Format, ReplayError, Score, Start, Status, Team,
+    events_for_final, replay,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::results;
 use crate::store::{
-    EventState, Store, StoreError, StoredEvent, StoredMatch, Teams, Tx, append, events_in,
-    find_result_in, head_seq_in, lock_result, mark, match_by_id_in, save_result, set_start_in,
-    touch,
+    EventState, Store, StoreError, StoredEvent, StoredMatch, Teams, Tx, append, delete_match_in,
+    events_in, find_result_in, head_seq_in, is_event_match_in, lock_result, mark, match_by_id_in,
+    save_result, set_start_in, touch,
 };
 
 /// The most commands one request may carry.
@@ -310,6 +311,27 @@ pub async fn set_start(
     let view = view_of(&m, &events).map_err(corrupt)?;
     tx.commit().await?;
     Ok(view)
+}
+
+/// Delete a match started by mistake, with everything scored on it. Only an unfinished match
+/// that is not an event's can go: 409 `finished` keeps a real result (it is in the history),
+/// 409 `event_match` leaves an event's matches to its coordinator.
+pub async fn delete_unfinished(store: &Store, m: &StoredMatch) -> Result<(), StoreError> {
+    let mut tx = store.begin().await?;
+    let m = match_by_id_in(&mut tx, &m.id)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+    if is_event_match_in(&mut tx, &m.id).await? {
+        return Err(StoreError::Conflict("event_match"));
+    }
+    let events = events_in(&mut tx, &m.id).await?;
+    let view = view_of(&m, &events).map_err(corrupt)?;
+    if matches!(view.score.status, Status::Finished { .. }) {
+        return Err(StoreError::Conflict("finished"));
+    }
+    delete_match_in(&mut tx, &m.id).await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 enum Guard {
