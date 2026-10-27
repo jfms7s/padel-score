@@ -420,3 +420,72 @@ async fn players_list_shows_automatic_link() {
     assert_eq!(link_of(&w.entry)["automatic"], true);
     assert_eq!(link_of(&manual)["automatic"], false);
 }
+
+#[tokio::test]
+async fn link_code_after_a_claim_settles_the_claim() {
+    let w = world().await;
+    let m = w
+        .state
+        .store
+        .create_match(
+            NewMatch {
+                format: format(),
+                start: Start {
+                    first_server: Player {
+                        team: Team::A,
+                        index: 0,
+                    },
+                    other_first_server: 0,
+                },
+                teams: Teams {
+                    a: ["A1".into(), "A2".into()],
+                    b: ["B1".into(), "B2".into()],
+                },
+                owner_user_id: Some(w.ana_id.clone()),
+                players: PlayerSlots {
+                    a: [Some(w.entry.clone()), None],
+                    b: [None, None],
+                },
+            },
+            1,
+        )
+        .await
+        .unwrap();
+    let target = json!({ "kind": "match_slot", "spectator_token": m.spectator_token,
+                         "team": "a", "position": 0 });
+    let claimed = w
+        .call(&w.rui, Method::POST, "/api/claims", Some(target))
+        .await;
+    assert_eq!(claimed.status, StatusCode::CREATED, "{}", claimed.body);
+    let made = w
+        .call(
+            &w.ana,
+            Method::POST,
+            &format!("/api/players/{}/link-code", w.entry),
+            None,
+        )
+        .await;
+    let code = fragment_code(made.body["url"].as_str().unwrap());
+    let accepted = w
+        .call(
+            &w.rui,
+            Method::POST,
+            "/api/link-codes/accept",
+            Some(json!({ "code": code })),
+        )
+        .await;
+    assert_eq!(accepted.status, StatusCode::OK, "{}", accepted.body);
+    let status: String = sqlx::query_scalar("SELECT status FROM player_claims WHERE player_id = ?")
+        .bind(&w.entry)
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "approved");
+    w.state.store.unlink(&w.ana_id, &w.entry).await.unwrap();
+    let inbox = w.call(&w.ana, Method::GET, "/api/claims", None).await;
+    assert!(
+        inbox.body["items"].as_array().unwrap().is_empty(),
+        "{}",
+        inbox.body
+    );
+}

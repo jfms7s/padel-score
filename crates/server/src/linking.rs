@@ -96,10 +96,11 @@ pub async fn preview_in(
 }
 
 /// Link the entry to `user_id`. Linking it to the same user again keeps the first link time but
-/// still clears the automatic mark, so an approval, a link code or link-me makes the link count. Refused with `Conflict("player_linked")` when it is linked to someone else, and
-/// with `Conflict("link_overlaps")` when it shares a match or an event (a placing, or a team of
-/// the same event) with another entry already linked to `user_id`: one person cannot be two
-/// sides of one game. An unknown entry is `NotFound`.
+/// still clears the automatic mark, so an approval, a link code or link-me makes the link count.
+/// Refused with `Conflict("player_linked")` when it is linked to someone else, and with
+/// `Conflict("link_overlaps")` when it shares a match or an event (a placing, or a team of the
+/// same event) with another entry already linked to `user_id`: one person cannot be two sides of
+/// one game. An unknown entry is `NotFound`.
 pub async fn link_in(
     tx: &mut Tx<'_>,
     player_id: &str,
@@ -117,6 +118,7 @@ pub async fn link_in(
                 .bind(player_id)
                 .execute(&mut **tx)
                 .await?;
+            settle_own_claim(tx, player_id, user_id, now).await?;
             return Ok(());
         }
         Some(_) => return Err(StoreError::Conflict("player_linked")),
@@ -155,8 +157,18 @@ pub async fn link_in(
         .bind(player_id)
         .execute(&mut **tx)
         .await?;
-    // The linker's own pending claim on this entry is settled by the link. Other claimants'
-    // rows stay pending: they reappear if the entry is unlinked.
+    settle_own_claim(tx, player_id, user_id, now).await?;
+    Ok(())
+}
+
+/// The linker's own pending claim on the entry is settled by the link. Other claimants' rows
+/// stay pending: they reappear if the entry is unlinked.
+async fn settle_own_claim(
+    tx: &mut Tx<'_>,
+    player_id: &str,
+    user_id: &str,
+    now: i64,
+) -> Result<(), StoreError> {
     sqlx::query(
         "UPDATE player_claims SET status = 'approved', decided_at = ? \
          WHERE player_id = ? AND claimant_user_id = ? AND status = 'pending'",
@@ -359,10 +371,11 @@ impl Store {
             .map_err(Into::into)
     }
 
-    /// A new link code for one of the owner's unlinked (or automatically linked) entries: the raw code (handed out once;
-    /// only its hash is stored) and when it expires. The entry's other unused codes are deleted
-    /// in the same transaction, so only the newest QR works. `NotFound` unless the entry is the
-    /// owner's, `Conflict("player_linked")` when it is linked already (an automatic link is not).
+    /// A new link code for one of the owner's unlinked (or automatically linked) entries: the
+    /// raw code (handed out once; only its hash is stored) and when it expires. The entry's
+    /// other unused codes are deleted in the same transaction, so only the newest QR works.
+    /// `NotFound` unless the entry is the owner's, `Conflict("player_linked")` when it is linked
+    /// already (an automatic link is not).
     pub async fn create_link_code(
         &self,
         owner: &str,
