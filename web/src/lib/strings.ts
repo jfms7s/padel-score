@@ -925,6 +925,31 @@ export const strings = {
 		account: 'Account'
 	},
 
+	// Notifications on this device (Account page).
+	push: {
+		title: 'Notifications on this device',
+		switchLabel: 'Notifications on this device',
+		hint: 'Game and event updates, even when the app is closed.',
+		on: 'On',
+		off: 'Off',
+		sendTest: 'Send a test',
+		testSent: 'Test sent',
+		unsupported: 'Not available in this browser',
+		denied: 'Notifications are blocked for this site in the browser settings',
+		iosNeedsHomeScreen: 'On iPhone, add padel-score to your home screen first; notifications only work from there.',
+		failed: "Couldn't turn on notifications."
+	},
+
+	// Push notification text, made on the phone by the service worker (#lib/notice.ts).
+	notices: {
+		appName: 'Padel score',
+		fallback: 'Something changed — tap to see',
+		test: {
+			title: 'Notifications are on',
+			body: "You'll get game and event updates on this device."
+		}
+	},
+
 	// A new version was deployed while this page was open.
 	update: {
 		ready: 'Updated — tap to reload'

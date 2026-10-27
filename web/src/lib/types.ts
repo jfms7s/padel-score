@@ -155,6 +155,22 @@ export interface CreatedMatch {
 	spectator_token: string;
 }
 
+/**
+ * What a push carries (crates/server/src/push.rs `Payload`): a kind, a same-origin path and
+ * the fields that kind uses. The kind is open: a newer server may send one this build lacks.
+ */
+export interface NoticePayload {
+	kind: string;
+	url?: string;
+	title?: string;
+	start?: number;
+	end?: number;
+	new_start?: number;
+	new_end?: number;
+	name?: string;
+	accepted?: boolean;
+}
+
 /** Every non-2xx body the API sends has an `error` code. */
 export type ApiErrorBody =
 	| { error: 'conflict'; view: MatchView }

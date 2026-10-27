@@ -12,6 +12,7 @@
 		revokeInvite,
 		shortDate
 	} from '#lib/auth.ts';
+	import { currentPushEnv, devicePushOn, disablePush, enablePush, pushSupport, sendTestPush, type PushSupport } from '#lib/push.ts';
 	import LinkCode from '#lib/components/LinkCode.svelte';
 	import { requireSignedIn, session, signedOut } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
@@ -39,10 +40,19 @@
 	let pwDone = $state(false);
 
 	let busy = $state(false);
+
+	const p = strings.push;
+	let support = $state<PushSupport>('unsupported');
+	let pushOn = $state(false);
+	let pushBusy = $state(false);
+	let pushFailure = $state<string | null>(null);
+	let pushNote = $state<string | null>(null);
 	let origin = $state('');
 
 	onMount(() => {
 		origin = location.origin;
+		support = pushSupport(currentPushEnv());
+		if (support === 'available') void devicePushOn().then((on) => (pushOn = on));
 		void load();
 	});
 
@@ -136,6 +146,45 @@
 			},
 			(m) => (deviceFailure = m)
 		);
+
+	async function togglePush(want: boolean) {
+		if (pushBusy) return;
+		pushBusy = true;
+		pushFailure = null;
+		pushNote = null;
+		try {
+			if (want) {
+				const result = await enablePush();
+				pushOn = result === 'on';
+				if (result === 'failed') pushFailure = p.failed;
+				// The prompt may have just been refused for good.
+				support = pushSupport(currentPushEnv());
+			} else {
+				await disablePush();
+				pushOn = false;
+			}
+		} catch (e) {
+			pushFailure = authMessage(e);
+			pushOn = await devicePushOn();
+		} finally {
+			pushBusy = false;
+		}
+	}
+
+	async function testPush() {
+		if (pushBusy) return;
+		pushBusy = true;
+		pushFailure = null;
+		pushNote = null;
+		try {
+			await sendTestPush();
+			pushNote = p.testSent;
+		} catch (e) {
+			pushFailure = authMessage(e);
+		} finally {
+			pushBusy = false;
+		}
+	}
 
 	const signOut = () =>
 		act(
@@ -232,6 +281,35 @@
 		</section>
 
 		<section>
+		<h2>{p.title}</h2>
+		{#if support === 'available'}
+			<label class="switch">
+				<input
+					type="checkbox"
+					role="switch"
+					checked={pushOn}
+					disabled={pushBusy}
+					aria-describedby="push-hint"
+					onchange={(e) => togglePush(e.currentTarget.checked)}
+				/>
+				<span class="name">{pushOn ? p.on : p.off}</span>
+			</label>
+			<p class="hint" id="push-hint">{p.hint}</p>
+			{#if pushOn}
+				<button class="secondary" type="button" onclick={testPush} disabled={pushBusy}>{p.sendTest}</button>
+			{/if}
+			{#if pushFailure}<p class="error" role="alert">{pushFailure}</p>{/if}
+			{#if pushNote}<p class="ok" role="status">{pushNote}</p>{/if}
+		{:else if support === 'ios-needs-home-screen'}
+			<p class="hint">{p.iosNeedsHomeScreen}</p>
+		{:else if support === 'denied'}
+			<p class="hint">{p.denied}</p>
+		{:else}
+			<p class="hint">{p.unsupported}</p>
+		{/if}
+		</section>
+
+		<section>
 		<h2>{a.password}</h2>
 		<form onsubmit={submitPassword}>
 			<label>
@@ -260,6 +338,24 @@
 </main>
 
 <style>
+	.switch {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 12px;
+		min-height: var(--tap);
+		cursor: pointer;
+	}
+	.switch input {
+		flex: none;
+		width: 22px;
+		height: 22px;
+		min-height: 22px;
+		margin: 0;
+	}
+	.name {
+		font-weight: 650;
+	}
 	@media (min-width: 1100px) {
 		.secs {
 			display: grid;

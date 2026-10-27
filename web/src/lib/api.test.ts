@@ -11,6 +11,7 @@ import {
 	putStart,
 	replace,
 	REQUEST_TIMEOUT_MS,
+	accountRequest,
 	streamUrl
 } from './api';
 import type { CommandRequest } from './types';
@@ -299,5 +300,10 @@ describe('typed results and the serve choice', () => {
 			serve(409, { error: 'event_match' });
 			await expect(deleteMatch('s1')).rejects.toMatchObject({ status: 409, code: 'event_match' });
 		});
+	});
+
+	it('accountRequest takes a 202 with no body as success', async () => {
+		vi.stubGlobal('fetch', async () => new Response('', { status: 202 }));
+		expect(await accountRequest('/api/me/push/test', { method: 'POST', ok: 202 })).toBeNull();
 	});
 });

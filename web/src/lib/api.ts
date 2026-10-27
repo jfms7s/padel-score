@@ -156,8 +156,9 @@ async function exchange(path: string, init: RequestInit): Promise<Answer> {
 		// The connection dropped mid-body: whatever the status, the answer never arrived.
 		throw unreachable(res.status);
 	}
-	// The account routes answer some requests with no content.
+	// The account routes answer some requests with no content (204, or a 202 with no body).
 	if (res.status === 204) return { status: 204, body: null };
+	if (res.status === 202 && text === '') return { status: 202, body: null };
 	try {
 		const answer: Answer = { status: res.status, body: JSON.parse(text) };
 		const retryAfter = retryAfterHeader(res);
