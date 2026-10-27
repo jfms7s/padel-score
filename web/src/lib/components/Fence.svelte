@@ -51,7 +51,7 @@
 		banner?: Snippet;
 		/** More buttons beside share and layout, styled for the layout's tone. */
 		extraActions?: Snippet<[Tone]>;
-		/** In place of the finished card's "New match" link (the court phone's next match). */
+		/** In place of the finished card's "New match" and "Home" links (the court phone's next match). */
 		finishedAction?: Snippet;
 	} = $props();
 
@@ -352,7 +352,14 @@
 		<div class="finished">
 			<p class="winner">{w ? f.wins(model[w].name) : f.draw}</p>
 			{#if setsSummary(model)}<p class="summary">{setsSummary(model)}</p>{/if}
-			{#if finishedAction}{@render finishedAction()}{:else}<a class="new" href="/new">{f.newMatch}</a>{/if}
+			{#if finishedAction}
+				{@render finishedAction()}
+			{:else}
+				<div class="finished-actions">
+					<a class="new" href="/new">{f.newMatch}</a>
+					<a class="new secondary" href="/">{f.home}</a>
+				</div>
+			{/if}
 		</div>
 	{/if}
 {/snippet}
@@ -545,6 +552,17 @@
 		color: var(--glass);
 		font-weight: 650;
 		text-decoration: none;
+	}
+	.finished-actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 10px;
+	}
+	.new.secondary {
+		background: transparent;
+		color: var(--ink);
+		border: 1px solid var(--line);
 	}
 	.problem {
 		position: fixed;
