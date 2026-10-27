@@ -2,6 +2,7 @@ package io.github.jfms7s.padelscore
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
@@ -12,6 +13,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val host = application as ContainerHost
         val container = host.container
         setContent { WatchApp(container, host.settingsStore, host.local, onSettingsApplied = ::restart) }
