@@ -10,7 +10,7 @@
 use std::fmt;
 
 use padel_scoring::{Event, Format, RulesError, Start};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
@@ -20,6 +20,29 @@ use crate::tokens::new_token;
 pub type Tx<'a> = sqlx::Transaction<'a, sqlx::Sqlite>;
 
 pub(crate) const MAX_NAME_CHARS: usize = 40;
+pub(crate) const MAX_PLACE_CHARS: usize = 80;
+
+/// A place: trimmed, blank meaning none, at most [`MAX_PLACE_CHARS`] chars.
+pub(crate) fn normalize_place(raw: Option<&str>) -> Result<Option<String>, StoreError> {
+    let place = raw.map_or("", str::trim);
+    if place.is_empty() {
+        Ok(None)
+    } else if place.chars().count() > MAX_PLACE_CHARS {
+        Err(StoreError::InvalidField("place"))
+    } else {
+        Ok(Some(place.to_owned()))
+    }
+}
+
+/// A present JSON key, `null` included, as `Some`; with `#[serde(default)]` an absent key is
+/// `None`. So `Some(None)` is an explicit `null`.
+pub(crate) fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
 
 /// `SELECT <every matches column> FROM matches <rest>`, as a `&'static str`. Every query that
 /// builds a [`StoredMatch`] goes through it, so a new column is added in one place.

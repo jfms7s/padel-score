@@ -28,7 +28,7 @@ use axum::response::sse::Event;
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, patch, post};
 use futures_util::StreamExt;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 
 use crate::AppState;
@@ -42,6 +42,7 @@ use crate::competitions::view::{
 };
 use crate::competitions::{CompetitionChange, EventTeam, NewCompetition, TeamChange};
 use crate::hub::Subscription;
+use crate::store::present;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -75,16 +76,6 @@ pub fn routes() -> Router<AppState> {
             post(match_result),
         )
         .layer(axum::middleware::map_response(accounts::secret_headers))
-}
-
-/// A present JSON key, `null` included, as `Some`; with `#[serde(default)]` an absent key is
-/// `None`. So `Some(None)` is an explicit `null`.
-fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(d).map(Some)
 }
 
 /// The owner's event detail, or 404.
