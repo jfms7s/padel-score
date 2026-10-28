@@ -370,3 +370,118 @@ async fn my_boards_lists_joined_boards_only() {
     assert_eq!(anon.status, StatusCode::UNAUTHORIZED);
     let _ = b_raw;
 }
+
+#[tokio::test]
+async fn game_actions_need_a_session_and_a_fresh_version() {
+    let (state, _) = state().await;
+    let app = support::app_from(&state, 1);
+    let mut users = Vec::new();
+    for (i, name) in ["Ana", "Rui", "Marta", "Joana"].into_iter().enumerate() {
+        users.push(fast_user(&state, &format!("u{i}@x.test"), name).await);
+    }
+    let token = seed_board(&state, &users[0].0).await;
+    // A game a few hours out, formed by a seed earlier than now so it may form.
+    let start = week_start() + 8 * HOUR;
+    for (id, _) in &users {
+        state
+            .store
+            .add_free(&token, id, start, start + HOUR, now() - 7200)
+            .await
+            .unwrap();
+    }
+    let view = state
+        .store
+        .board_view(&token, Some(&users[0].0), now())
+        .await
+        .unwrap()
+        .unwrap();
+    let game = &view.games[0];
+    let path = |action: &str| format!("/api/boards/{token}/games/{}/{action}", game.id);
+
+    let anon = send(
+        &app,
+        req(
+            Method::POST,
+            &path("leave"),
+            Some(json!({ "version": game.version })),
+            &[],
+        ),
+    )
+    .await;
+    assert_eq!(anon.status, StatusCode::UNAUTHORIZED);
+
+    let stale = send(
+        &app,
+        as_session(
+            &state,
+            &users[1].1,
+            Method::POST,
+            &path("give"),
+            Some(json!({ "version": game.version + 1 })),
+        ),
+    )
+    .await;
+    assert_eq!(stale.status, StatusCode::CONFLICT);
+    assert_eq!(stale.body["error"], "game_changed");
+
+    let nobody = send(
+        &app,
+        as_session(
+            &state,
+            &users[1].1,
+            Method::POST,
+            &path("give"),
+            Some(json!({ "version": game.version })),
+        ),
+    )
+    .await;
+    assert_eq!(nobody.status, StatusCode::CONFLICT);
+    assert_eq!(nobody.body["error"], "nobody_can_take");
+
+    let left = send(
+        &app,
+        as_session(
+            &state,
+            &users[1].1,
+            Method::POST,
+            &path("leave"),
+            Some(json!({ "version": game.version })),
+        ),
+    )
+    .await;
+    assert_eq!(left.status, StatusCode::OK, "{}", left.body);
+    assert_eq!(left.body["games"][0]["state"], "short");
+    assert_eq!(
+        left.body["games"][0]["players"].as_array().unwrap().len(),
+        3
+    );
+    assert_eq!(left.header(header::CACHE_CONTROL), Some("no-store"));
+    let version = left.body["games"][0]["version"].as_i64().unwrap();
+
+    let taken = send(
+        &app,
+        as_session(
+            &state,
+            &users[1].1,
+            Method::POST,
+            &path("take"),
+            Some(json!({ "version": version })),
+        ),
+    )
+    .await;
+    assert_eq!(taken.status, StatusCode::OK, "{}", taken.body);
+    assert_eq!(taken.body["games"][0]["state"], "full");
+
+    let missing = send(
+        &app,
+        as_session(
+            &state,
+            &users[1].1,
+            Method::POST,
+            &format!("/api/boards/{token}/games/nope/take"),
+            Some(json!({ "version": 0 })),
+        ),
+    )
+    .await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+}

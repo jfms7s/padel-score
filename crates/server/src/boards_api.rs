@@ -8,6 +8,8 @@
 //!   `DELETE /api/boards/{token}` is 204 (creator only).
 //! - `POST /api/boards/{token}/join` is 200; `POST .../leave` is 204.
 //! - `POST /api/boards/{token}/ranges` and `.../ranges/remove` with `{start, end}` are 200.
+//! - `POST /api/boards/{token}/games/{game_id}/leave|give|take` with `{version}` (the game's, from
+//!   the view the player saw; a stale one is `409 game_changed`) is 200 [`BoardView`].
 //! - `GET /api/me/boards` is `{ "items": [BoardOut] }`.
 //!
 //! Everything but the read takes a signed-in session (a device token is 403). Store conflicts
@@ -38,6 +40,12 @@ pub fn routes() -> Router<AppState> {
         .route("/api/boards/{token}/leave", post(leave))
         .route("/api/boards/{token}/ranges", post(add_range))
         .route("/api/boards/{token}/ranges/remove", post(remove_range))
+        .route(
+            "/api/boards/{token}/games/{game_id}/leave",
+            post(leave_game),
+        )
+        .route("/api/boards/{token}/games/{game_id}/give", post(give_place))
+        .route("/api/boards/{token}/games/{game_id}/take", post(take_place))
         .route("/api/me/boards", get(mine))
         .layer(axum::middleware::map_response(accounts::secret_headers))
 }
@@ -47,6 +55,12 @@ pub fn routes() -> Router<AppState> {
 struct RangeBody {
     start: i64,
     end: i64,
+}
+
+/// The body of a game action: the game's `version` from the view the player saw.
+#[derive(Debug, Deserialize)]
+struct VersionBody {
+    version: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,4 +173,46 @@ async fn mine(
 ) -> Result<Json<MyBoards>, ApiError> {
     let items = state.store.my_boards(&user.user.id, now()).await?;
     Ok(Json(MyBoards { items }))
+}
+
+async fn leave_game(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath((token, game_id)): ApiPath<(String, String)>,
+    ApiJson(body): ApiJson<VersionBody>,
+) -> Result<Json<BoardView>, ApiError> {
+    let view = state
+        .store
+        .leave_game(&token, &game_id, &user.user.id, body.version, now())
+        .await?;
+    state.push.wake();
+    Ok(Json(view))
+}
+
+async fn give_place(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath((token, game_id)): ApiPath<(String, String)>,
+    ApiJson(body): ApiJson<VersionBody>,
+) -> Result<Json<BoardView>, ApiError> {
+    let view = state
+        .store
+        .give_place(&token, &game_id, &user.user.id, body.version, now())
+        .await?;
+    state.push.wake();
+    Ok(Json(view))
+}
+
+async fn take_place(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath((token, game_id)): ApiPath<(String, String)>,
+    ApiJson(body): ApiJson<VersionBody>,
+) -> Result<Json<BoardView>, ApiError> {
+    let view = state
+        .store
+        .take_place(&token, &game_id, &user.user.id, body.version, now())
+        .await?;
+    state.push.wake();
+    Ok(Json(view))
 }

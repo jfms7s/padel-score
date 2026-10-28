@@ -65,6 +65,9 @@ pub fn uncovered_parts(mine: &[Piece], start: i64, end: i64) -> Vec<(i64, i64)> 
 /// `created_at`, and a cut in the middle makes two pieces.
 pub fn trim(mine: &[Piece], start: i64, end: i64) -> Trim {
     let mut out = Trim::default();
+    if start >= end {
+        return out;
+    }
     for p in ordered(mine) {
         if p.end <= start || p.start >= end {
             continue;
@@ -158,6 +161,14 @@ mod tests {
         for (s, e) in [(8 * H, 9 * H), (12 * H, 13 * H), (9 * H, 10 * H)] {
             let t = trim(&mine, s, e);
             assert!(t.delete.is_empty() && t.insert.is_empty());
+        }
+    }
+
+    #[test]
+    fn trim_of_an_empty_or_backwards_range_changes_nothing() {
+        let mine = vec![piece("p1", 10 * H, 12 * H, 100)];
+        for (s, e) in [(11 * H, 11 * H), (12 * H, 10 * H)] {
+            assert_eq!(trim(&mine, s, e), Trim::default());
         }
     }
 

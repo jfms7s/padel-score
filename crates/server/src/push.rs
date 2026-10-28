@@ -263,6 +263,7 @@ pub enum NoticeKind {
     GameFormed,
     MovedIn,
     PlayerLeft,
+    PlaceGiven,
     BoardDeleted,
 }
 
