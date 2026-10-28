@@ -2,14 +2,14 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ApiError, createMatch } from '#lib/api.ts';
+	import { createMatch } from '#lib/api.ts';
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
 	import PlayLaterFields from '#lib/components/PlayLaterFields.svelte';
 	import ServeOrderFields from '#lib/components/ServeOrderFields.svelte';
 	import { startFailure, startFromParam } from '#lib/handoff.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { createScheduled, emptyLater, laterStart, scheduledMessage, toNewScheduled } from '#lib/scheduled.ts';
-	import { bootSession } from '#lib/session.ts';
+	import { requireSignedIn, session } from '#lib/session.ts';
 	import { safeStorage } from '#lib/storage.ts';
 	import { strings } from '#lib/strings.ts';
 	import {
@@ -57,15 +57,18 @@
 		});
 	});
 
-	/** The signed-in user's players; null while unknown, signed out or unreadable (plain inputs). */
+	// Starting a match needs an account: signed out, the browser goes to sign-in and back here.
+	/** The signed-in user's players; null while unknown or unreadable (plain inputs). */
 	let players = $state<Player[] | null>(null);
 	let playersFailed = $state(false);
+	let unavailable = $state(false);
 	$effect(() => {
 		void loadPlayers();
 	});
 
 	async function loadPlayers() {
-		const s = await bootSession();
+		const s = await requireSignedIn();
+		if (s.status === 'unavailable') unavailable = true;
 		if (s.status !== 'signed_in') return;
 		try {
 			players = await listPlayers({ quiet: true });
@@ -132,11 +135,9 @@
 					? refused.dropFrom
 						? `${refused.message} ${t.unlinked}`
 						: refused.message
-					: e instanceof ApiError && e.code === 'invalid_match' && e.message === 'players need an account'
-						? strings.signedOutPlayers
-						: e instanceof Error
-							? e.message
-							: '';
+					: e instanceof Error
+						? e.message
+						: '';
 			busy = false;
 			return;
 		}
@@ -186,6 +187,10 @@
 
 <main>
 	<a class="back" href="/">{t.back}</a>
+	{#if unavailable}
+		<p class="error" role="alert">{strings.networkError}</p>
+	{/if}
+	{#if $session.status === 'signed_in'}
 	<form onsubmit={start}>
 		<h1>{t.title}</h1>
 		{#if handoffExpired}<p class="hint" role="status">{t.handoffExpired}</p>{/if}
@@ -302,6 +307,7 @@
 		</div>
 		</div>
 	</form>
+	{/if}
 </main>
 
 <style>

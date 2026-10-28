@@ -37,7 +37,7 @@ use serde_json::json;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::AppState;
-use crate::auth::OptionalUser;
+use crate::auth::CurrentUser;
 use crate::commands::{
     Authority, CommandOutcome, CommandRequest, FinalRequest, MatchView, ReplaceRequest,
     apply_command, delete_unfinished, record_final, replace_from, set_start, view_of,
@@ -280,31 +280,26 @@ struct Created<'a> {
     spectator_token: &'a str,
 }
 
-/// A signed-in caller owns the match; anyone else (no credential, or one that fails) creates an
-/// anonymous quick match exactly as before, never a 401, unless the request has a `from`: a
-/// match started from a game needs its starter, so that is a 401.
+/// Starting a match needs a signed-in caller (session or device), who owns it; anyone else is
+/// 401. Matches created anonymously before this rule keep working by their tokens.
 async fn create_match(
     State(state): State<AppState>,
-    OptionalUser(user): OptionalUser,
+    user: CurrentUser,
     ApiJson(req): ApiJson<CreateMatchRequest>,
 ) -> Result<Response, ApiError> {
-    if req.from.is_some() && user.is_none() {
-        return Err(ApiError::Unauthorized);
-    }
+    let owner = user.user.id;
     let new = NewMatch {
         format: req.format,
         start: req.start,
         teams: req.teams,
-        owner_user_id: user.map(|u| u.user.id),
+        owner_user_id: Some(owner.clone()),
         players: req.players,
     };
     let m = match &req.from {
         Some(from) => create_match_from(&state.store, new, from, now()).await?,
         None => state.store.create_match(new, now()).await?,
     };
-    if let Some(owner) = &m.owner_user_id {
-        state.hub.notify_user(owner);
-    }
+    state.hub.notify_user(&owner);
     let location = format!("/s/{}", m.scorer_token);
     let body = Created {
         id: &m.id,

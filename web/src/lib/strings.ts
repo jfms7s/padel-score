@@ -42,7 +42,7 @@ export const strings = {
 	newMatch: 'New match',
 	recentMatches: 'Recent matches on this device',
 	noRecent: 'Matches you start here will show up in this list.',
-	homeIntro: 'Score a padel match from the fence. No account needed.',
+	homeIntro: 'Score a padel match from the fence.',
 
 	// New match.
 	setup: {
@@ -927,7 +927,6 @@ export const strings = {
 	},
 
 	// API failures.
-	signedOutPlayers: "You've been signed out. Sign in again to use your players.",
 	networkError: "Can't reach the server.",
 	serverError: (status: number) => `The server answered ${status}.`,
 

@@ -383,13 +383,13 @@ async fn match_with_players_records_slots() {
 }
 
 #[tokio::test]
-async fn match_with_players_needs_account() {
+async fn signed_out_match_is_401() {
     let (state, pool, app, _id, raw) = with_admin().await;
     let ana = make_player(&state, &app, &raw, "Ana").await;
-    let body = match_body(free_teams(), Some(json!({"a": [ana, null]})));
-    let res = create(&state, &app, None, body).await;
-    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", res.body);
-    assert_eq!(res.body["error"], "invalid_match");
+    for players in [None, Some(json!({"a": [ana, null]}))] {
+        let res = create(&state, &app, None, match_body(free_teams(), players)).await;
+        assert_eq!(res.status, StatusCode::UNAUTHORIZED, "{}", res.body);
+    }
     assert_eq!(count(&pool, "matches").await, 0);
 }
 
@@ -478,15 +478,6 @@ async fn mixed_slots_are_fine() {
     .await;
     assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
     assert_eq!(count(&pool, "match_players").await, 1);
-}
-
-#[tokio::test]
-async fn anonymous_match_unchanged() {
-    let (state, pool, app, _id, _raw) = with_admin().await;
-    let res = create(&state, &app, None, match_body(free_teams(), None)).await;
-    assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
-    assert_eq!(count(&pool, "matches").await, 1);
-    assert_eq!(count(&pool, "match_players").await, 0);
 }
 
 // ---- history and the player page ----

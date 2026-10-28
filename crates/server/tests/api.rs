@@ -11,8 +11,10 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::{HeaderMap, Request, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, header};
+use axum::middleware::map_request;
 use http_body_util::BodyExt;
+use padel_score_server::accounts_store::{NewUser, PollOutcome};
 use padel_score_server::api::now;
 use padel_score_server::commands::{Authority, FinalRequest, record_final};
 use padel_score_server::{AppState, Config, Store, db, router};
@@ -22,10 +24,43 @@ use tower::ServiceExt;
 
 const TIMEOUT: Duration = Duration::from_secs(2);
 
+/// The router with every request signed in by a watch's device token (unless it brings its own
+/// `Authorization`): starting a match needs an account, and the token routes ignore it.
 async fn setup() -> (Router, AppState) {
     let store = Store::new(db::connect("sqlite::memory:").await.unwrap());
     let state = AppState::new(Arc::new(Config::from_map(&HashMap::new()).unwrap()), store);
-    (router(state.clone()), state)
+    let user = NewUser {
+        email: "ana@x.test".into(),
+        display_name: "Ana".into(),
+        password_hash: "$argon2id$fake".into(),
+    };
+    let admin = state.store.create_first_admin(user, now()).await.unwrap();
+    let bearer = HeaderValue::from_str(&format!(
+        "Bearer {}",
+        device_token(&state.store, &admin.id).await
+    ))
+    .unwrap();
+    let signed_in = map_request(move |mut req: Request<Body>| {
+        let bearer = bearer.clone();
+        async move {
+            req.headers_mut()
+                .entry(header::AUTHORIZATION)
+                .or_insert(bearer);
+            req
+        }
+    });
+    (router(state.clone()).layer(signed_in), state)
+}
+
+async fn device_token(s: &Store, user_id: &str) -> String {
+    let started = s.start_device("Watch", now()).await.unwrap();
+    s.approve_device(&started.user_code, user_id, now())
+        .await
+        .unwrap();
+    match s.poll_device(&started.device_code, now()).await.unwrap() {
+        PollOutcome::Issued { raw_token } => raw_token,
+        _ => panic!("expected a token"),
+    }
 }
 
 fn new_match_body() -> Value {

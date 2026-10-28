@@ -23,7 +23,7 @@ Then open <http://localhost:8080>. With `podman build`, add `--format docker`, o
 
 ## Accounts
 
-Anonymous quick matches need no account. Owned matches, invites, the admin pages and watch sign-in do.
+Starting a match needs an account, as do invites, the admin pages and watch sign-in. Scoring and watching a match by its link need none.
 
 **First run.** While there are no users, the server logs a one-time setup code (a new one on each restart until the first admin exists). Find it, then open `/setup`:
 

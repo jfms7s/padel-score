@@ -83,6 +83,17 @@ describe('api', () => {
 		expect((err as ApiError).code).toBe('invalid_match');
 	});
 
+	it('creates a plain match as a signed-in call too: a 401 sends the user to sign-in', async () => {
+		const { format, start, teams } = asView(view);
+		serve(401, { error: 'unauthorized' });
+		const seen: string[] = [];
+		const undo = setUnauthorizedHandler(() => seen.push('signin'));
+		const err = await createMatch({ format, start, teams }).catch((e: unknown) => e);
+		undo();
+		expect(seen).toEqual(['signin']);
+		expect((err as ApiError).code).toBe('unauthorized');
+	});
+
 	it('reads the scorer and spectator views with an encoded token', async () => {
 		const calls = serve(200, view);
 		expect(await getScore('ab/c')).toEqual(view);
