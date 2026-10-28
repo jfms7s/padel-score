@@ -378,7 +378,7 @@ pub(crate) async fn load_state_in(
     .await?;
     let games: Vec<(String, i64, i64, i64, i64, bool)> = sqlx::query_as(
         "SELECT id, starts_at, ends_at, formed_at, moved, match_id IS NOT NULL FROM board_games \
-         WHERE board_id = ? ORDER BY starts_at, formed_at, id",
+         WHERE board_id = ? ORDER BY starts_at, formed_at, rowid",
     )
     .bind(board_id)
     .fetch_all(&mut *conn)
@@ -439,6 +439,33 @@ pub(crate) async fn load_state_in(
             })
             .collect(),
     })
+}
+
+/// The games one write forms get stored (so listed, since rows tie on `formed_at`) by start, then
+/// by their sorted player ids, not by their random ids. Fills keep their place.
+fn order_forms(mut steps: Vec<Step>) -> Vec<Step> {
+    let key = |step: &Step| match step {
+        Step::Form { start, players, .. } => {
+            let mut who = players.clone();
+            who.sort();
+            Some((*start, who))
+        }
+        Step::Fill { .. } => None,
+    };
+    let slots: Vec<usize> = (0..steps.len())
+        .filter(|&i| steps.get(i).and_then(key).is_some())
+        .collect();
+    let mut forms: Vec<Step> = slots
+        .iter()
+        .filter_map(|&i| steps.get(i).cloned())
+        .collect();
+    forms.sort_by_key(|f| key(f));
+    for (slot, form) in slots.into_iter().zip(forms) {
+        if let Some(place) = steps.get_mut(slot) {
+            *place = form;
+        }
+    }
+    steps
 }
 
 async fn display_name_in(conn: &mut SqliteConnection, user: &str) -> Result<String, StoreError> {
@@ -528,7 +555,7 @@ pub(crate) async fn settle_in(
     };
     let board = find_by_id_in(tx, board_id).await?;
     let mut notices = Vec::new();
-    for step in settle(&state, now) {
+    for step in order_forms(settle(&state, now)) {
         match step {
             Step::Form {
                 start,
@@ -1026,4 +1053,52 @@ async fn insert_piece_in(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+mod order_tests {
+    use super::*;
+
+    fn form(start: i64, who: [&str; 4]) -> Step {
+        Step::Form {
+            start,
+            end: start + 3600,
+            players: who.iter().map(|s| (*s).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn simultaneous_games_are_ordered_by_start_then_sorted_player_ids() {
+        let late = form(100, ["z", "y", "x", "w"]);
+        let early_b = form(50, ["m", "n", "o", "p"]);
+        let early_a = form(50, ["d", "c", "b", "a"]);
+        let fill = Step::Fill {
+            game_id: "g".into(),
+            user_id: "u".into(),
+        };
+        let a = order_forms(vec![
+            late.clone(),
+            fill.clone(),
+            early_b.clone(),
+            early_a.clone(),
+        ]);
+        let b = order_forms(vec![
+            early_a.clone(),
+            early_b.clone(),
+            late.clone(),
+            fill.clone(),
+        ]);
+        // Forms are sorted whatever order they came in; a fill keeps its slot.
+        assert_eq!(
+            a,
+            vec![early_a.clone(), fill.clone(), early_b.clone(), late.clone()]
+        );
+        assert_eq!(b, vec![early_a, early_b, late, fill]);
+    }
 }

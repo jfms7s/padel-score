@@ -161,7 +161,8 @@ impl BoardState {
                     && g.start >= now.saturating_add(FILL_CUTOFF_SECS)
             })
             .collect();
-        games.sort_by(|a, b| (a.start, a.formed_at, &a.id).cmp(&(b.start, b.formed_at, &b.id)));
+        // Stable: games arrive in store order (start, formed_at, insertion), which settles ties.
+        games.sort_by_key(|g| (g.start, g.formed_at));
         games
     }
 
@@ -266,7 +267,7 @@ pub fn uncovered(state: &BoardState, now: i64) -> Vec<(String, String)> {
         .iter()
         .filter(|g| !g.moved && !g.played && g.start > now)
         .collect();
-    games.sort_by(|a, b| (a.start, a.formed_at, &a.id).cmp(&(b.start, b.formed_at, &b.id)));
+    games.sort_by_key(|g| (g.start, g.formed_at));
     games
         .into_iter()
         .flat_map(|g| {
