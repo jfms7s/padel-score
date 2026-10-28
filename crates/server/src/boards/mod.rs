@@ -9,7 +9,7 @@ mod actions;
 pub mod formation;
 pub mod ranges;
 
-use actions::leave_in;
+use actions::{GameRow, leave_in, requests_in};
 
 use std::collections::HashMap;
 
@@ -114,7 +114,7 @@ pub enum RequestKind {
     Time,
 }
 
-/// A pending swap or time-change request the viewer is part of. Filled from Task 9 on.
+/// A pending swap or time-change request the viewer asked or must answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RequestOut {
     pub id: String,
@@ -626,6 +626,24 @@ async fn view_in(
         .map(|(id, version, played, token)| (id, (version, played, token)))
         .collect();
 
+    let game_rows: HashMap<String, GameRow> = state
+        .games
+        .iter()
+        .map(|g| {
+            let (version, played, _) = extras.get(&g.id).cloned().unwrap_or((0, false, None));
+            (
+                g.id.clone(),
+                GameRow {
+                    start: g.start,
+                    end: g.end,
+                    version,
+                    played,
+                },
+            )
+        })
+        .collect();
+    let requests = requests_in(conn, &board.id, viewer, &state, &game_rows, &names, now).await?;
+
     let games = state
         .games
         .iter()
@@ -692,7 +710,7 @@ async fn view_in(
             })
             .collect(),
         games,
-        requests: Vec::new(),
+        requests,
     })
 }
 

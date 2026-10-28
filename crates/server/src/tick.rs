@@ -12,6 +12,8 @@ pub const TICK: Duration = Duration::from_secs(60);
 pub struct TickReport {
     /// Outbox rows deleted for being older than [`OUTBOX_KEEP_SECS`].
     pub pruned: usize,
+    /// Board swap and time requests set to `expired` because a game changed or started.
+    pub expired_requests: usize,
 }
 
 /// One tick as of `now`.
@@ -20,6 +22,10 @@ pub async fn tick_once(state: &AppState, now: i64) -> TickReport {
     match state.store.prune_push_outbox(now - OUTBOX_KEEP_SECS).await {
         Ok(pruned) => report.pruned = pruned,
         Err(error) => tracing::error!(%error, "push outbox prune failed"),
+    }
+    match state.store.expire_requests(now).await {
+        Ok(expired) => report.expired_requests = expired,
+        Err(error) => tracing::error!(%error, "board request expiry failed"),
     }
     report
 }
@@ -34,8 +40,12 @@ pub async fn run(state: AppState) {
             _ = ticker.tick() => {}
         }
         let report = tick_once(&state, crate::api::now()).await;
-        if report.pruned > 0 {
-            tracing::info!(pruned = report.pruned, "tick done");
+        if report.pruned + report.expired_requests > 0 {
+            tracing::info!(
+                pruned = report.pruned,
+                expired_requests = report.expired_requests,
+                "tick done"
+            );
         }
     }
 }

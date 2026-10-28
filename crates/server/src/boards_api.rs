@@ -10,6 +10,13 @@
 //! - `POST /api/boards/{token}/ranges` and `.../ranges/remove` with `{start, end}` are 200.
 //! - `POST /api/boards/{token}/games/{game_id}/leave|give|take` with `{version}` (the game's, from
 //!   the view the player saw; a stale one is `409 game_changed`) is 200 [`BoardView`].
+//! - `POST /api/boards/{token}/games/{game_id}/swap` with `{version, other_game_id,
+//!   other_user_id}` asks a player of an overlapping game to trade places, and `.../time` with
+//!   `{version, start, end, agreed}` moves the game (at once when `agreed`, else as a request
+//!   the other players answer). Both are 200 [`BoardView`].
+//! - `POST /api/board-requests/{id}/accept` and `.../decline`, with no body, answer a request
+//!   addressed to the caller: 200 [`BoardView`] of its board. A request that went stale or no
+//!   longer works is `409 request_expired` (or the failing code).
 //! - `GET /api/me/boards` is `{ "items": [BoardOut] }`.
 //!
 //! Everything but the read takes a signed-in session (a device token is 403). Store conflicts
@@ -46,6 +53,10 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/api/boards/{token}/games/{game_id}/give", post(give_place))
         .route("/api/boards/{token}/games/{game_id}/take", post(take_place))
+        .route("/api/boards/{token}/games/{game_id}/swap", post(ask_swap))
+        .route("/api/boards/{token}/games/{game_id}/time", post(ask_time))
+        .route("/api/board-requests/{id}/accept", post(accept_request))
+        .route("/api/board-requests/{id}/decline", post(decline_request))
         .route("/api/me/boards", get(mine))
         .layer(axum::middleware::map_response(accounts::secret_headers))
 }
@@ -61,6 +72,23 @@ struct RangeBody {
 #[derive(Debug, Deserialize)]
 struct VersionBody {
     version: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct SwapBody {
+    version: i64,
+    other_game_id: String,
+    other_user_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TimeBody {
+    version: i64,
+    start: i64,
+    end: i64,
+    /// The players settled it in the chat: apply at once and only tell them.
+    #[serde(default)]
+    agreed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -215,4 +243,81 @@ async fn take_place(
         .await?;
     state.push.wake();
     Ok(Json(view))
+}
+
+async fn ask_swap(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath((token, game_id)): ApiPath<(String, String)>,
+    ApiJson(body): ApiJson<SwapBody>,
+) -> Result<Json<BoardView>, ApiError> {
+    let view = state
+        .store
+        .ask_swap(
+            &token,
+            &game_id,
+            &user.user.id,
+            body.version,
+            &body.other_game_id,
+            &body.other_user_id,
+            now(),
+        )
+        .await?;
+    state.push.wake();
+    Ok(Json(view))
+}
+
+async fn ask_time(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath((token, game_id)): ApiPath<(String, String)>,
+    ApiJson(body): ApiJson<TimeBody>,
+) -> Result<Json<BoardView>, ApiError> {
+    let view = state
+        .store
+        .ask_time(
+            &token,
+            &game_id,
+            &user.user.id,
+            body.version,
+            body.start,
+            body.end,
+            body.agreed,
+            now(),
+        )
+        .await?;
+    state.push.wake();
+    Ok(Json(view))
+}
+
+async fn accept_request(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath(id): ApiPath<String>,
+) -> Result<Json<BoardView>, ApiError> {
+    answer(&state, &user.user.id, &id, true).await
+}
+
+async fn decline_request(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath(id): ApiPath<String>,
+) -> Result<Json<BoardView>, ApiError> {
+    answer(&state, &user.user.id, &id, false).await
+}
+
+async fn answer(
+    state: &AppState,
+    user: &str,
+    request_id: &str,
+    accept: bool,
+) -> Result<Json<BoardView>, ApiError> {
+    let result = state
+        .store
+        .answer_request(request_id, user, accept, now())
+        .await;
+    // An expired answer still commits (the request is closed), and may have queued nothing,
+    // but waking costs nothing.
+    state.push.wake();
+    Ok(Json(result?))
 }

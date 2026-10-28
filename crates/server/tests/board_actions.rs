@@ -8,7 +8,7 @@
 //! Game actions on a board: Leave, Give my place and Take the open place, through the store.
 
 use padel_score_server::accounts_store::NewUser;
-use padel_score_server::boards::{BoardView, GameState, NewBoard, WEEK_SECS};
+use padel_score_server::boards::{BoardView, GameState, NewBoard, RequestKind, WEEK_SECS};
 use padel_score_server::db;
 use padel_score_server::store::{Store, StoreError};
 use serde_json::Value;
@@ -478,4 +478,599 @@ async fn take_refused_when_busy_in_another_game() {
     assert_eq!(code(err), "busy");
     let after = view(&s, &token, &second[0], now).await;
     assert_eq!(players(&after, 0), players(&v, 0));
+}
+
+/// `two_games` with `a0` also free for the second game and `b0` for the first, so they can swap.
+async fn swappable() -> (Store, SqlitePool, String, [String; 4], [String; 4]) {
+    let (s, pool, token, first, second) = two_games().await;
+    s.add_free(
+        &token,
+        &first[0],
+        START + HOUR,
+        START + HOUR + HALF,
+        T0 + 20,
+    )
+    .await
+    .unwrap();
+    s.add_free(&token, &second[0], START, START + HALF, T0 + 21)
+        .await
+        .unwrap();
+    clear_outbox(&pool).await;
+    (s, pool, token, first, second)
+}
+
+async fn request_status(pool: &SqlitePool, id: &str) -> String {
+    sqlx::query_scalar("SELECT status FROM board_requests WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Ana asks Rui... the first request in `who`'s view.
+fn first_request(v: &BoardView) -> &padel_score_server::boards::RequestOut {
+    v.requests.first().expect("a pending request")
+}
+
+#[tokio::test]
+async fn swap_accept_trades_places() {
+    let (s, pool, token, first, second) = swappable().await;
+    let [a0, a1, a2, a3] = &first;
+    let [b0, b1, b2, b3] = &second;
+    let v = view(&s, &token, a0, T0 + 30).await;
+    let (g1, g2) = (&v.games[0], &v.games[1]);
+    let asked = s
+        .ask_swap(&token, &g1.id, a0, g1.version, &g2.id, b0, T0 + 30)
+        .await
+        .unwrap();
+    let mine = first_request(&asked);
+    assert_eq!(mine.kind, RequestKind::Swap);
+    assert!(!mine.needs_my_answer);
+    assert_eq!(mine.from.user_id, *a0);
+    assert_eq!(mine.game_id, g1.id);
+    assert_eq!(mine.other_game_id.as_deref(), Some(g2.id.as_str()));
+    let rows = outbox(&pool).await;
+    assert_eq!(recipients(&rows, "swap_asked"), vec![b0.clone()]);
+    let (_, p) = rows
+        .iter()
+        .find(|(_, p)| p["kind"] == "swap_asked")
+        .unwrap();
+    assert_eq!(p["name"], "Aa0");
+    assert_eq!(
+        (p["start"].as_i64(), p["end"].as_i64()),
+        (Some(g2.start), Some(g2.end))
+    );
+    assert_eq!(
+        (p["new_start"].as_i64(), p["new_end"].as_i64()),
+        (Some(g1.start), Some(g1.end))
+    );
+    // A second ask from the same user on the same game is refused.
+    let err = s
+        .ask_swap(&token, &g1.id, a0, g1.version, &g2.id, b0, T0 + 31)
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "request_pending");
+    // The addressee sees it and must answer; bystanders see nothing.
+    let theirs = view(&s, &token, b0, T0 + 32).await;
+    assert!(first_request(&theirs).needs_my_answer);
+    assert!(view(&s, &token, a1, T0 + 32).await.requests.is_empty());
+    clear_outbox(&pool).await;
+    let after = s.answer_request(&mine.id, b0, true, T0 + 40).await.unwrap();
+    assert_eq!(
+        players(&after, 0),
+        vec![b0.clone(), a1.clone(), a2.clone(), a3.clone()]
+    );
+    assert_eq!(
+        players(&after, 1),
+        vec![a0.clone(), b1.clone(), b2.clone(), b3.clone()]
+    );
+    assert_eq!(after.games[0].version, g1.version + 1);
+    assert_eq!(after.games[1].version, g2.version + 1);
+    assert!(after.requests.is_empty());
+    assert_eq!(request_status(&pool, &mine.id).await, "accepted");
+    let rows = outbox(&pool).await;
+    assert_eq!(recipients(&rows, "swap_answered"), vec![a0.clone()]);
+    let (_, p) = rows
+        .iter()
+        .find(|(_, p)| p["kind"] == "swap_answered")
+        .unwrap();
+    assert_eq!(p["accepted"], true);
+    assert_eq!(p["name"], "Bb0");
+    assert_eq!(
+        (p["start"].as_i64(), p["end"].as_i64()),
+        (Some(g1.start), Some(g1.end))
+    );
+    assert_eq!(
+        (p["new_start"].as_i64(), p["new_end"].as_i64()),
+        (Some(g2.start), Some(g2.end))
+    );
+    // Answered once: a second answer finds nothing pending.
+    let err = s
+        .answer_request(&mine.id, b0, true, T0 + 41)
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "not_found");
+}
+
+#[tokio::test]
+async fn swap_asks_are_refused_when_they_cannot_work() {
+    let (s, _, token, first, second) = swappable().await;
+    let v = view(&s, &token, &first[0], T0 + 30).await;
+    let (g1, g2) = (&v.games[0], &v.games[1]);
+    // Rui (a1) is not free for the second game.
+    let err = s
+        .ask_swap(
+            &token,
+            &g1.id,
+            &first[1],
+            g1.version,
+            &g2.id,
+            &second[0],
+            T0 + 30,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "cannot_swap");
+    // A stale version is refused first.
+    let err = s
+        .ask_swap(
+            &token,
+            &g1.id,
+            &first[0],
+            g1.version + 1,
+            &g2.id,
+            &second[0],
+            T0 + 30,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "game_changed");
+    let err = s
+        .ask_swap(
+            &token,
+            &g1.id,
+            &first[0],
+            g1.version,
+            "nope",
+            &second[0],
+            T0 + 30,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "not_found");
+}
+
+#[tokio::test]
+async fn swap_decline_changes_nothing() {
+    let (s, pool, token, first, second) = swappable().await;
+    let b0 = &second[0];
+    let v = view(&s, &token, &first[0], T0 + 30).await;
+    let (g1, g2) = (&v.games[0], &v.games[1]);
+    let asked = s
+        .ask_swap(&token, &g1.id, &first[0], g1.version, &g2.id, b0, T0 + 30)
+        .await
+        .unwrap();
+    clear_outbox(&pool).await;
+    let id = first_request(&asked).id.clone();
+    let after = s.answer_request(&id, b0, false, T0 + 40).await.unwrap();
+    assert_eq!(players(&after, 0), first.to_vec());
+    assert_eq!(players(&after, 1), second.to_vec());
+    assert_eq!(after.games[0].version, g1.version);
+    assert_eq!(after.games[1].version, g2.version);
+    assert!(after.requests.is_empty());
+    assert_eq!(request_status(&pool, &id).await, "declined");
+    let rows = outbox(&pool).await;
+    assert_eq!(recipients(&rows, "swap_answered"), vec![first[0].clone()]);
+    assert_eq!(rows[0].1["accepted"], false);
+}
+
+#[tokio::test]
+async fn swap_request_expires_when_a_game_changes() {
+    let (s, pool, token, first, second) = swappable().await;
+    let b0 = &second[0];
+    let v = view(&s, &token, &first[0], T0 + 30).await;
+    let (g1, g2) = (&v.games[0], &v.games[1]);
+    let asked = s
+        .ask_swap(&token, &g1.id, &first[0], g1.version, &g2.id, b0, T0 + 30)
+        .await
+        .unwrap();
+    let id = first_request(&asked).id.clone();
+    // Someone leaves the other game.
+    s.leave_game(&token, &g2.id, &second[1], g2.version, T0 + 31)
+        .await
+        .unwrap();
+    // The stale request is hidden on read.
+    assert!(view(&s, &token, b0, T0 + 32).await.requests.is_empty());
+    assert!(
+        view(&s, &token, &first[0], T0 + 32)
+            .await
+            .requests
+            .is_empty()
+    );
+    let err = s.answer_request(&id, b0, true, T0 + 33).await.unwrap_err();
+    assert_eq!(code(err), "request_expired");
+    assert_eq!(request_status(&pool, &id).await, "expired");
+    let after = view(&s, &token, b0, T0 + 34).await;
+    assert_eq!(players(&after, 0), first.to_vec());
+}
+
+#[tokio::test]
+async fn swap_that_no_longer_works_expires_with_its_code() {
+    let (s, pool, token, first, second) = swappable().await;
+    let (a0, b0) = (&first[0], &second[0]);
+    let v = view(&s, &token, a0, T0 + 30).await;
+    let (g1, g2) = (&v.games[0], &v.games[1]);
+    let asked = s
+        .ask_swap(&token, &g1.id, a0, g1.version, &g2.id, b0, T0 + 30)
+        .await
+        .unwrap();
+    let id = first_request(&asked).id.clone();
+    // Ana drops her free time over the second game; no game version changes.
+    s.remove_free(&token, a0, START + HOUR, START + HOUR + HALF, T0 + 31)
+        .await
+        .unwrap();
+    let err = s.answer_request(&id, b0, true, T0 + 32).await.unwrap_err();
+    assert_eq!(code(err), "cannot_swap");
+    assert_eq!(request_status(&pool, &id).await, "expired");
+    assert_eq!(
+        players(&view(&s, &token, b0, T0 + 33).await, 0),
+        first.to_vec()
+    );
+}
+
+/// Ask for START + 2h .. + 3h from `who[0]` in a formed game.
+async fn ask_later(s: &Store, token: &str, who: &[String; 4], agreed: bool, now: i64) -> BoardView {
+    let v = view(s, token, &who[0], now).await;
+    s.ask_time(
+        token,
+        &v.games[0].id,
+        &who[0],
+        v.games[0].version,
+        START + 2 * HOUR,
+        START + 3 * HOUR,
+        agreed,
+        now,
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn time_change_applies_when_all_accept_and_marks_moved() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    let before = view(&s, &token, &a, T0 + 20).await.games[0].clone();
+    clear_outbox(&pool).await;
+    let asked = ask_later(
+        &s,
+        &token,
+        &[a.clone(), b.clone(), c.clone(), d.clone()],
+        false,
+        T0 + 20,
+    )
+    .await;
+    let req = first_request(&asked).clone();
+    assert_eq!(req.kind, RequestKind::Time);
+    assert_eq!(req.new_start, Some(START + 2 * HOUR));
+    assert_eq!(req.new_end, Some(START + 3 * HOUR));
+    assert!(!req.needs_my_answer);
+    let rows = outbox(&pool).await;
+    assert_eq!(recipients(&rows, "time_asked"), sorted(&[&b, &c, &d]));
+    let (_, p) = rows
+        .iter()
+        .find(|(_, p)| p["kind"] == "time_asked")
+        .unwrap();
+    assert_eq!(p["name"], "Ana");
+    assert_eq!(p["start"], before.start);
+    assert_eq!(p["new_start"], START + 2 * HOUR);
+    // Two accept: still waiting. Accepting twice is refused.
+    let mid = s.answer_request(&req.id, &b, true, T0 + 30).await.unwrap();
+    assert_eq!(mid.games[0].start, before.start);
+    assert!(!mid.games[0].moved);
+    assert!(!first_request(&mid).needs_my_answer);
+    let err = s
+        .answer_request(&req.id, &b, true, T0 + 31)
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "already_answered");
+    s.answer_request(&req.id, &c, true, T0 + 32).await.unwrap();
+    clear_outbox(&pool).await;
+    // The last one makes it happen.
+    let after = s.answer_request(&req.id, &d, true, T0 + 33).await.unwrap();
+    let g = &after.games[0];
+    assert_eq!((g.start, g.end), (START + 2 * HOUR, START + 3 * HOUR));
+    assert!(g.moved);
+    assert!(g.version > before.version);
+    assert_eq!(
+        players(&after, 0),
+        vec![a.clone(), b.clone(), c.clone(), d.clone()]
+    );
+    assert!(after.requests.is_empty());
+    assert_eq!(request_status(&pool, &req.id).await, "accepted");
+    let rows = outbox(&pool).await;
+    assert_eq!(recipients(&rows, "time_answered"), vec![a.clone()]);
+    assert_eq!(recipients(&rows, "time_changed"), sorted(&[&b, &c]));
+    let (_, p) = rows
+        .iter()
+        .find(|(_, p)| p["kind"] == "time_answered")
+        .unwrap();
+    assert_eq!(p["accepted"], true);
+    let (_, p) = rows
+        .iter()
+        .find(|(_, p)| p["kind"] == "time_changed")
+        .unwrap();
+    assert_eq!(p["name"], "Ana");
+    assert_eq!(
+        (p["start"].as_i64(), p["new_start"].as_i64()),
+        (Some(before.start), Some(START + 2 * HOUR))
+    );
+}
+
+#[tokio::test]
+async fn one_decline_drops_the_time_change() {
+    let (s, pool, token, who) = formed().await;
+    let [a, b, c, _] = &who;
+    let before = view(&s, &token, a, T0 + 20).await.games[0].clone();
+    let asked = ask_later(&s, &token, &who, false, T0 + 20).await;
+    let id = first_request(&asked).id.clone();
+    clear_outbox(&pool).await;
+    let after = s.answer_request(&id, b, false, T0 + 30).await.unwrap();
+    assert_eq!(after.games[0].start, before.start);
+    assert!(!after.games[0].moved);
+    assert_eq!(after.games[0].version, before.version);
+    assert!(after.requests.is_empty());
+    assert_eq!(request_status(&pool, &id).await, "declined");
+    let rows = outbox(&pool).await;
+    assert_eq!(recipients(&rows, "time_answered"), vec![a.clone()]);
+    assert_eq!(rows[0].1["accepted"], false);
+    assert_eq!(rows[0].1["name"], "Rui");
+    // The request is closed for everyone else.
+    let err = s.answer_request(&id, c, true, T0 + 31).await.unwrap_err();
+    assert_eq!(code(err), "not_found");
+}
+
+#[tokio::test]
+async fn agreed_in_the_chat_applies_at_once_and_only_tells() {
+    let (s, pool, token, who) = formed().await;
+    let [a, b, c, d] = &who;
+    let before = view(&s, &token, a, T0 + 20).await.games[0].clone();
+    clear_outbox(&pool).await;
+    let after = ask_later(&s, &token, &who, true, T0 + 20).await;
+    let g = &after.games[0];
+    assert_eq!((g.start, g.end), (START + 2 * HOUR, START + 3 * HOUR));
+    assert!(g.moved);
+    assert!(g.version > before.version);
+    assert!(after.requests.is_empty());
+    let rows = outbox(&pool).await;
+    assert!(recipients(&rows, "time_asked").is_empty());
+    assert_eq!(recipients(&rows, "time_changed"), sorted(&[b, c, d]));
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM board_requests")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn a_lone_player_changes_the_time_at_once() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    // Everyone else leaves; the game is short inside the hour so nobody fills in.
+    let now = START - 2 * HOUR;
+    for who in [&b, &c, &d] {
+        let v = view(&s, &token, who, now).await;
+        s.leave_game(&token, &v.games[0].id, who, v.games[0].version, now)
+            .await
+            .unwrap();
+    }
+    clear_outbox(&pool).await;
+    let v = view(&s, &token, &a, now).await;
+    assert_eq!(v.games[0].players.len(), 1);
+    let after = s
+        .ask_time(
+            &token,
+            &v.games[0].id,
+            &a,
+            v.games[0].version,
+            START + 2 * HOUR,
+            START + 3 * HOUR,
+            false,
+            now,
+        )
+        .await
+        .unwrap();
+    assert!(after.games[0].moved);
+    assert_eq!(after.games[0].start, START + 2 * HOUR);
+    assert!(after.requests.is_empty());
+    assert!(outbox(&pool).await.is_empty());
+}
+
+#[tokio::test]
+async fn moved_game_keeps_players_without_ranges_at_the_new_time() {
+    let (s, _, token, who) = formed().await;
+    let after = ask_later(&s, &token, &who, true, T0 + 20).await;
+    // Nobody has free time over the new time, yet a later settle keeps them in.
+    assert!(after.pieces.is_empty());
+    let z = user(&s, "Zed").await;
+    let later = s
+        .add_free(&token, &z, START + 5 * HOUR, START + 6 * HOUR, T0 + 30)
+        .await
+        .unwrap();
+    assert_eq!(later.games.len(), 1);
+    assert_eq!(players(&later, 0), who.to_vec());
+    assert!(later.games[0].moved);
+}
+
+#[tokio::test]
+async fn moved_game_does_not_reform_at_the_old_time() {
+    let (s, _, token, who) = formed().await;
+    let after = ask_later(&s, &token, &who, true, T0 + 20).await;
+    // The four are not free at the old time any more, so no second game forms there.
+    assert_eq!(after.games.len(), 1);
+    assert_eq!(after.games[0].start, START + 2 * HOUR);
+    assert!(
+        after
+            .pieces
+            .iter()
+            .all(|p| p.end <= START || p.start >= START + HOUR)
+    );
+    // An overlapping move keeps the shared part of their free time.
+    let (s, _, token, who) = formed().await;
+    let v = view(&s, &token, &who[0], T0 + 20).await;
+    let after = s
+        .ask_time(
+            &token,
+            &v.games[0].id,
+            &who[0],
+            v.games[0].version,
+            START + HALF,
+            START + HALF + HOUR,
+            true,
+            T0 + 20,
+        )
+        .await
+        .unwrap();
+    assert_eq!(after.games.len(), 1);
+    assert_eq!(after.pieces.len(), 4);
+    assert!(
+        after
+            .pieces
+            .iter()
+            .all(|p| (p.start, p.end) == (START + HALF, START + HOUR))
+    );
+}
+
+#[tokio::test]
+async fn time_change_refusals() {
+    let (s, _, token, who) = formed().await;
+    let v = view(&s, &token, &who[0], T0 + 20).await;
+    let (g, ver) = (v.games[0].id.clone(), v.games[0].version);
+    let ask = |start: i64, end: i64, now: i64, user: &String| {
+        let (s, token, g) = (s.clone(), token.clone(), g.clone());
+        let user = user.clone();
+        async move {
+            s.ask_time(&token, &g, &user, ver, start, end, false, now)
+                .await
+        }
+    };
+    let err = ask(START + 2 * HOUR, START + 2 * HOUR + HALF, T0 + 20, &who[0]).await;
+    assert!(matches!(err, Err(StoreError::InvalidField("range"))));
+    let err = ask(START, START + HOUR, START - HALF, &who[0]).await;
+    assert_eq!(code(err.unwrap_err()), "too_soon");
+    let outsider = user(&s, "Zed").await;
+    let err = ask(START + 2 * HOUR, START + 3 * HOUR, T0 + 20, &outsider).await;
+    assert_eq!(code(err.unwrap_err()), "not_in_game");
+    // A pending request blocks a second one from the same player.
+    ask(START + 2 * HOUR, START + 3 * HOUR, T0 + 20, &who[0])
+        .await
+        .unwrap();
+    let err = ask(START + 3 * HOUR, START + 4 * HOUR, T0 + 21, &who[0]).await;
+    assert_eq!(code(err.unwrap_err()), "request_pending");
+}
+
+#[tokio::test]
+async fn only_addressees_can_answer() {
+    let (s, _, token, who) = formed().await;
+    let asked = ask_later(&s, &token, &who, false, T0 + 20).await;
+    let id = first_request(&asked).id.clone();
+    // The asker, a stranger and an unknown request all get 404.
+    let stranger = user(&s, "Zed").await;
+    for user in [&who[0], &stranger] {
+        let err = s
+            .answer_request(&id, user, true, T0 + 30)
+            .await
+            .unwrap_err();
+        assert_eq!(code(err), "not_found");
+    }
+    let err = s
+        .answer_request("nope", &who[1], true, T0 + 30)
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "not_found");
+    // A swap's addressee is only the asked player, not the rest of their game.
+    let (s, _, token, first, second) = swappable().await;
+    let v = view(&s, &token, &first[0], T0 + 30).await;
+    let asked = s
+        .ask_swap(
+            &token,
+            &v.games[0].id,
+            &first[0],
+            v.games[0].version,
+            &v.games[1].id,
+            &second[0],
+            T0 + 30,
+        )
+        .await
+        .unwrap();
+    let id = first_request(&asked).id.clone();
+    for user in [&second[1], &first[1], &first[0]] {
+        let err = s
+            .answer_request(&id, user, true, T0 + 31)
+            .await
+            .unwrap_err();
+        assert_eq!(code(err), "not_found");
+    }
+    assert!(
+        view(&s, &token, &second[1], T0 + 31)
+            .await
+            .requests
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn leave_is_never_refused_for_the_piece_cap() {
+    let (s, pool) = setup().await;
+    let ids = [
+        user(&s, "Ana").await,
+        user(&s, "Rui").await,
+        user(&s, "Marta").await,
+        user(&s, "Joana").await,
+    ];
+    let token = board(&s, &ids[0]).await;
+    let (from, to) = (START + 3 * HOUR, START + 4 * HOUR);
+    for (i, who) in [&ids[0], &ids[2], &ids[3]].into_iter().enumerate() {
+        s.add_free(&token, who, from, to, T0 + i64::try_from(i).unwrap())
+            .await
+            .unwrap();
+    }
+    // Rui's one piece spans the whole game and more.
+    s.add_free(&token, &ids[1], START + 2 * HOUR, START + 5 * HOUR, T0 + 3)
+        .await
+        .unwrap();
+    let board_id: String = sqlx::query_scalar("SELECT id FROM boards WHERE token = ?")
+        .bind(&token)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    // Fill him up to the cap with half-hour pieces further on.
+    for i in 0..199_i64 {
+        sqlx::query(
+            "INSERT INTO board_ranges (id, board_id, user_id, starts_at, ends_at, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(format!("fill-{i}"))
+        .bind(&board_id)
+        .bind(&ids[1])
+        .bind(START + 6 * HOUR + i * HALF)
+        .bind(START + 6 * HOUR + (i + 1) * HALF)
+        .bind(T0 + 4)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let v = view(&s, &token, &ids[1], T0 + 20).await;
+    assert_eq!(v.games.len(), 1);
+    assert_eq!(players(&v, 0).len(), 4);
+    // Cutting the game out of the long piece makes two pieces: over the cap, but Leave goes through.
+    let after = s
+        .leave_game(&token, &v.games[0].id, &ids[1], v.games[0].version, T0 + 20)
+        .await
+        .unwrap();
+    assert_eq!(after.games[0].players.len(), 3);
+    assert!(after.games[0].players.iter().all(|p| p.user_id != ids[1]));
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM board_ranges WHERE user_id = ?")
+        .bind(&ids[1])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 201);
 }
