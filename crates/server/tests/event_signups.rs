@@ -1046,8 +1046,8 @@ async fn deadline_below_minimum_cancels_and_tells_everyone() {
     w.solo(&solo, T0 + 100).await;
     users.push(solo);
     let s = &w.state.store;
-    assert_eq!(s.close_due_signups(DEADLINE - 1).await.unwrap(), 0);
-    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap(), 1);
+    assert_eq!(s.close_due_signups(DEADLINE - 1).await.unwrap().len(), 0);
+    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap().len(), 1);
     let ev = w.event_now().await;
     assert_eq!(ev.status, Status::Cancelled);
     assert_eq!(ev.cancelled_at, Some(DEADLINE));
@@ -1056,7 +1056,7 @@ async fn deadline_below_minimum_cancels_and_tells_everyone() {
         assert_eq!(w.kinds(u).await, ["event_cancelled"], "{u}");
     }
     // Done once.
-    assert_eq!(s.close_due_signups(DEADLINE + 60).await.unwrap(), 0);
+    assert_eq!(s.close_due_signups(DEADLINE + 60).await.unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -1064,12 +1064,12 @@ async fn deadline_with_enough_teams_closes_signups() {
     let w = world(16).await;
     let users = w.teams("T", 4).await;
     let s = &w.state.store;
-    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap(), 1);
+    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap().len(), 1);
     let ev = w.event_now().await;
     assert_eq!(ev.status, Status::Setup);
     assert_eq!(ev.signups_closed_at, Some(DEADLINE));
     assert!(w.kinds(&users[0]).await.is_empty());
-    assert_eq!(s.close_due_signups(DEADLINE + 60).await.unwrap(), 0);
+    assert_eq!(s.close_due_signups(DEADLINE + 60).await.unwrap().len(), 0);
     let late = w.user("Late").await;
     assert!(matches!(
         w.join(&late, JoinAs::Solo, DEADLINE + 1).await,
@@ -1094,9 +1094,10 @@ async fn deadline_job_leaves_other_events_alone() {
     // Not due yet, sign-ups off, already closed, and already running are all skipped.
     let w = world(16).await;
     let s = &w.state.store;
-    assert_eq!(s.close_due_signups(DEADLINE - 1).await.unwrap(), 0);
+    assert_eq!(s.close_due_signups(DEADLINE - 1).await.unwrap().len(), 0);
+    w.teams("T", 4).await;
     s.take_teams(&w.owner, &w.event, T0 + 5).await.unwrap();
-    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap(), 0);
+    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap().len(), 0);
     assert_eq!(w.event_now().await.signups_closed_at, Some(T0 + 5));
     assert_eq!(w.event_now().await.status, Status::Setup);
 }
@@ -1122,8 +1123,10 @@ async fn take_teams_tournament_takes_largest_bracket() {
         assert_eq!(notices[0]["title"], "Friday cup");
     }
     // A second run changes nothing.
-    let again = w.take(T0 + 600).await.unwrap();
-    assert_eq!((again.taken, again.left_on_line), (0, 3));
+    assert!(matches!(
+        w.take(T0 + 600).await,
+        Err(StoreError::Conflict("nothing_to_take"))
+    ));
     assert_eq!(w.team_rows().await, 8);
     assert_eq!(w.kinds(&users[8]).await, ["no_place"]);
 }
@@ -1260,7 +1263,15 @@ async fn take_teams_closes_signups() {
         Err(StoreError::Conflict("signups_closed"))
     ));
     // The deadline job then has nothing to do.
-    assert_eq!(w.state.store.close_due_signups(DEADLINE).await.unwrap(), 0);
+    assert_eq!(
+        w.state
+            .store
+            .close_due_signups(DEADLINE)
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[tokio::test]
@@ -1302,4 +1313,112 @@ async fn take_teams_over_http() {
     let (_, other) = fast_user(&w.state, "other@x.test", "Other").await;
     let res = w.call(&other, Method::POST, &path, None).await;
     assert_eq!(res.status, StatusCode::NOT_FOUND);
+}
+
+// ---- D4 fix wave ----
+
+#[tokio::test]
+async fn taken_entry_stays_a_team_after_a_hand_added_team() {
+    let w = non_stop_world(4).await;
+    let users = w.teams("T", 4).await;
+    assert_eq!(w.take(T0 + 500).await.unwrap().taken, 4);
+    // A fifth team by hand, past the maximum: the taken sign-ups keep their places.
+    w.hand_team("Hand A", "Hand B").await;
+    for u in &users {
+        assert!(w.kinds(u).await.is_empty(), "{u}");
+    }
+    assert_eq!(w.me(&users[3]).await, Some(MyEntry::Team { place: 5 }));
+    let list = w.list().await;
+    assert_eq!((list.teams.len(), list.line.len()), (4, 0));
+    // Lowering the maximum below the taken teams does not move them either.
+    let change = CompetitionChange {
+        schedule: Some(ScheduleInput {
+            max_teams: Some(Some(2)),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    w.state
+        .store
+        .update_competition(&w.owner, &w.event, change, T0 + 600)
+        .await
+        .unwrap();
+    for u in &users {
+        assert!(w.kinds(u).await.is_empty(), "{u}");
+    }
+    assert!(matches!(w.me(&users[0]).await, Some(MyEntry::Team { .. })));
+    assert_eq!(w.list().await.line.len(), 0);
+}
+
+#[tokio::test]
+async fn take_teams_with_nothing_to_take_changes_nothing() {
+    let w = world(8).await;
+    let users = w.teams("T", 3).await;
+    assert!(matches!(
+        w.take(T0 + 500).await,
+        Err(StoreError::Conflict("nothing_to_take"))
+    ));
+    assert_eq!(w.event_now().await.signups_closed_at, None);
+    assert_eq!(w.team_rows().await, 0);
+    for u in &users {
+        assert!(w.kinds(u).await.is_empty());
+    }
+    let path = format!("/api/events/{}/take-teams", w.event);
+    let res = w.call(&w.raw, Method::POST, &path, None).await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(res.body["error"], "nothing_to_take");
+}
+
+#[tokio::test]
+async fn named_partner_never_reuses_a_linked_entry() {
+    let w = non_stop_world(8).await;
+    let (ana, rui, marta) = (
+        w.user("Ana").await,
+        w.user("Rui").await,
+        w.user("Marta").await,
+    );
+    w.solo(&ana, T0 + 10).await;
+    w.solo(&rui, T0 + 20).await;
+    // A different Ana, without an account.
+    w.named(&marta, "Ana", T0 + 30).await;
+    let report = w.take(T0 + 500).await.unwrap();
+    assert_eq!((report.taken, report.skipped.len()), (2, 0));
+    let players: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT name, linked_user_id FROM players WHERE owner_user_id = ? ORDER BY name",
+    )
+    .bind(&w.owner)
+    .fetch_all(&w.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        players,
+        [
+            ("Ana".to_owned(), Some(ana)),
+            ("Ana 2".to_owned(), None),
+            ("Marta".to_owned(), Some(marta)),
+            ("Rui".to_owned(), Some(rui)),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn automatic_cancel_tells_the_organiser_and_reports_it() {
+    let w = world(16).await;
+    let users = w.teams("T", 2).await;
+    let closed = w.state.store.close_due_signups(DEADLINE).await.unwrap();
+    assert_eq!(closed.len(), 1);
+    assert_eq!(closed[0].event_id, w.event);
+    assert_eq!(closed[0].owner_id, w.owner);
+    assert!(closed[0].cancelled);
+    assert_eq!(w.kinds(&w.owner).await, ["event_cancelled"]);
+    assert_eq!(w.kinds(&users[0]).await, ["event_cancelled"]);
+}
+
+#[tokio::test]
+async fn closing_without_cancel_does_not_notify_the_organiser() {
+    let w = world(16).await;
+    w.teams("T", 4).await;
+    let closed = w.state.store.close_due_signups(DEADLINE).await.unwrap();
+    assert!(!closed[0].cancelled);
+    assert!(w.kinds(&w.owner).await.is_empty());
 }

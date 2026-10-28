@@ -142,6 +142,7 @@ async fn events_without_a_date_work_as_before() {
     assert_eq!(schedule["max_teams"], Value::Null);
     assert_eq!(schedule["deadline_at"], Value::Null);
     assert_eq!(res.body["event"]["cancelled_at"], Value::Null);
+    assert_eq!(res.body["event"]["signups_closed_at"], Value::Null);
     assert_eq!(res.body["join_token"], Value::Null);
 }
 

@@ -45,6 +45,8 @@ pub struct EventSummary {
     pub court_count: usize,
     pub schedule: Schedule,
     pub cancelled_at: Option<i64>,
+    /// When sign-ups closed: the deadline ran, or the organiser took the teams.
+    pub signups_closed_at: Option<i64>,
 }
 
 impl EventSummary {
@@ -63,6 +65,7 @@ impl EventSummary {
             court_count,
             schedule: ev.schedule.clone(),
             cancelled_at: ev.cancelled_at,
+            signups_closed_at: ev.signups_closed_at,
         }
     }
 }

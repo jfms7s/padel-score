@@ -30,7 +30,13 @@ pub async fn tick_once(state: &AppState, now: i64) -> TickReport {
         Err(error) => tracing::error!(%error, "board request expiry failed"),
     }
     match state.store.close_due_signups(now).await {
-        Ok(closed) => report.closed_signups = closed,
+        Ok(closed) => {
+            report.closed_signups = closed.len();
+            for event in &closed {
+                state.hub.notify_event(&event.event_id);
+                state.hub.notify_user(&event.owner_id);
+            }
+        }
         Err(error) => tracing::error!(%error, "sign-up deadline job failed"),
     }
     if report.closed_signups > 0 {

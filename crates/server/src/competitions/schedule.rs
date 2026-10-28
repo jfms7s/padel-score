@@ -178,7 +178,9 @@ pub fn normalize_schedule(
         (None, Some(Some(_))) => return Err(StoreError::InvalidField("deadline_at")),
         (None, _) => None,
         (Some(start), Some(Some(at))) => {
-            if current.deadline_at != Some(at) && at <= now || at > start {
+            // A stale deadline sent back unchanged is only kept while sign-ups stay as they were.
+            let stale = at <= now && (turning_on || current.deadline_at != Some(at));
+            if stale || at > start {
                 return Err(StoreError::InvalidField("deadline_at"));
             }
             Some(at)
@@ -454,6 +456,31 @@ mod tests {
         // A start in the past is refused.
         let err = normalize_schedule(Kind::Tournament, &json!({}), &created, &on, NOW + 4 * DAY);
         assert_eq!(invalid(err), "starts_at");
+    }
+
+    #[test]
+    fn opening_signups_refuses_the_stale_deadline_even_when_unchanged() {
+        let created = normalize(Kind::Tournament, &json!({}), &input(NOW + 3 * DAY)).unwrap();
+        let later = NOW + 2 * DAY + 3600;
+        let stale = ScheduleInput {
+            signups: Some(Signups::Public),
+            max_teams: Some(Some(8)),
+            deadline_at: Some(created.deadline_at),
+            ..ScheduleInput::default()
+        };
+        let err = normalize_schedule(Kind::Tournament, &json!({}), &created, &stale, later);
+        assert_eq!(invalid(err), "deadline_at");
+        // With sign-ups already on, resending the saved deadline stays fine.
+        let on = Schedule {
+            signups: Signups::Public,
+            max_teams: Some(8),
+            ..created
+        };
+        let same = ScheduleInput {
+            deadline_at: Some(on.deadline_at),
+            ..ScheduleInput::default()
+        };
+        assert!(normalize_schedule(Kind::Tournament, &json!({}), &on, &same, later).is_ok());
     }
 
     #[test]

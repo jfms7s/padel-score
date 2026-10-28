@@ -265,6 +265,50 @@ pub async fn auto_entry_in(
     Err(StoreError::Conflict("name_taken"))
 }
 
+/// The organiser's plain (unlinked) entry for a person typed by name: an existing unlinked entry
+/// of that name (un-archived), else a new one. An entry of that name linked to an account is
+/// someone else, so the name gets the " 2" … " 99" suffix of [`auto_entry_in`] until it is free
+/// or unlinked (`Conflict("name_taken")` after that).
+pub(crate) async fn plain_entry_in(
+    tx: &mut Tx<'_>,
+    owner: &str,
+    raw_name: &str,
+    now: i64,
+) -> Result<String, StoreError> {
+    let base = normalize_name(raw_name)?;
+    for n in 1..=MAX_AUTO_NUMBER {
+        let name = if n == 1 {
+            base.clone()
+        } else {
+            let suffix = format!(" {n}");
+            let room = MAX_NAME_CHARS.saturating_sub(suffix.chars().count());
+            let cut: String = base.chars().take(room).collect();
+            format!("{}{suffix}", cut.trim_end())
+        };
+        let existing = sqlx::query(
+            "SELECT linked_user_id FROM players WHERE owner_user_id = ? AND name_key = ?",
+        )
+        .bind(owner)
+        .bind(name_key(&name))
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some(row) = existing
+            && row
+                .try_get::<Option<String>, _>("linked_user_id")?
+                .is_some()
+        {
+            continue;
+        }
+        return Ok(
+            crate::players::create_or_get_player_in(tx, owner, &name, now)
+                .await?
+                .0
+                .id,
+        );
+    }
+    Err(StoreError::Conflict("name_taken"))
+}
+
 /// `NotFound` unless the entry belongs to `owner`.
 async fn require_owned_in(
     conn: &mut SqliteConnection,

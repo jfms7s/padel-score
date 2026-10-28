@@ -221,5 +221,13 @@ async fn tick_runs_deadlines() {
             .unwrap();
     assert_eq!(kinds.len(), 1);
     assert!(kinds[0].contains("event_cancelled"), "{}", kinds[0]);
+    // The organiser is told too, and the desk's stream was nudged.
+    let own: Vec<String> = sqlx::query_scalar("SELECT payload FROM push_outbox WHERE user_id = ?")
+        .bind(&admin)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(own.len(), 1);
+    assert!(own[0].contains("event_cancelled"), "{}", own[0]);
     assert_eq!(tick_once(&state, T0 + 2 * DAY + 60).await.closed_signups, 0);
 }

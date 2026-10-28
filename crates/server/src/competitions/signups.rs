@@ -24,8 +24,7 @@ use super::{
     Competition, Kind, MAX_TEAMS, Status, add_team_in, cancel_in, clean_name, competition_by_id_in,
     competition_by_join_token_in, competition_in, not_cancelled,
 };
-use crate::linking::auto_entry_in;
-use crate::players::create_or_get_player_in;
+use crate::linking::{auto_entry_in, plain_entry_in};
 use crate::push::{Notice, NoticeKind, Payload, queue_in};
 use crate::store::{Store, StoreError, Tx};
 use crate::tokens::new_token;
@@ -135,6 +134,15 @@ pub struct TakeReport {
     pub skipped: Vec<String>,
     /// Complete sign-ups still waiting: the ones past the places, and the skipped.
     pub left_on_line: usize,
+}
+
+/// An event the deadline job handled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClosedSignups {
+    pub event_id: String,
+    pub owner_id: String,
+    /// Cancelled for too few teams, rather than just closed.
+    pub cancelled: bool,
 }
 
 /// A solo waiting for a partner, as [`pairs`] sees it.
@@ -326,7 +334,12 @@ impl Layout {
         });
         solos.sort_by(|a, b| (a.user1_at, &a.id).cmp(&(b.user1_at, &b.id)));
         pending.sort_by(|a, b| (a.user1_at, &a.id).cmp(&(b.user1_at, &b.id)));
-        let room = max.saturating_sub(hand_added).min(complete.len());
+        // Taken entries are teams of the event whatever the maximum says.
+        let taken = complete.iter().filter(|e| e.taken).count();
+        let room = max
+            .saturating_sub(hand_added)
+            .max(taken)
+            .min(complete.len());
         let line = complete.split_off(room);
         Layout {
             hand_added,
@@ -557,8 +570,9 @@ impl Store {
     /// sign-ups plus the hand-added teams below `min_teams` the event is cancelled and every
     /// signed-up user is told (`event_cancelled`); otherwise `signups_closed_at` is set. Each
     /// event is its own transaction, and one that fails is logged and left for the next tick.
-    /// Returns how many events were handled.
-    pub async fn close_due_signups(&self, now: i64) -> Result<usize, StoreError> {
+    /// An automatic cancel also tells the organiser (`event_cancelled`): nobody asked for it.
+    /// Returns the events handled, for the caller to tell their streams.
+    pub async fn close_due_signups(&self, now: i64) -> Result<Vec<ClosedSignups>, StoreError> {
         let due: Vec<String> = sqlx::query_scalar(
             "SELECT id FROM competitions WHERE status = 'setup' AND signups != 'off' \
              AND cancelled_at IS NULL AND signups_closed_at IS NULL \
@@ -567,34 +581,41 @@ impl Store {
         .bind(now)
         .fetch_all(self.pool())
         .await?;
-        let mut handled = 0;
+        let mut handled = Vec::new();
         for id in due {
             match self.close_signups_of(&id, now).await {
-                Ok(true) => handled += 1,
-                Ok(false) => {}
+                Ok(Some(closed)) => handled.push(closed),
+                Ok(None) => {}
                 Err(error) => tracing::error!(%error, event = %id, "closing sign-ups failed"),
             }
         }
         Ok(handled)
     }
 
-    /// [`Store::close_due_signups`] for one event; `false` when it is no longer due.
-    async fn close_signups_of(&self, id: &str, now: i64) -> Result<bool, StoreError> {
+    /// [`Store::close_due_signups`] for one event; `None` when it is no longer due.
+    async fn close_signups_of(
+        &self,
+        id: &str,
+        now: i64,
+    ) -> Result<Option<ClosedSignups>, StoreError> {
         let mut tx = self.begin().await?;
         let Some(mut ev) = competition_by_id_in(&mut tx, id).await? else {
-            return Ok(false);
+            return Ok(None);
         };
         let due = ev.status == Status::Setup
             && ev.schedule.signups != Signups::Off
             && ev.signups_closed_at.is_none()
             && ev.schedule.deadline_at.is_some_and(|d| d <= now);
         if !due {
-            return Ok(false);
+            return Ok(None);
         }
         let layout = layout_in(&mut tx, id, ev.schedule.max_teams).await?;
         let teams = layout.hand_added + layout.teams.len() + layout.line.len();
-        if teams < usize::try_from(ev.schedule.min_teams).unwrap_or(usize::MAX) {
+        let cancelled = teams < usize::try_from(ev.schedule.min_teams).unwrap_or(usize::MAX);
+        if cancelled {
             cancel_in(&mut tx, &mut ev, now).await?;
+            let told = notice(&ev, &ev.owner_user_id, NoticeKind::EventCancelled, None);
+            queue_in(&mut tx, &told.into_iter().collect::<Vec<_>>(), now).await?;
         } else {
             sqlx::query("UPDATE competitions SET signups_closed_at = ? WHERE id = ?")
                 .bind(now)
@@ -603,7 +624,11 @@ impl Store {
                 .await?;
         }
         tx.commit().await?;
-        Ok(true)
+        Ok(Some(ClosedSignups {
+            event_id: ev.id,
+            owner_id: ev.owner_user_id,
+            cancelled,
+        }))
     }
 
     /// The organiser takes the complete sign-ups as teams of the event (in setup, not
@@ -614,7 +639,8 @@ impl Store {
     /// up the rest. Each person becomes the organiser's entry linked to their account
     /// (`auto_entry_in`); a partner typed by name becomes a plain entry. A sign-up with a player
     /// already in a team is skipped and the next one tried (see [`TakeReport::skipped`]). The
-    /// complete sign-ups left over are told `no_place` once. A second run takes nothing new.
+    /// complete sign-ups left over are told `no_place` once. When there is nothing to take
+    /// (`take_count` adds no team), it is `Conflict("nothing_to_take")` and nothing changes.
     pub async fn take_teams(
         &self,
         owner: &str,
@@ -642,7 +668,11 @@ impl Store {
             .schedule
             .max_teams
             .unwrap_or_else(|| u32::try_from(MAX_TEAMS).unwrap_or(u32::MAX));
-        let wanted = take_count(ev.kind, hand_added, waiting.len(), max).saturating_sub(hand_added);
+        let total = take_count(ev.kind, hand_added, waiting.len(), max);
+        let wanted = total.saturating_sub(hand_added);
+        if wanted == 0 {
+            return Err(StoreError::Conflict("nothing_to_take"));
+        }
 
         let mut taken_ids: HashSet<&str> = HashSet::new();
         let mut skipped = Vec::new();
@@ -1121,7 +1151,7 @@ async fn entry_players_in(
     let first = auto_entry_in(tx, owner, &entry.user1_id, now).await?;
     let second = match (&entry.user2_id, &entry.partner_name) {
         (Some(user), _) => auto_entry_in(tx, owner, user, now).await?,
-        (None, Some(name)) => create_or_get_player_in(tx, owner, name, now).await?.0.id,
+        (None, Some(name)) => plain_entry_in(tx, owner, name, now).await?,
         (None, None) => {
             return Err(StoreError::Corrupt(format!(
                 "complete sign-up {} has no second player",
