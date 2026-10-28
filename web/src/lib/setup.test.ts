@@ -19,6 +19,7 @@ import {
 	saveLastSetup,
 	setSets,
 	toCreateRequest,
+	toFormat,
 	type Setup,
 	type StorageLike
 } from './setup';
@@ -353,5 +354,16 @@ describe('afterCreate', () => {
 			})
 		);
 		expect(r).toEqual({ navigated: false, path: '/s/tok%2Fen#v=spec' });
+	});
+});
+
+describe('toFormat', () => {
+	it('is the rules of the setup, with a full deciding set for one set', () => {
+		const s = defaultSetup();
+		s.deuce = 'advantage';
+		s.sets = 'one';
+		s.deciding = 'super_tie_break';
+		expect(toFormat(s)).toEqual({ sets: { deuce: 'advantage', sets: 'one', deciding: 'full_set' } });
+		expect(toCreateRequest(s).format).toEqual(toFormat(s));
 	});
 });

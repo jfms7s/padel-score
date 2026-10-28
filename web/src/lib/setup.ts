@@ -9,6 +9,7 @@ import type {
 	CreateMatchRequest,
 	DecidingSet,
 	DeuceRule,
+	Format,
 	PlayerSlots,
 	SetsFormat,
 	StartedFrom,
@@ -81,16 +82,21 @@ export function nameOrSlot(teams: Teams, team: Team, index: 0 | 1): string {
 	return teams[team][index].trim() || slotName(team, index);
 }
 
+/** The rules of the setup; one set can only have a full deciding set. */
+export function toFormat(setup: Setup): Format {
+	return {
+		sets: {
+			deuce: setup.deuce,
+			sets: setup.sets,
+			deciding: setup.sets === 'one' ? 'full_set' : setup.deciding
+		}
+	};
+}
+
 export function toCreateRequest(setup: Setup, from?: StartedFrom): CreateMatchRequest {
 	const name = (team: Team, i: 0 | 1) => nameOrSlot(setup.teams, team, i);
 	const req: CreateMatchRequest = {
-		format: {
-			sets: {
-				deuce: setup.deuce,
-				sets: setup.sets,
-				deciding: setup.sets === 'one' ? 'full_set' : setup.deciding
-			}
-		},
+		format: toFormat(setup),
 		start: toStart(setup.serve),
 		teams: { a: [name('a', 0), name('a', 1)], b: [name('b', 0), name('b', 1)] }
 	};

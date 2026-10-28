@@ -152,7 +152,7 @@ export interface CreateMatchRequest {
 }
 
 /** What a match is started from (crates/server/src/starting.rs `StartedFrom`). */
-export type StartedFrom = { kind: 'game'; id: string };
+export type StartedFrom = { kind: 'game'; id: string } | { kind: 'scheduled'; id: string };
 
 /** The four players to fill New match with, in seat order (crates/server/src/starting.rs). */
 export interface StartPlayers {
@@ -201,7 +201,8 @@ export type ApiErrorBody =
 	| { error: AccountErrorCode }
 	| { error: EventErrorCode }
 	| { error: SignupErrorCode }
-	| { error: BoardErrorCode };
+	| { error: BoardErrorCode }
+	| { error: ScheduledErrorCode };
 
 // ---- accounts (crates/server/src/accounts.rs, owned.rs, device.rs) ------------------------
 
@@ -1004,8 +1005,76 @@ export interface EventJoinInfo {
 	closed: boolean;
 }
 
-/** `GET /api/join/{token}`. Task 16 adds a scheduled match. */
-export type JoinView = { kind: 'event'; event: EventJoinInfo; list: SignupList; me: MyEntry | null };
+/** What a join link opens for an event. */
+export type EventJoinView = { kind: 'event'; event: EventJoinInfo; list: SignupList; me: MyEntry | null };
+
+/** `GET /api/join/{token}`: an event, else a scheduled match. */
+export type JoinView = EventJoinView | { kind: 'match'; view: ScheduledView };
+
+// ---- scheduled matches (crates/server/src/scheduled.rs) -----------------------------------
+
+export type Listing = 'private' | 'public';
+
+export type ScheduledState = 'open' | 'full' | 'started' | 'cancelled' | 'past';
+
+/** A place (its slot, 0-3) or a spot in the line (its position). `user_id` is the owner's or yours. */
+export interface PlaceOut {
+	slot: number;
+	/** Null for an open place. */
+	name: string | null;
+	user_id: string | null;
+}
+
+export interface ScheduledMe {
+	owner: boolean;
+	/** The place you hold. */
+	slot: number | null;
+	in_line: boolean;
+}
+
+export interface ScheduledView {
+	id: string;
+	join_token: string;
+	owner_name: string;
+	starts_at: number;
+	place: string | null;
+	listing: Listing;
+	format: Format;
+	/** Always four, in slot order. */
+	places: PlaceOut[];
+	line: PlaceOut[];
+	state: ScheduledState;
+	/** Set once the match was started: where to watch it. */
+	match_spectator_token: string | null;
+	/** Null when signed out. */
+	me: ScheduledMe | null;
+}
+
+/** `POST /api/scheduled`: each place is one of your player ids, or null (open). */
+export interface NewScheduled {
+	starts_at: number;
+	place?: string;
+	listing: Listing;
+	format: Format;
+	places: [string | null, string | null, string | null, string | null];
+}
+
+/** `PATCH /api/scheduled/{id}`: what is absent stays; `place: null` clears it. */
+export interface ScheduledChange {
+	starts_at?: number;
+	place?: string | null;
+}
+
+/** The scheduled routes' 409 codes (the 422 fields are `starts_at` and `place`). */
+export type ScheduledErrorCode =
+	| 'already_in'
+	| 'line_full'
+	| 'match_closed'
+	| 'match_short'
+	| 'too_many_scheduled'
+	| 'not_yet'
+	| 'game_over'
+	| 'already_started';
 
 /** `POST /api/join/{token}`. */
 export type JoinAs = { as: 'solo' } | { as: 'partner'; partner_name?: string };

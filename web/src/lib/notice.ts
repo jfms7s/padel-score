@@ -59,6 +59,16 @@ function eventBody(p: NoticePayload, opts: NoticeOptions): string {
 	return parts.join(' · ');
 }
 
+/** "Wed 4 20:00 · Ana": when a scheduled match starts and who organises it. */
+function matchBody(p: NoticePayload, opts: NoticeOptions): string {
+	const parts: string[] = [];
+	if (p.start !== undefined) {
+		parts.push(`${dayLabel(p.start, opts.timeZone, opts.locale)} ${timeText(p.start, opts.timeZone, opts.locale)}`);
+	}
+	if (p.name) parts.push(p.name);
+	return parts.join(' · ');
+}
+
 /** Words for a push payload; `opts` sets the zone and locale instants are printed in. */
 export function noticeText(p: NoticePayload, opts: NoticeOptions = {}): NoticeText {
 	const url = safeNoticeUrl(p.url);
@@ -102,6 +112,16 @@ export function noticeText(p: NoticePayload, opts: NoticeOptions = {}): NoticeTe
 			return made(t.partnerLeft(p.name), eventBody(p, opts));
 		case 'no_place':
 			return made(t.noPlace, eventBody(p, opts));
+		case 'place_opened':
+			return made(t.placeOpened, matchBody(p, opts));
+		case 'match_changed':
+			return made(t.matchChanged, matchBody(p, opts));
+		case 'match_cancelled':
+			return made(t.matchCancelled, matchBody(p, opts));
+		case 'removed_from_match':
+			return made(t.removedFromMatch, matchBody(p, opts));
+		case 'match_short':
+			return made(t.matchShort, matchBody(p, opts));
 		default:
 			return made(t.appName, t.fallback);
 	}

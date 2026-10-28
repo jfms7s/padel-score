@@ -121,7 +121,23 @@ describe('startFromParam', () => {
 
 	it('says expired for a from this build does not know', () => {
 		fakeSession();
-		expect(startFromParam('scheduled:s1', last)).toEqual({ setup: last, from: null, expired: true });
+		expect(startFromParam('other:s1', last)).toEqual({ setup: last, from: null, expired: true });
+	});
+
+	it('starts from a scheduled match with its format and its four players', () => {
+		fakeSession();
+		const match: StartPlayers = {
+			...started,
+			format: { sets: { deuce: 'star_point', sets: 'best_of_3', deciding: 'super_tie_break' } },
+			from: { kind: 'scheduled', id: 's1' }
+		};
+		putStartHandoff(match);
+		const out = startFromParam('scheduled:s1', last);
+		expect(out.expired).toBe(false);
+		expect(out.from).toEqual({ kind: 'scheduled', id: 's1' });
+		expect(out.setup).toMatchObject({ deuce: 'star_point', sets: 'best_of_3', deciding: 'super_tie_break' });
+		expect(out.setup.teams.b).toEqual(['Marta', 'Joana']);
+		expect(out.setup.players.a).toEqual(['p1', 'p2']);
 	});
 
 	it('is taken once: reading it again, as a re-run would, finds it expired', () => {
@@ -156,5 +172,32 @@ describe('startFailure', () => {
 	it('leaves a plain create to its own message', () => {
 		expect(startFailure(err(409, 'already_started'), false)).toEqual({ message: null, dropFrom: false });
 		expect(startFailure(new Error('boom'), true)).toEqual({ message: null, dropFrom: false });
+	});
+});
+
+describe('parseFrom', () => {
+	it('knows a game and a scheduled match', () => {
+		expect(parseFrom('game:g1')).toEqual({ kind: 'game', id: 'g1' });
+		expect(parseFrom('scheduled:s1')).toEqual({ kind: 'scheduled', id: 's1' });
+		expect(parseFrom('other:x')).toBeNull();
+		expect(parseFrom(null)).toBeNull();
+	});
+});
+
+describe('startFailure for a scheduled match', () => {
+	const err = (status: number, code: string) => new ApiError(status, code as never, code);
+
+	it('drops the source when the match is gone, closed or started', () => {
+		const gone = startFailure(err(404, 'not_found'), true, 'scheduled');
+		expect(gone).toEqual({ message: strings.setup.matchGone, dropFrom: true });
+		for (const code of ['match_closed', 'already_started', 'game_over']) {
+			expect(startFailure(err(409, code), true, 'scheduled').dropFrom).toBe(true);
+		}
+	});
+
+	it('keeps the source for a start that is only too early or short', () => {
+		const early = startFailure(err(409, 'not_yet'), true, 'scheduled');
+		expect(early).toEqual({ message: strings.scheduled.errors.not_yet, dropFrom: false });
+		expect(startFailure(err(409, 'match_short'), true, 'scheduled').dropFrom).toBe(false);
 	});
 });
