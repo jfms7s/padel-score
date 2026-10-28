@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
 
 use crate::linking::auto_entry_in;
+use crate::scheduled::{check_startable_in, mark_started_in};
 use crate::store::{NewMatch, Store, StoreError, StoredMatch, Tx, create_match_in};
 
 /// How long before its start a game can be started.
@@ -37,6 +38,7 @@ pub struct StartPlayers {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StartedFrom {
     Game { id: String },
+    Scheduled { id: String },
 }
 
 /// A game's columns the start checks need.
@@ -49,7 +51,7 @@ struct StartGame {
 
 /// The window in which a game can be started: from [`START_WINDOW_SECS`] before its start until
 /// its end.
-fn check_window(start: i64, end: i64, now: i64) -> Result<(), StoreError> {
+pub(crate) fn check_window(start: i64, end: i64, now: i64) -> Result<(), StoreError> {
     if now < start - START_WINDOW_SECS {
         return Err(StoreError::Conflict("not_yet"));
     }
@@ -97,6 +99,9 @@ async fn game_in(conn: &mut SqliteConnection, game_id: &str) -> Result<StartGame
 /// Create the match and mark what it came from as played, in the caller's transaction. The
 /// match's players are not compared with the source's: the starter may sub.
 ///
+/// For a scheduled match: the owner must be its owner (`NotFound` otherwise), it must not be
+/// cancelled (`match_closed`) or started (`already_started`) and `now` must be in its window.
+///
 /// For a game: the owner must be one of its players (`NotFound` otherwise), it must not be
 /// played (`already_started`) and `now` must be in its window (`not_yet`, `game_over`).
 pub async fn create_match_from(
@@ -107,15 +112,25 @@ pub async fn create_match_from(
 ) -> Result<StoredMatch, StoreError> {
     let mut tx = store.begin().await?;
     let owner = new.owner_user_id.clone().ok_or(StoreError::NotFound)?;
-    let StartedFrom::Game { id } = from;
-    let game = game_in(&mut tx, id).await?;
-    seated_in(&mut tx, &game.id, &owner).await?;
-    if game.played {
-        return Err(StoreError::Conflict("already_started"));
-    }
-    check_window(game.start, game.end, now)?;
-    let stored = create_match_in(&mut tx, new, now).await?;
-    mark_played_in(&mut tx, &game.id, &stored.id, now).await?;
+    let stored = match from {
+        StartedFrom::Game { id } => {
+            let game = game_in(&mut tx, id).await?;
+            seated_in(&mut tx, &game.id, &owner).await?;
+            if game.played {
+                return Err(StoreError::Conflict("already_started"));
+            }
+            check_window(game.start, game.end, now)?;
+            let stored = create_match_in(&mut tx, new, now).await?;
+            mark_played_in(&mut tx, &game.id, &stored.id, now).await?;
+            stored
+        }
+        StartedFrom::Scheduled { id } => {
+            check_startable_in(&mut tx, id, &owner, now).await?;
+            let stored = create_match_in(&mut tx, new, now).await?;
+            mark_started_in(&mut tx, id, &stored.id, now).await?;
+            stored
+        }
+    };
     tx.commit().await?;
     Ok(stored)
 }

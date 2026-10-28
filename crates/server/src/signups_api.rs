@@ -5,7 +5,9 @@
 //!   the link (signed out, `me` is `null`). An unknown link, or an event whose sign-ups are off,
 //!   is 404.
 //! - `POST /api/join/{token}` with a [`JoinAs`] signs the caller up: 200 [`MyEntry`].
-//!   `DELETE /api/join/{token}` leaves: 204.
+//!   `DELETE /api/join/{token}` leaves: 204. A link that is not an event's is a scheduled
+//!   match's: it opens as `{"kind": "match", "view": ScheduledView}`, the POST takes only
+//!   `{"as": "solo"}` (`partner` is 422 `validation` on `as`) and is 200 [`ScheduledView`].
 //! - `GET /api/partner/{ptoken}` is the [`PartnerInvite`]; `POST .../accept` is 200 [`MyEntry`];
 //!   `POST .../decline` is 204 (the inviter gets a fresh link).
 //! - The organiser's, owner only (another user's event is 404):
@@ -22,7 +24,7 @@
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::Json;
+use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{delete, get, post};
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +35,7 @@ use crate::auth::{OptionalUser, SessionUser};
 use crate::competitions::signups::{
     EventJoinInfo, JoinAs, MyEntry, PartnerInvite, SignupList, TakeReport,
 };
+use crate::scheduled::ScheduledView;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -48,7 +51,7 @@ pub fn routes() -> Router<AppState> {
         .layer(axum::middleware::map_response(accounts::secret_headers))
 }
 
-/// What a join link opens. Task 16 adds a scheduled match.
+/// What a join link opens: an event, else a scheduled match.
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JoinView {
@@ -56,6 +59,9 @@ pub enum JoinView {
         event: EventJoinInfo,
         list: SignupList,
         me: Option<MyEntry>,
+    },
+    Match {
+        view: ScheduledView,
     },
 }
 
@@ -86,11 +92,14 @@ async fn read_join(
     ApiPath(token): ApiPath<String>,
 ) -> Result<Json<JoinView>, ApiError> {
     let viewer = user.as_ref().map(|u| u.user.id.as_str());
-    let page = state
-        .store
-        .join_page(&token, viewer, now())
-        .await?
-        .ok_or(ApiError::NotFound)?;
+    let Some(page) = state.store.join_page(&token, viewer, now()).await? else {
+        let view = state
+            .store
+            .scheduled_by_token(&token, viewer, now())
+            .await?
+            .ok_or(ApiError::NotFound)?;
+        return Ok(Json(JoinView::Match { view }));
+    };
     Ok(Json(JoinView::Event {
         event: page.event,
         list: page.list,
@@ -103,13 +112,19 @@ async fn join(
     SessionUser(user): SessionUser,
     ApiPath(token): ApiPath<String>,
     ApiJson(as_): ApiJson<JoinAs>,
-) -> Result<Json<MyEntry>, ApiError> {
-    let mine = state
-        .store
-        .join_event(&token, &user.user.id, as_, now())
-        .await?;
+) -> Result<Response, ApiError> {
+    let user = &user.user.id;
+    if state.store.join_link_event(&token).await?.is_none() {
+        // A match has places, not teams: only a solo join.
+        if as_ != JoinAs::Solo {
+            return Err(ApiError::Validation { field: "as" });
+        }
+        let view = state.store.join_scheduled(&token, user, now()).await?;
+        return Ok(Json(view).into_response());
+    }
+    let mine = state.store.join_event(&token, user, as_, now()).await?;
     changed_by_link(&state, &token).await?;
-    Ok(Json(mine))
+    Ok(Json(mine).into_response())
 }
 
 async fn leave(
@@ -117,10 +132,13 @@ async fn leave(
     SessionUser(user): SessionUser,
     ApiPath(token): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
-    state
-        .store
-        .leave_event(&token, &user.user.id, now())
-        .await?;
+    let user = &user.user.id;
+    if state.store.join_link_event(&token).await?.is_none() {
+        state.store.leave_scheduled(&token, user, now()).await?;
+        state.push.wake();
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    state.store.leave_event(&token, user, now()).await?;
     changed_by_link(&state, &token).await?;
     Ok(StatusCode::NO_CONTENT)
 }

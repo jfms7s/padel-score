@@ -277,6 +277,10 @@ pub enum NoticeKind {
     MovedDown,
     PartnerLeft,
     NoPlace,
+    PlaceOpened,
+    MatchChanged,
+    MatchCancelled,
+    RemovedFromMatch,
 }
 
 /// What a notification says, as data. `url` is always a same-origin path (`/b/{token}`,

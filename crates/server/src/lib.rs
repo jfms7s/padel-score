@@ -27,6 +27,8 @@ pub mod push_api;
 pub mod ratelimit;
 pub mod results;
 pub mod retention;
+pub mod scheduled;
+pub mod scheduled_api;
 pub mod signups_api;
 pub mod starting;
 pub mod store;

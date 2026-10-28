@@ -149,7 +149,7 @@ pub(crate) async fn player_in(
 }
 
 /// [`player_in`] plus the account the entry is linked to, if any.
-async fn linked_player_in(
+pub(crate) async fn linked_player_in(
     conn: &mut SqliteConnection,
     owner: &str,
     id: &str,
