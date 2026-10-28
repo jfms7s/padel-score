@@ -1,8 +1,11 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ApiError, createMatch } from '#lib/api.ts';
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
 	import ServeOrderFields from '#lib/components/ServeOrderFields.svelte';
+	import { startFailure, startFromParam } from '#lib/handoff.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { bootSession } from '#lib/session.ts';
 	import { safeStorage } from '#lib/storage.ts';
@@ -18,7 +21,7 @@
 		setSets,
 		toCreateRequest
 	} from '#lib/setup.ts';
-	import type { Player } from '#lib/types.ts';
+	import type { Player, StartedFrom } from '#lib/types.ts';
 
 	const t = strings.setup;
 	const TEAMS = ['a', 'b'] as const;
@@ -30,8 +33,22 @@
 	] as const;
 
 	let setup = $state(defaultSetup());
+	/** What the match starts from (a game), once its hand-off was found; sent with the create. */
+	let from = $state<StartedFrom | null>(null);
+	/** `?from=` named a source but its hand-off is gone (a reload, another tab). */
+	let handoffExpired = $state(false);
+	// The `from` value alone: the effect below runs again only when it changes, not when
+	// something else on the page URL does or after the hand-off was taken.
+	const fromRaw = $derived(page.url.searchParams.get('from'));
 	$effect(() => {
-		setup = loadLastSetup(safeStorage());
+		const raw = fromRaw;
+		// The hand-off is taken once per `from`, so a reload falls back to a plain New match.
+		untrack(() => {
+			const started = startFromParam(raw, loadLastSetup(safeStorage()));
+			setup = started.setup;
+			from = started.from;
+			handoffExpired = started.expired;
+		});
 	});
 
 	/** The signed-in user's players; null while unknown, signed out or unreadable (plain inputs). */
@@ -78,16 +95,25 @@
 		busy = true;
 		failure = null;
 		let created;
-		const req = toCreateRequest(setup);
+		const req = toCreateRequest(setup, from ?? undefined);
 		try {
 			created = await createMatch(req);
 		} catch (e) {
+			const refused = startFailure(e, from !== null);
+			if (refused.dropFrom) {
+				// The game can't start this match any more: a retry makes a plain, unlinked one.
+				from = null;
+			}
 			failure =
-				e instanceof ApiError && e.code === 'invalid_match' && e.message === 'players need an account'
-					? strings.signedOutPlayers
-					: e instanceof Error
-						? e.message
-						: '';
+				refused.message !== null
+					? refused.dropFrom
+						? `${refused.message} ${t.unlinked}`
+						: refused.message
+					: e instanceof ApiError && e.code === 'invalid_match' && e.message === 'players need an account'
+						? strings.signedOutPlayers
+						: e instanceof Error
+							? e.message
+							: '';
 			busy = false;
 			return;
 		}
@@ -110,6 +136,7 @@
 	<a class="back" href="/">{t.back}</a>
 	<form onsubmit={start}>
 		<h1>{t.title}</h1>
+		{#if handoffExpired}<p class="hint" role="status">{t.handoffExpired}</p>{/if}
 
 		<div class="cols">
 		<div class="col">

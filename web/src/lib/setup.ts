@@ -5,7 +5,16 @@
 
 import { defaultServeOrder, fromStart, toStart, type ServeOrder } from './serve';
 import { strings } from './strings';
-import type { CreateMatchRequest, DecidingSet, DeuceRule, PlayerSlots, SetsFormat, Team, Teams } from './types';
+import type {
+	CreateMatchRequest,
+	DecidingSet,
+	DeuceRule,
+	PlayerSlots,
+	SetsFormat,
+	StartedFrom,
+	Team,
+	Teams
+} from './types';
 
 export interface StorageLike {
 	getItem(key: string): string | null;
@@ -72,7 +81,7 @@ export function nameOrSlot(teams: Teams, team: Team, index: 0 | 1): string {
 	return teams[team][index].trim() || slotName(team, index);
 }
 
-export function toCreateRequest(setup: Setup): CreateMatchRequest {
+export function toCreateRequest(setup: Setup, from?: StartedFrom): CreateMatchRequest {
 	const name = (team: Team, i: 0 | 1) => nameOrSlot(setup.teams, team, i);
 	const req: CreateMatchRequest = {
 		format: {
@@ -87,6 +96,7 @@ export function toCreateRequest(setup: Setup): CreateMatchRequest {
 	};
 	const { a, b } = setup.players;
 	if ([...a, ...b].some((id) => id !== null)) req.players = { a: [a[0], a[1]], b: [b[0], b[1]] };
+	if (from) req.from = from;
 	return req;
 }
 

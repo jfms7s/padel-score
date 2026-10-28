@@ -9,6 +9,7 @@ import {
 	postCommands,
 	postFinal,
 	putStart,
+	setUnauthorizedHandler,
 	replace,
 	REQUEST_TIMEOUT_MS,
 	accountRequest,
@@ -58,6 +59,20 @@ describe('api', () => {
 		expect(calls[0]?.url).toBe('/api/matches');
 		expect(calls[0]?.init?.method).toBe('POST');
 		expect(JSON.parse(String(calls[0]?.init?.body))).toEqual(body);
+	});
+
+	it('creates from a game as a signed-in call: a 401 sends the user to sign-in', async () => {
+		const { format, start, teams } = asView(view);
+		const body = { format, start, teams, from: { kind: 'game' as const, id: 'g1' } };
+		serve(401, { error: 'unauthorized' });
+		const seen: string[] = [];
+		const undo = setUnauthorizedHandler(() => seen.push('signin'));
+		const err = await createMatch(body).catch((e: unknown) => e);
+		undo();
+		expect(seen).toEqual(['signin']);
+		expect((err as ApiError).code).toBe('unauthorized');
+		serve(409, { error: 'already_started' });
+		expect(((await createMatch(body).catch((e: unknown) => e)) as ApiError).code).toBe('already_started');
 	});
 
 	it('throws the server error code when a match is refused', async () => {

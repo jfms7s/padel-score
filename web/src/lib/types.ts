@@ -147,6 +147,19 @@ export interface CreateMatchRequest {
 	teams: Teams;
 	/** Signed in only: the slots picked from the player list. Left out when none is picked. */
 	players?: PlayerSlots;
+	/** Signed in only: what the match is started from. It marks that source played. */
+	from?: StartedFrom;
+}
+
+/** What a match is started from (crates/server/src/starting.rs `StartedFrom`). */
+export type StartedFrom = { kind: 'game'; id: string };
+
+/** The four players to fill New match with, in seat order (crates/server/src/starting.rs). */
+export interface StartPlayers {
+	players: { player_id: string; name: string }[];
+	/** Null for a board game: New match keeps its last setup. */
+	format: Format | null;
+	from: StartedFrom;
 }
 
 export interface CreatedMatch {
@@ -779,7 +792,29 @@ export type ReplayResult = { ok: Score } | { err: EngineError };
 // ---- game boards (crates/server/src/boards/mod.rs, boards_api.rs) -------------------------
 
 /** The board routes' 409 codes (the 422 fields are `range`, `title`, `place`, `time_zone`, `week`). */
-export type BoardErrorCode = 'board_over' | 'board_full' | 'too_many_boards' | 'creator_only' | 'too_many_ranges';
+export type BoardErrorCode =
+	'board_over' | 'board_full' | 'too_many_boards' | 'creator_only' | 'too_many_ranges' | GameErrorCode;
+
+/** The game actions' 409 codes (crates/server/src/boards/actions.rs, starting.rs). */
+export type GameErrorCode =
+	| 'game_changed'
+	| 'nobody_can_take'
+	| 'too_late'
+	| 'cannot_swap'
+	| 'players_busy'
+	| 'too_soon'
+	| 'request_pending'
+	| 'request_expired'
+	| 'already_answered'
+	| 'not_yet'
+	| 'game_over'
+	| 'already_started'
+	| 'not_in_game'
+	| 'game_played'
+	| 'game_started'
+	| 'already_in_game'
+	| 'game_full'
+	| 'busy';
 
 export interface NewBoard {
 	title: string;

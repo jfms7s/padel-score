@@ -279,6 +279,146 @@ pub fn uncovered(state: &BoardState, now: i64) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Where a player who gives their place goes, and who takes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Give {
+    /// Swap seats with a player of another game that overlaps this one.
+    Trade {
+        other_game: String,
+        other_user: String,
+    },
+    /// Leave for the front of the line; `replacement` is the line's first member.
+    ToLine { replacement: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GiveRefusal {
+    NotInGame,
+    /// The game starts inside the fill cutoff.
+    TooLate,
+    NobodyCanTake,
+}
+
+/// Give `user`'s place in the game away. The giver goes to the next game that overlaps this one
+/// in (start, formed_at, id) order and that they are free for; there, the highest-priority
+/// player (at that game's start) who is free for this game's time moves up into the giver's
+/// place. Games already started or inside the fill cutoff are not candidates. With no such
+/// game, the giver goes to the front of the line and the line's first member takes the place.
+pub fn give_place(
+    state: &BoardState,
+    game_id: &str,
+    user: &str,
+    now: i64,
+) -> Result<Give, GiveRefusal> {
+    let game = state
+        .games
+        .iter()
+        .find(|g| g.id == game_id && g.players.iter().any(|p| p == user))
+        .ok_or(GiveRefusal::NotInGame)?;
+    let cutoff = now.saturating_add(FILL_CUTOFF_SECS);
+    if game.start < cutoff {
+        return Err(GiveRefusal::TooLate);
+    }
+    let mut others: Vec<&Game> = state
+        .games
+        .iter()
+        .filter(|g| {
+            g.id != game.id
+                && !g.played
+                && g.start >= cutoff
+                && overlaps(g.start, g.end, game.start, game.end)
+                && state.free_for(user, g.start, g.end, Some(&game.id))
+        })
+        .collect();
+    others.sort_by(|a, b| (a.start, a.formed_at, &a.id).cmp(&(b.start, b.formed_at, &b.id)));
+    for other in others {
+        let taker = other
+            .players
+            .iter()
+            .filter(|p| state.free_for(p, game.start, game.end, Some(&other.id)))
+            .filter_map(|p| {
+                state
+                    .priority_at(p, other.start)
+                    .or_else(|| state.priority_at(p, game.start))
+            })
+            .min();
+        if let Some(Priority(_, _, other_user)) = taker {
+            return Ok(Give::Trade {
+                other_game: other.id.clone(),
+                other_user,
+            });
+        }
+    }
+    state
+        .line(&game.id)
+        .into_iter()
+        .find(|u| u != user)
+        .map(|replacement| Give::ToLine { replacement })
+        .ok_or(GiveRefusal::NobodyCanTake)
+}
+
+/// Whether `user_a` (in `game_a`) and `user_b` (in `game_b`) can trade places. The games differ
+/// and overlap, and neither has been played or started. Each user is in their own game, and
+/// each is free for the other game's whole time once they leave their own.
+pub fn can_swap(
+    state: &BoardState,
+    game_a: &str,
+    user_a: &str,
+    game_b: &str,
+    user_b: &str,
+    now: i64,
+) -> bool {
+    let find = |id: &str| state.games.iter().find(|g| g.id == id);
+    let (Some(a), Some(b)) = (find(game_a), find(game_b)) else {
+        return false;
+    };
+    a.id != b.id
+        && overlaps(a.start, a.end, b.start, b.end)
+        && !a.played
+        && !b.played
+        && a.start > now
+        && b.start > now
+        && a.players.iter().any(|p| p == user_a)
+        && b.players.iter().any(|p| p == user_b)
+        && state.free_for(user_a, b.start, b.end, Some(&a.id))
+        && state.free_for(user_b, a.start, a.end, Some(&b.id))
+}
+
+/// Whether the game can move to `[start, end)`. `"range"` unless it is an hour or an hour and a
+/// half on the board's half-hour grid inside its week, and not the time it already has;
+/// `"too_soon"` when it starts less than [`LEAD_SECS`] from `now`; `"players_busy"` when one of its players is in another game then.
+pub fn check_new_time(
+    state: &BoardState,
+    game_id: &str,
+    start: i64,
+    end: i64,
+    now: i64,
+) -> Result<(), &'static str> {
+    let length = end.saturating_sub(start);
+    let on_grid = |t: i64| t.saturating_sub(state.starts_at) % SLOT_SECS == 0;
+    let ok = (length == MIN_GAME_SECS || length == MAX_GAME_SECS)
+        && on_grid(start)
+        && on_grid(end)
+        && start >= state.starts_at
+        && end <= state.ends_at;
+    let game = state.games.iter().find(|g| g.id == game_id);
+    // Moving a game to the time it already has would only mark it moved and tell everyone.
+    let Some(game) = game.filter(|g| ok && (g.start, g.end) != (start, end)) else {
+        return Err("range");
+    };
+    if start < now.saturating_add(LEAD_SECS) {
+        return Err("too_soon");
+    }
+    if game
+        .players
+        .iter()
+        .any(|p| state.busy(p, start, end, Some(game_id)))
+    {
+        return Err("players_busy");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -819,5 +959,299 @@ mod tests {
         rotated.pieces.rotate_left(3);
         rotated.games.rotate_left(1);
         assert_eq!(settle(&rotated, T0), base);
+    }
+
+    /// Two overlapping full games: `g1` 10:00-11:00 and `g2` 10:30-11:30. Everyone covers
+    /// their own game; `extra` pieces are added on top.
+    fn two_games(extra: Vec<Piece>) -> BoardState {
+        let names = ["ana", "bia", "cris", "duarte", "eva", "fio", "gil", "hugo"];
+        let members: Vec<(&str, i64)> = names.iter().zip(1..).map(|(n, j)| (*n, j)).collect();
+        let mut pieces: Vec<Piece> = names
+            .iter()
+            .zip(1..)
+            .map(|(n, c)| {
+                let (s, e) = if ["ana", "bia", "cris", "duarte"].contains(n) {
+                    (at(10, 0), at(11, 0))
+                } else {
+                    (at(10, 30), at(11, 30))
+                };
+                piece(n, s, e, c)
+            })
+            .collect();
+        pieces.extend(extra);
+        let mut g2 = game("g2", at(10, 30), at(11, 30), &["eva", "fio", "gil", "hugo"]);
+        g2.formed_at = T0 + 1;
+        board(
+            &members,
+            pieces,
+            vec![
+                game(
+                    "g1",
+                    at(10, 0),
+                    at(11, 0),
+                    &["ana", "bia", "cris", "duarte"],
+                ),
+                g2,
+            ],
+        )
+    }
+
+    fn extra(id: &str, name: &str, start: i64, end: i64, created_at: i64) -> Piece {
+        Piece {
+            id: id.to_owned(),
+            ..piece(name, start, end, created_at)
+        }
+    }
+
+    fn trade(other_game: &str, other_user: &str) -> Give {
+        Give::Trade {
+            other_game: other_game.to_owned(),
+            other_user: other_user.to_owned(),
+        }
+    }
+
+    #[test]
+    fn give_trades_with_the_next_overlapping_game() {
+        // ana also covers g2; eva (in g2) also covers g1.
+        let state = two_games(vec![
+            extra("ana-2", "ana", at(11, 0), at(11, 30), 1),
+            extra("eva-2", "eva", at(10, 0), at(10, 30), 5),
+        ]);
+        assert_eq!(give_place(&state, "g1", "ana", T0), Ok(trade("g2", "eva")));
+    }
+
+    #[test]
+    fn give_picks_the_highest_priority_free_player_there() {
+        // eva is the oldest in g2 but covers nothing of g1; fio and gil do, fio is older.
+        let state = two_games(vec![
+            extra("ana-2", "ana", at(11, 0), at(11, 30), 1),
+            extra("gil-2", "gil", at(10, 0), at(10, 30), 7),
+            extra("fio-2", "fio", at(10, 0), at(10, 30), 6),
+        ]);
+        assert_eq!(give_place(&state, "g1", "ana", T0), Ok(trade("g2", "fio")));
+    }
+
+    #[test]
+    fn give_falls_back_to_the_line_and_heads_it() {
+        // No overlapping game to go to; eva is free for g1 and not in a game.
+        let mut state = two_games(vec![extra("eva-2", "eva", at(10, 0), at(10, 30), 5)]);
+        state.games.retain(|g| g.id == "g1");
+        assert_eq!(
+            give_place(&state, "g1", "ana", T0),
+            Ok(Give::ToLine {
+                replacement: "eva".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn give_refused_when_nobody_can_take() {
+        let state = two_games(vec![]);
+        assert_eq!(
+            give_place(&state, "g1", "ana", T0),
+            Err(GiveRefusal::NobodyCanTake)
+        );
+        assert_eq!(
+            give_place(&state, "g1", "eva", T0),
+            Err(GiveRefusal::NotInGame)
+        );
+        assert_eq!(
+            give_place(&state, "nope", "ana", T0),
+            Err(GiveRefusal::NotInGame)
+        );
+    }
+
+    #[test]
+    fn give_refused_inside_the_cutoff() {
+        let state = two_games(vec![
+            extra("ana-2", "ana", at(11, 0), at(11, 30), 1),
+            extra("eva-2", "eva", at(10, 0), at(10, 30), 5),
+        ]);
+        // g1 starts in 59 minutes.
+        assert_eq!(
+            give_place(&state, "g1", "ana", at(9, 1)),
+            Err(GiveRefusal::TooLate)
+        );
+        // Exactly an hour out is still fine.
+        assert!(give_place(&state, "g1", "ana", at(9, 0)).is_ok());
+    }
+
+    #[test]
+    fn give_skips_a_trade_game_inside_the_cutoff() {
+        // fio (g2, 10:30) gives; g1 (10:00) could take the trade.
+        let state = two_games(vec![
+            extra("fio-2", "fio", at(10, 0), at(10, 30), 2),
+            extra("ana-2", "ana", at(11, 0), at(11, 30), 1),
+        ]);
+        assert_eq!(
+            give_place(&state, "g2", "fio", at(8, 30)),
+            Ok(trade("g1", "ana"))
+        );
+        // At 09:15 g2 is 75 min out but g1 only 45: no trade, and the line is empty.
+        assert_eq!(
+            give_place(&state, "g2", "fio", at(9, 15)),
+            Err(GiveRefusal::NobodyCanTake)
+        );
+    }
+
+    /// Two overlapping games: g1 10:00-11:00 (ana, bia, cris, duarte) and g2 10:30-11:30
+    /// (eva, fio, gui, hugo). Ana covers g2's time too and eva covers g1's.
+    fn swap_state() -> BoardState {
+        let mut pieces = vec![];
+        for (n, c) in [("bia", 2), ("cris", 3), ("duarte", 4)] {
+            pieces.push(piece(n, at(10, 0), at(11, 0), c));
+        }
+        for (n, c) in [("fio", 6), ("gui", 7), ("hugo", 8)] {
+            pieces.push(piece(n, at(10, 30), at(11, 30), c));
+        }
+        pieces.push(piece("ana", at(10, 0), at(11, 30), 1));
+        pieces.push(piece("eva", at(10, 0), at(11, 30), 5));
+        board(
+            &[
+                ("ana", 1),
+                ("bia", 2),
+                ("cris", 3),
+                ("duarte", 4),
+                ("eva", 5),
+                ("fio", 6),
+                ("gui", 7),
+                ("hugo", 8),
+            ],
+            pieces,
+            vec![
+                game(
+                    "g1",
+                    at(10, 0),
+                    at(11, 0),
+                    &["ana", "bia", "cris", "duarte"],
+                ),
+                game("g2", at(10, 30), at(11, 30), &["eva", "fio", "gui", "hugo"]),
+            ],
+        )
+    }
+
+    #[test]
+    fn swap_needs_both_free_for_the_other_game() {
+        let state = swap_state();
+        assert!(can_swap(&state, "g1", "ana", "g2", "eva", T0));
+        // Bia is only free for g1.
+        assert!(!can_swap(&state, "g1", "bia", "g2", "eva", T0));
+        // Fio is only free for g2.
+        assert!(!can_swap(&state, "g1", "ana", "g2", "fio", T0));
+        // Busy elsewhere: ana also plays a third game inside g2's time.
+        let mut busy = swap_state();
+        busy.games
+            .push(game("g3", at(11, 0), at(12, 0), &["ana", "x", "y", "z"]));
+        assert!(!can_swap(&busy, "g1", "ana", "g2", "eva", T0));
+        // Not in their game.
+        assert!(!can_swap(&state, "g1", "eva", "g2", "ana", T0));
+        assert!(!can_swap(&state, "g1", "zed", "g2", "eva", T0));
+        // Both games must start after now.
+        assert!(!can_swap(&state, "g1", "ana", "g2", "eva", at(10, 0)));
+        assert!(can_swap(&state, "g1", "ana", "g2", "eva", at(10, 0) - 1));
+    }
+
+    #[test]
+    fn swap_refused_for_games_that_do_not_overlap() {
+        let mut state = swap_state();
+        state.games.retain(|g| g.id == "g1");
+        state.games.push(game(
+            "g2",
+            at(11, 0),
+            at(12, 0),
+            &["eva", "fio", "gui", "hugo"],
+        ));
+        state.pieces.push(piece("ana", at(11, 0), at(12, 0), 1));
+        state.pieces.push(piece("eva", at(11, 0), at(12, 0), 5));
+        // g1 ends exactly when g2 starts: touching is not overlapping.
+        assert!(!can_swap(&state, "g1", "ana", "g2", "eva", T0));
+        // A game with itself.
+        assert!(!can_swap(&state, "g1", "ana", "g1", "bia", T0));
+    }
+
+    fn week_state() -> BoardState {
+        board(
+            &[("ana", 1), ("bia", 2), ("cris", 3), ("duarte", 4)],
+            vec![],
+            vec![game(
+                "g1",
+                at(10, 0),
+                at(11, 0),
+                &["ana", "bia", "cris", "duarte"],
+            )],
+        )
+    }
+
+    #[test]
+    fn new_time_must_be_one_hour_to_ninety_minutes_on_the_grid() {
+        let state = week_state();
+        let check = |s, e| check_new_time(&state, "g1", s, e, T0);
+        assert_eq!(check(at(12, 0), at(13, 0)), Ok(()));
+        assert_eq!(check(at(12, 0), at(13, 30)), Ok(()));
+        assert_eq!(check(at(12, 30), at(13, 30)), Ok(()));
+        // Too short, too long, in between, backwards.
+        assert_eq!(check(at(12, 0), at(12, 30)), Err("range"));
+        assert_eq!(check(at(12, 0), at(14, 0)), Err("range"));
+        assert_eq!(check(at(12, 0), at(13, 15)), Err("range"));
+        assert_eq!(check(at(13, 0), at(12, 0)), Err("range"));
+        // Off the half-hour grid.
+        assert_eq!(check(at(12, 15), at(13, 15)), Err("range"));
+        // Outside the week.
+        assert_eq!(check(T0 - 3600, T0), Err("range"));
+        assert_eq!(check(T0 + WEEK, T0 + WEEK + 3600), Err("range"));
+        assert_eq!(check(T0 + WEEK - 3600, T0 + WEEK), Ok(()));
+        assert_eq!(
+            check_new_time(&state, "nope", at(12, 0), at(13, 0), T0),
+            Err("range")
+        );
+    }
+
+    #[test]
+    fn new_time_must_differ_from_the_games_own() {
+        let state = week_state();
+        assert_eq!(
+            check_new_time(&state, "g1", at(10, 0), at(11, 0), T0),
+            Err("range")
+        );
+        // The same start with the other length is a change.
+        assert_eq!(
+            check_new_time(&state, "g1", at(10, 0), at(11, 30), T0),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn time_change_refused_when_a_player_is_busy() {
+        let mut state = week_state();
+        state
+            .games
+            .push(game("g2", at(12, 0), at(13, 0), &["duarte", "x", "y", "z"]));
+        assert_eq!(
+            check_new_time(&state, "g1", at(12, 30), at(13, 30), T0),
+            Err("players_busy")
+        );
+        // Touching the other game is fine, and so is the game's own current time.
+        assert_eq!(
+            check_new_time(&state, "g1", at(13, 0), at(14, 0), T0),
+            Ok(())
+        );
+        assert_eq!(
+            check_new_time(&state, "g1", at(10, 30), at(11, 30), T0),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn new_time_needs_one_hour_lead() {
+        let state = week_state();
+        let now = at(11, 30);
+        assert_eq!(
+            check_new_time(&state, "g1", at(12, 0), at(13, 0), now),
+            Err("too_soon")
+        );
+        assert_eq!(
+            check_new_time(&state, "g1", at(12, 30), at(13, 30), now),
+            Ok(())
+        );
     }
 }

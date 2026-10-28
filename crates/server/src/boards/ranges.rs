@@ -64,17 +64,43 @@ pub fn uncovered_parts(mine: &[Piece], start: i64, end: i64) -> Vec<(i64, i64)> 
 /// Removes `[start, end)` from the user's pieces. A cut piece keeps its
 /// `created_at`, and a cut in the middle makes two pieces.
 pub fn trim(mine: &[Piece], start: i64, end: i64) -> Trim {
+    trim_ranges(mine, &[(start, end)])
+}
+
+/// Removes every range in `cuts` from the user's pieces in one pass, so a piece cut twice is
+/// deleted once and leaves only what none of the cuts touch. Empty or backwards cuts are
+/// ignored; the others may come in any order and overlap.
+pub fn trim_ranges(mine: &[Piece], cuts: &[(i64, i64)]) -> Trim {
+    let mut cuts: Vec<(i64, i64)> = cuts.iter().copied().filter(|&(s, e)| s < e).collect();
+    cuts.sort_unstable();
+    let mut union: Vec<(i64, i64)> = Vec::new();
+    for (s, e) in cuts {
+        match union.last_mut() {
+            Some(last) if s <= last.1 => last.1 = last.1.max(e),
+            _ => union.push((s, e)),
+        }
+    }
     let mut out = Trim::default();
     for p in ordered(mine) {
-        if p.end <= start || p.start >= end {
+        if !union.iter().any(|&(s, e)| p.start < e && s < p.end) {
             continue;
         }
         out.delete.push(p.id.clone());
-        if p.start < start {
-            out.insert.push((p.start, start, p.created_at));
+        let mut cursor = p.start;
+        for &(s, e) in &union {
+            if e <= cursor {
+                continue;
+            }
+            if s >= p.end {
+                break;
+            }
+            if s > cursor {
+                out.insert.push((cursor, s, p.created_at));
+            }
+            cursor = cursor.max(e);
         }
-        if p.end > end {
-            out.insert.push((end, p.end, p.created_at));
+        if cursor < p.end {
+            out.insert.push((cursor, p.end, p.created_at));
         }
     }
     out
@@ -162,6 +188,14 @@ mod tests {
     }
 
     #[test]
+    fn trim_of_an_empty_or_backwards_range_changes_nothing() {
+        let mine = vec![piece("p1", 10 * H, 12 * H, 100)];
+        for (s, e) in [(11 * H, 11 * H), (12 * H, 10 * H)] {
+            assert_eq!(trim(&mine, s, e), Trim::default());
+        }
+    }
+
+    #[test]
     fn trim_covering_a_piece_deletes_it_whole() {
         let mine = vec![
             piece("p1", 10 * H, 11 * H, 100),
@@ -170,5 +204,36 @@ mod tests {
         let t = trim(&mine, 9 * H, 11 * H + 1800);
         assert_eq!(t.delete, vec!["p1".to_owned(), "p2".to_owned()]);
         assert_eq!(t.insert, vec![(11 * H + 1800, 12 * H, 5)]);
+    }
+
+    #[test]
+    fn trim_ranges_cuts_every_range_in_one_pass() {
+        // Cutting [10,11) and [12,13) from [10,13) keeps only [11,12), once.
+        let mine = vec![piece("p1", 10 * H, 13 * H, 100)];
+        let t = trim_ranges(&mine, &[(10 * H, 11 * H), (12 * H, 13 * H)]);
+        assert_eq!(t.delete, vec!["p1".to_owned()]);
+        assert_eq!(t.insert, vec![(11 * H, 12 * H, 100)]);
+    }
+
+    #[test]
+    fn trim_ranges_handles_unsorted_and_overlapping_cuts() {
+        let mine = vec![
+            piece("p1", 10 * H, 14 * H, 100),
+            piece("p2", 20 * H, 21 * H, 1),
+        ];
+        let t = trim_ranges(
+            &mine,
+            &[
+                (12 * H, 13 * H),
+                (10 * H, 11 * H),
+                (10 * H + 1800, 11 * H + 1800),
+            ],
+        );
+        assert_eq!(t.delete, vec!["p1".to_owned()]);
+        assert_eq!(
+            t.insert,
+            vec![(11 * H + 1800, 12 * H, 100), (13 * H, 14 * H, 100)]
+        );
+        assert_eq!(trim_ranges(&mine, &[]), Trim::default());
     }
 }

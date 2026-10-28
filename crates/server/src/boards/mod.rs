@@ -5,8 +5,11 @@
 //!
 //! Every write ends with [`settle_in`], so no write path fills or forms a game on its own.
 
+mod actions;
 pub mod formation;
 pub mod ranges;
+
+use actions::{GameRow, leave_in, requests_in};
 
 use std::collections::HashMap;
 
@@ -111,7 +114,7 @@ pub enum RequestKind {
     Time,
 }
 
-/// A pending swap or time-change request the viewer is part of. Filled from Task 9 on.
+/// A pending swap or time-change request the viewer asked or must answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RequestOut {
     pub id: String,
@@ -476,64 +479,6 @@ async fn display_name_in(conn: &mut SqliteConnection, user: &str) -> Result<Stri
     Ok(name.unwrap_or_default())
 }
 
-/// Take `user` out of a game. An emptied game is deleted; otherwise its version goes up and the
-/// players left are told. It does not fill the seat: [`settle_in`] does, after the caller's
-/// changes are all made.
-pub(crate) async fn leave_in(
-    tx: &mut Tx<'_>,
-    board_id: &str,
-    game_id: &str,
-    user: &str,
-    now: i64,
-) -> Result<(), StoreError> {
-    let removed = sqlx::query("DELETE FROM board_game_players WHERE game_id = ? AND user_id = ?")
-        .bind(game_id)
-        .bind(user)
-        .execute(&mut **tx)
-        .await?;
-    if removed.rows_affected() == 0 {
-        return Ok(());
-    }
-    let rest: Vec<String> = sqlx::query_scalar(
-        "SELECT user_id FROM board_game_players WHERE game_id = ? ORDER BY seat",
-    )
-    .bind(game_id)
-    .fetch_all(&mut **tx)
-    .await?;
-    if rest.is_empty() {
-        sqlx::query("DELETE FROM board_games WHERE id = ?")
-            .bind(game_id)
-            .execute(&mut **tx)
-            .await?;
-        return Ok(());
-    }
-    sqlx::query("UPDATE board_games SET version = version + 1 WHERE id = ?")
-        .bind(game_id)
-        .execute(&mut **tx)
-        .await?;
-    let (start, end): (i64, i64) =
-        sqlx::query_as("SELECT starts_at, ends_at FROM board_games WHERE id = ?")
-            .bind(game_id)
-            .fetch_one(&mut **tx)
-            .await?;
-    let board = find_by_id_in(tx, board_id).await?;
-    let name = display_name_in(tx, user).await?;
-    let notices: Vec<Notice> = rest
-        .iter()
-        .map(|other| {
-            board.notice(
-                other,
-                NoticeKind::PlayerLeft,
-                board.board_url(),
-                (start, end),
-                Some(name.clone()),
-            )
-        })
-        .collect();
-    queue_in(tx, &notices, now).await?;
-    Ok(())
-}
-
 /// Bring the board to what the rules say: players whose free time no longer covers their game
 /// leave it, then short games fill from the line and new games form. Notices are queued here.
 /// `actor` is the user whose action caused this: they are not told they were moved in.
@@ -681,6 +626,24 @@ async fn view_in(
         .map(|(id, version, played, token)| (id, (version, played, token)))
         .collect();
 
+    let game_rows: HashMap<String, GameRow> = state
+        .games
+        .iter()
+        .map(|g| {
+            let (version, played, _) = extras.get(&g.id).cloned().unwrap_or((0, false, None));
+            (
+                g.id.clone(),
+                GameRow {
+                    start: g.start,
+                    end: g.end,
+                    version,
+                    played,
+                },
+            )
+        })
+        .collect();
+    let requests = requests_in(conn, &board.id, viewer, &state, &game_rows, &names, now).await?;
+
     let games = state
         .games
         .iter()
@@ -747,7 +710,7 @@ async fn view_in(
             })
             .collect(),
         games,
-        requests: Vec::new(),
+        requests,
     })
 }
 

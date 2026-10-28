@@ -9,6 +9,7 @@
 	import { ApiError, redirectToSignIn } from '#lib/api.ts';
 	import {
 		addRange,
+		answerRequest,
 		boardMessage,
 		deleteBoard,
 		getBoard,
@@ -17,8 +18,11 @@
 		removeRange,
 		updateBoard
 	} from '#lib/boards.ts';
+	import GameSheet from '#lib/components/boards/GameSheet.svelte';
+	import RequestCard from '#lib/components/boards/RequestCard.svelte';
 	import WeekGrid from '#lib/components/boards/WeekGrid.svelte';
 	import { browserTimeZone, dayLabel, monthYear, timeRange } from '#lib/dates.ts';
+	import { requestCards } from '#lib/gamesheet.ts';
 	import { shareLink } from '#lib/share.ts';
 	import { MAX_NAME_LENGTH } from '#lib/setup.ts';
 	import { strings } from '#lib/strings.ts';
@@ -53,6 +57,9 @@
 		view && me ? view.games.filter((g) => g.players.some((p) => p.user_id === me.user_id)) : []
 	);
 	const openGame = $derived(view?.games.find((g) => g.id === openGameId) ?? null);
+	const waiting = $derived(view ? requestCards(view) : []);
+	// Unix seconds, read again with the board, so the sheet's time rules follow the clock.
+	let now = $state(Math.floor(Date.now() / 1000));
 	const weekText = $derived(
 		view
 			? t.weekHeader(
@@ -74,6 +81,7 @@
 			const next = await getBoard(forToken);
 			if (mine !== latest) return;
 			view = next;
+			now = Math.floor(Date.now() / 1000);
 			loadFailure = null;
 			if (!askedForGame) {
 				askedForGame = true;
@@ -122,6 +130,7 @@
 				if (next) {
 					latest += 1;
 					view = next;
+					now = Math.floor(Date.now() / 1000);
 				}
 			})
 			.catch((e) => {
@@ -134,6 +143,7 @@
 			});
 	}
 
+	const answer = (id: string, accept: boolean) => act(() => answerRequest(id, accept));
 	const add = (start: number, end: number) => act(() => addRange(token, start, end));
 	const remove = (start: number, end: number) => act(() => removeRange(token, start, end));
 	const join = () => act(() => joinBoard(token));
@@ -155,6 +165,20 @@
 			return null;
 		});
 	}
+
+	// Opening a game brings its sheet into view and hands it the focus, as on a phone it sits
+	// below the grid.
+	let sheetEl: HTMLElement | undefined = $state();
+	$effect(() => {
+		// Only a newly opened game does this, not the board being read again.
+		if (openGameId && sheetEl) {
+			const el = sheetEl;
+			untrack(() => {
+				el.scrollIntoView({ block: 'nearest' });
+				el.focus({ preventScroll: true });
+			});
+		}
+	});
 
 	let menuOpen = $state(false);
 	let confirmEl: HTMLElement | undefined = $state();
@@ -280,7 +304,7 @@
 		{/if}
 
 		{#if over}<p class="hint">{t.over}</p>{/if}
-		{#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
+		{#if actionError && !openGame}<p class="error" role="alert">{actionError}</p>{/if}
 
 		{#if !signedIn && !over}
 			<div class="join">
@@ -301,15 +325,37 @@
 			</div>
 
 			<aside class="side" aria-label={t.yourGames}>
+				{#if waiting.length > 0}
+					<h2>{strings.gameSheet.needsAnswer}</h2>
+					<ul class="list requests">
+						{#each waiting as r (r.id)}
+							<li>
+								<RequestCard
+									kind={r.kind}
+									from={r.from}
+									current={r.current}
+									proposed={r.proposed}
+									busy={working > 0}
+									onanswer={(accept) => answer(r.id, accept)}
+								/>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 				{#if openGame}
-					<section class="game-card" aria-label={t.gameOpen}>
-						<h2>{gameWhen(openGame)}</h2>
-						<p class="hint">{t.gameState[openGame.state]} · {t.line(openGame.line.length)}</p>
-						<ul class="people" aria-label={t.players}>
-							{#each openGame.players as p (p.user_id)}<li>{p.name}</li>{/each}
-						</ul>
-						<button type="button" class="secondary" onclick={() => (openGameId = null)}>{t.closeGame}</button>
-					</section>
+					{#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
+					<div class="sheetbox" tabindex="-1" bind:this={sheetEl}>
+						<GameSheet
+							{view}
+							gameId={openGame.id}
+							{token}
+							{now}
+							{zone}
+							working={working > 0}
+							run={act}
+							onclose={() => (openGameId = null)}
+						/>
+					</div>
 				{/if}
 				{#if signedIn}
 					<h2>{t.yourGames}</h2>
@@ -436,19 +482,11 @@
 	.side h2 {
 		margin-top: 8px;
 	}
-	.game-card {
+	.requests {
 		margin-bottom: 12px;
-		padding: 12px 14px;
-		border: 3px solid var(--ball);
-		border-radius: 14px;
-		background: var(--panel);
 	}
-	.game-card h2 {
-		margin: 0 0 4px;
-	}
-	.people {
-		margin: 0 0 10px;
-		padding-left: 22px;
+	.sheetbox:focus-visible {
+		outline-offset: 3px;
 	}
 	.game-row {
 		width: 100%;

@@ -674,6 +674,11 @@
 		position: absolute;
 		inset: -10px;
 	}
+	/* The phone's ✕ is 22 px in a column about 46 px wide: its hit area grows down and to the
+	   left, inside its own column, so it never takes taps from the next column or the cell above. */
+	.grid.cols .x::before {
+		inset: 0 0 -26px -18px;
+	}
 	.grid.cols .x {
 		top: 0;
 		right: 0;
@@ -697,6 +702,8 @@
 		border-radius: 5px;
 		background: transparent;
 		box-shadow: 0 0 0 1px var(--ink);
+		/* The size the game's open button may take a hit area from (see .gopen::before). */
+		container-type: size;
 	}
 
 	.grid.cols .game {
@@ -730,10 +737,17 @@
 		font-size: 10px;
 		pointer-events: auto;
 	}
+	/* A 48 px hit area from the button's corner into its own game (out to the game's outer edge,
+	   its 3 px border and 1 px margin included). Games side by side share a column, so it is cut
+	   there: it never reaches the next game's button. A phone column is about 45 px wide, so
+	   the hit area is as wide as the column or the lane, and 48 px high. */
 	.gopen::before {
 		content: '';
 		position: absolute;
-		inset: -10px;
+		left: -4px;
+		bottom: -4px;
+		width: min(48px, calc(100cqw + 8px));
+		height: min(48px, calc(100cqh + 8px));
 	}
 
 	.legend {
