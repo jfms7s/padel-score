@@ -56,8 +56,9 @@ export class ApiError extends Error {
 function goToSignIn(): void {
 	const loc = globalThis.location;
 	if (!loc || loc.pathname === '/login') return;
-	// The fragment stays out: on /invite and /reset it is a secret code.
-	loc.assign(loginPath(loc.pathname + loc.search));
+	// The fragment stays out: on /invite and /reset it is a secret code. Replaced, not pushed:
+	// Back from sign-in must not land on the page that needed a user.
+	loc.replace(loginPath(loc.pathname + loc.search));
 }
 
 let onUnauthorized: () => void = goToSignIn;
