@@ -464,7 +464,7 @@ async fn trimming_a_range_under_a_game_leaves_it_and_the_line_fills() {
         [e.clone(), b.clone(), c.clone(), d.clone()]
     );
     assert_eq!(view.games[0].state, GameState::Full);
-    assert!(view.games[0].version >= 1);
+    assert_eq!(view.games[0].version, 2);
 
     let rows = outbox(&pool).await;
     assert_eq!(kinds(&rows, "player_left"), sorted(&[&b, &c, &d]));
@@ -787,4 +787,146 @@ async fn my_boards_lists_open_boards_the_user_is_in() {
     let later = s.my_boards(&a, old.board.ends_at).await.unwrap();
     assert_eq!(later.len(), 2);
     assert!(s.my_boards(&b, T0).await.unwrap().len() == 1);
+}
+
+#[tokio::test]
+async fn the_player_whose_tap_fills_a_seat_is_not_told_but_the_game_is_unchanged_for_others() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    s.leave_board(&token, &d, T0 + 20).await.unwrap();
+    let e = user(&s, "Tiago").await;
+    sqlx::query("DELETE FROM push_outbox")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let view = s
+        .add_free(&token, &e, START, START + HOUR, T0 + 30)
+        .await
+        .unwrap();
+    assert_eq!(player_ids(&view, 0), [a, b, c, e]);
+    assert!(outbox(&pool).await.is_empty());
+}
+
+#[tokio::test]
+async fn removing_time_inside_the_fill_cutoff_leaves_the_game_short() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    let e = user(&s, "Tiago").await;
+    s.add_free(&token, &e, START, START + HOUR, T0 + 50)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM push_outbox")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // 30 minutes before the start: the leaver goes, the line is not used any more.
+    let view = s
+        .remove_free(&token, &a, START, START + HOUR, START - 1800)
+        .await
+        .unwrap();
+    assert_eq!(player_ids(&view, 0), [b.clone(), c.clone(), d.clone()]);
+    assert_eq!(view.games[0].state, GameState::Short);
+    let rows = outbox(&pool).await;
+    assert!(kinds(&rows, "moved_in").is_empty());
+    assert_eq!(kinds(&rows, "player_left"), sorted(&[&b, &c, &d]));
+}
+
+#[tokio::test]
+async fn cutting_the_middle_of_a_piece_counts_against_the_200_cap() {
+    let (s, _) = setup().await;
+    let a = user(&s, "Ana").await;
+    let token = board(&s, &a).await;
+    s.add_free(&token, &a, START, START + 4 * 1800, T0)
+        .await
+        .unwrap();
+    for i in 0..(MAX_PIECES_PER_MEMBER - 1) {
+        let at = START + (10 + i64::try_from(i).unwrap()) * 1800;
+        s.add_free(&token, &a, at, at + 1800, T0).await.unwrap();
+    }
+    let err = s
+        .remove_free(&token, &a, START + 1800, START + 3600, T0)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("too_many_ranges")),
+        "{err:?}"
+    );
+    // The refused cut changed nothing.
+    let view = s.board_view(&token, Some(&a), T0).await.unwrap().unwrap();
+    assert_eq!(view.pieces.len(), MAX_PIECES_PER_MEMBER);
+    // Cutting an end does not add a piece.
+    s.remove_free(&token, &a, START + 3 * 1800, START + 4 * 1800, T0)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn leaving_takes_the_member_out_of_a_game_that_has_started() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    s.leave_board(&token, &b, START + 600).await.unwrap();
+    let view = s
+        .board_view(&token, Some(&a), START + 600)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(player_ids(&view, 0), [a, c, d]);
+    let seats: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM board_game_players WHERE user_id = ?")
+            .bind(&b)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(seats, 0);
+}
+
+#[tokio::test]
+async fn the_creator_may_leave_and_still_edit_and_delete() {
+    let (s, _, token, [a, ..]) = formed().await;
+    s.leave_board(&token, &a, T0 + 20).await.unwrap();
+    let view = s
+        .update_board(
+            &token,
+            &a,
+            BoardChange {
+                title: Some("Renamed".to_owned()),
+                place: None,
+            },
+            T0 + 21,
+        )
+        .await
+        .unwrap();
+    assert_eq!(view.board.title, "Renamed");
+    let me = view.me.unwrap();
+    assert!(!me.member && me.creator);
+    s.delete_board(&token, &a, T0 + 22).await.unwrap();
+    assert!(
+        s.board_view(&token, Some(&a), T0 + 23)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn a_view_is_one_snapshot_and_does_not_wait_for_a_writer() {
+    let path = std::env::temp_dir().join(format!("padel-{}.db", uuid::Uuid::new_v4()));
+    let pool = db::connect(&format!("sqlite://{}?mode=rwc", path.display()))
+        .await
+        .unwrap();
+    let s = Store::new(pool.clone());
+    let a = user(&s, "Ana").await;
+    let token = board(&s, &a).await;
+    let mut tx = s.begin().await.unwrap();
+    sqlx::query("UPDATE boards SET title = 'Changed'")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let before = s.board_view(&token, Some(&a), T0).await.unwrap().unwrap();
+    assert_eq!(before.board.title, "Thursday padel");
+    tx.commit().await.unwrap();
+    let after = s.board_view(&token, Some(&a), T0).await.unwrap().unwrap();
+    assert_eq!(after.board.title, "Changed");
+
+    pool.close().await;
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
 }

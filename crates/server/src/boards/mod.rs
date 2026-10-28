@@ -116,11 +116,9 @@ pub enum RequestKind {
 pub struct RequestOut {
     pub id: String,
     pub kind: RequestKind,
-    /// The asker's user id.
-    pub from: String,
+    pub from: MemberRef,
     pub game_id: String,
     pub other_game_id: Option<String>,
-    pub to_user_id: Option<String>,
     pub new_start: Option<i64>,
     pub new_end: Option<i64>,
     pub needs_my_answer: bool,
@@ -511,7 +509,13 @@ pub(crate) async fn leave_in(
 
 /// Bring the board to what the rules say: players whose free time no longer covers their game
 /// leave it, then short games fill from the line and new games form. Notices are queued here.
-pub(crate) async fn settle_in(tx: &mut Tx<'_>, board_id: &str, now: i64) -> Result<(), StoreError> {
+/// `actor` is the user whose action caused this: they are not told they were moved in.
+pub(crate) async fn settle_in(
+    tx: &mut Tx<'_>,
+    board_id: &str,
+    actor: Option<&str>,
+    now: i64,
+) -> Result<(), StoreError> {
     let state = load_state_in(tx, board_id).await?;
     let gone = uncovered(&state, now);
     for (game_id, user) in &gone {
@@ -596,13 +600,15 @@ pub(crate) async fn settle_in(tx: &mut Tx<'_>, board_id: &str, now: i64) -> Resu
                     .ok_or_else(|| {
                         StoreError::Corrupt(format!("filled game {game_id} is unknown"))
                     })?;
-                notices.push(board.notice(
-                    &user_id,
-                    NoticeKind::MovedIn,
-                    board.board_url(),
-                    (game.start, game.end),
-                    None,
-                ));
+                if actor != Some(user_id.as_str()) {
+                    notices.push(board.notice(
+                        &user_id,
+                        NoticeKind::MovedIn,
+                        board.board_url(),
+                        (game.start, game.end),
+                        None,
+                    ));
+                }
             }
         }
     }
@@ -789,11 +795,12 @@ impl Store {
         viewer: Option<&str>,
         now: i64,
     ) -> Result<Option<BoardView>, StoreError> {
-        let mut conn = self.pool().acquire().await?;
-        let Some(board) = find_by_token_in(&mut conn, token).await? else {
+        // One read transaction, so every query sees the same snapshot.
+        let mut tx = self.pool().begin().await?;
+        let Some(board) = find_by_token_in(&mut tx, token).await? else {
             return Ok(None);
         };
-        Ok(Some(view_in(&mut conn, &board, viewer, now).await?))
+        Ok(Some(view_in(&mut tx, &board, viewer, now).await?))
     }
 
     /// Join the board; joining again is a no-op, even when the board is full.
@@ -811,8 +818,8 @@ impl Store {
         Ok(view)
     }
 
-    /// Leave the board: free time goes, and so does the place in every game that has not started
-    /// (the line fills it). Games already started or played stay as they were.
+    /// Leave the board: free time goes, and so does the place in every game that has no match
+    /// yet, started or not (the line fills it). Played games stay as they were.
     pub async fn leave_board(&self, token: &str, user: &str, now: i64) -> Result<(), StoreError> {
         let mut tx = self.begin().await?;
         let board = open_board_in(&mut tx, token, now).await?;
@@ -828,7 +835,7 @@ impl Store {
         for game in state
             .games
             .iter()
-            .filter(|g| !g.played && g.start > now && g.players.iter().any(|p| p == user))
+            .filter(|g| !g.played && g.players.iter().any(|p| p == user))
         {
             leave_in(&mut tx, &board.id, &game.id, user, now).await?;
         }
@@ -837,7 +844,7 @@ impl Store {
             .bind(user)
             .execute(&mut *tx)
             .await?;
-        settle_in(&mut tx, &board.id, now).await?;
+        settle_in(&mut tx, &board.id, Some(user), now).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -865,7 +872,7 @@ impl Store {
         for (part_start, part_end) in parts {
             insert_piece_in(&mut tx, &board.id, user, part_start, part_end, now).await?;
         }
-        settle_in(&mut tx, &board.id, now).await?;
+        settle_in(&mut tx, &board.id, Some(user), now).await?;
         let view = view_in(&mut tx, &board, Some(user), now).await?;
         tx.commit().await?;
         Ok(view)
@@ -885,7 +892,13 @@ impl Store {
         check_range(&board, start, end)?;
         if is_member_in(&mut tx, &board.id, user).await? {
             let state = load_state_in(&mut tx, &board.id).await?;
-            let cut = trim(&mine(&state, user), start, end);
+            let existing = mine(&state, user);
+            let cut = trim(&existing, start, end);
+            if (existing.len().saturating_sub(cut.delete.len())) + cut.insert.len()
+                > MAX_PIECES_PER_MEMBER
+            {
+                return Err(StoreError::Conflict("too_many_ranges"));
+            }
             for id in &cut.delete {
                 sqlx::query("DELETE FROM board_ranges WHERE id = ?")
                     .bind(id)
@@ -896,7 +909,7 @@ impl Store {
                 insert_piece_in(&mut tx, &board.id, user, piece_start, piece_end, created_at)
                     .await?;
             }
-            settle_in(&mut tx, &board.id, now).await?;
+            settle_in(&mut tx, &board.id, Some(user), now).await?;
         }
         let view = view_in(&mut tx, &board, Some(user), now).await?;
         tx.commit().await?;
