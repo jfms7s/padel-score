@@ -2,14 +2,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './api';
 import {
 	addRange,
+	answerRequest,
+	askSwap,
+	askTime,
 	boardMessage,
 	createBoard,
 	deleteBoard,
 	getBoard,
+	giveGame,
 	joinBoard,
 	leaveBoard,
+	leaveGame,
 	myBoards,
 	removeRange,
+	startGame,
+	takeGame,
 	updateBoard
 } from './boards';
 import { strings } from './strings';
@@ -50,6 +57,35 @@ describe('boardMessage', () => {
 			expect(boardMessage(err('validation', f))).toBe(strings.boards.fields[f as 'range']);
 		}
 		expect(strings.boards.fields.range).toBe('Pick times on the half-hour grid inside the week.');
+	});
+
+	it('gives every game action code its own sentence', () => {
+		const codes = [
+			'game_changed',
+			'nobody_can_take',
+			'too_late',
+			'cannot_swap',
+			'players_busy',
+			'too_soon',
+			'request_pending',
+			'request_expired',
+			'already_answered',
+			'not_yet',
+			'game_over',
+			'game_short',
+			'already_started',
+			'not_in_game',
+			'game_played',
+			'game_started',
+			'already_in_game',
+			'game_full',
+			'busy'
+		];
+		const texts = codes.map((c) => boardMessage(err(c)));
+		expect(texts.every((t) => t !== strings.serverError(409))).toBe(true);
+		expect(new Set(texts).size).toBe(codes.length);
+		expect(boardMessage(err('game_changed'))).toBe('This game just changed');
+		expect(boardMessage(err('nobody_can_take'))).toBe('Nobody can take your place right now. Use Leave instead.');
 	});
 
 	it('falls back to the account copy', () => {
@@ -112,5 +148,63 @@ describe('boards client', () => {
 	it('raises the server s code on a conflict', async () => {
 		serve(409, { error: 'board_full' });
 		await expect(joinBoard('t')).rejects.toMatchObject({ code: 'board_full' });
+	});
+
+	it('sends a game action with the game s version', async () => {
+		const calls = serve(200, view);
+		await leaveGame('t', 'g/1', 3);
+		await giveGame('t', 'g1', 4);
+		await takeGame('t', 'g1', 5);
+		expect(calls.map((c) => [c.init?.method, c.url])).toEqual([
+			['POST', '/api/boards/t/games/g%2F1/leave'],
+			['POST', '/api/boards/t/games/g1/give'],
+			['POST', '/api/boards/t/games/g1/take']
+		]);
+		expect(calls.map((c) => JSON.parse(String(c.init?.body)))).toEqual([
+			{ version: 3 },
+			{ version: 4 },
+			{ version: 5 }
+		]);
+	});
+
+	it('asks for a swap and a time change', async () => {
+		const calls = serve(200, view);
+		await askSwap('t', 'g1', 2, 'g2', 'rui');
+		await askTime('t', 'g1', 2, 100, 5500, true);
+		await askTime('t', 'g1', 2, 100, 3700, false);
+		expect(calls.map((c) => c.url)).toEqual([
+			'/api/boards/t/games/g1/swap',
+			'/api/boards/t/games/g1/time',
+			'/api/boards/t/games/g1/time'
+		]);
+		expect(calls.map((c) => JSON.parse(String(c.init?.body)))).toEqual([
+			{ version: 2, other_game_id: 'g2', other_user_id: 'rui' },
+			{ version: 2, start: 100, end: 5500, agreed: true },
+			{ version: 2, start: 100, end: 3700, agreed: false }
+		]);
+	});
+
+	it('answers a request with no body', async () => {
+		const calls = serve(200, view);
+		await answerRequest('r/1', true);
+		await answerRequest('r1', false);
+		expect(calls.map((c) => [c.init?.method, c.url, c.init?.body])).toEqual([
+			['POST', '/api/board-requests/r%2F1/accept', undefined],
+			['POST', '/api/board-requests/r1/decline', undefined]
+		]);
+	});
+
+	it('starts a match from a game and returns its players', async () => {
+		const players = { players: [], format: null, from: { kind: 'game', id: 'g1' } };
+		const calls = serve(200, players);
+		expect(await startGame('t', 'g1')).toEqual(players);
+		expect(calls[0]?.url).toBe('/api/boards/t/games/g1/start');
+		expect(calls[0]?.init?.method).toBe('POST');
+		expect(calls[0]?.init?.body).toBeUndefined();
+	});
+
+	it('raises game_changed as a code the sheet can tell apart', async () => {
+		serve(409, { error: 'game_changed' });
+		await expect(giveGame('t', 'g1', 1)).rejects.toMatchObject({ code: 'game_changed' });
 	});
 });

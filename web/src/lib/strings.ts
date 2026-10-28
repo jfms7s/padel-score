@@ -955,7 +955,13 @@ export const strings = {
 		gameFormed: 'Game formed',
 		movedIn: "You're in a game",
 		playerLeft: (name: string | undefined) => `${name ?? 'Someone'} left your game`,
-		boardDeleted: 'Board deleted'
+		boardDeleted: 'Board deleted',
+		placeGiven: (name: string | undefined) => `${name ?? 'Someone'} gave you their place`,
+		swapAsked: (name: string | undefined) => `${name ?? 'Someone'} asks to swap`,
+		swapAnswered: { accepted: 'Swap accepted', declined: 'Swap declined' },
+		timeAsked: (name: string | undefined) => `${name ?? 'Someone'} proposes a new time`,
+		timeAnswered: { accepted: 'New time accepted', declined: 'New time declined' },
+		timeChanged: 'Game moved'
 	},
 
 	// Game boards: the board page, the week grid and the new-board form.
@@ -1025,7 +1031,27 @@ export const strings = {
 			board_full: 'This board is full.',
 			too_many_boards: 'You have 20 open boards already.',
 			creator_only: "Only the board's creator can do that.",
-			too_many_ranges: "You've added too many ranges."
+			too_many_ranges: "You've added too many ranges.",
+			// Game actions.
+			game_changed: 'This game just changed',
+			nobody_can_take: 'Nobody can take your place right now. Use Leave instead.',
+			too_late: 'Too late to give your place: the game starts within the hour.',
+			cannot_swap: "That swap doesn't work any more.",
+			players_busy: 'Someone in the game is in another game at that time.',
+			too_soon: 'Pick a time at least an hour from now.',
+			request_pending: 'You already asked for that. Wait for the answer.',
+			request_expired: 'That request is out of date.',
+			already_answered: 'You already answered that.',
+			not_yet: 'It is too early to start this match.',
+			game_over: 'This game is over.',
+			game_short: 'The game needs four players to start a match.',
+			already_started: 'A match was already started from this game.',
+			not_in_game: 'You are not in this game.',
+			game_played: 'This game was already played.',
+			game_started: 'This game has already started.',
+			already_in_game: 'You are already in this game.',
+			game_full: 'This game is full.',
+			busy: 'You are in another game at that time.'
 		},
 		fields: {
 			range: 'Pick times on the half-hour grid inside the week.',
@@ -1034,6 +1060,61 @@ export const strings = {
 			time_zone: "The time zone isn't one the server knows.",
 			week: 'A board covers one week, starting from a day that is not over.'
 		}
+	},
+
+	// The game sheet on a board, and the requests that wait for an answer.
+	gameSheet: {
+		needsAnswer: 'Needs your answer',
+		accept: 'Accept',
+		decline: 'Decline',
+		moved: 'Moved',
+		movedHint: 'This game was moved from the time it formed.',
+		line: 'Line',
+		lineEmpty: 'Nobody in line',
+		you: 'you',
+		playersLabel: 'Players',
+		close: 'Close',
+		leave: 'Leave',
+		give: 'Give my place',
+		swap: 'Swap',
+		time: 'Change time',
+		take: 'Take the open place',
+		start: 'Start match',
+		working: 'Working…',
+		justChanged: 'This game just changed',
+		leaveNote: 'Your free time for this game is removed.',
+		reasons: {
+			give: 'Nobody can take your place right now. Use Leave instead.',
+			giveLate: 'Too late to give your place: the game starts within the hour.',
+			swap: 'Nobody in an overlapping game can swap with you.',
+			time: 'There is no other time to move this game to.',
+			take: 'You are in another game at that time.'
+		},
+		swapTitle: 'Swap with',
+		swapPick: 'Pick a player',
+		swapSend: 'Ask to swap',
+		swapPlayer: (name: string, when: string) => `${name}, ${when}`,
+		timeTitle: 'Change time',
+		timeStart: 'Start',
+		timeLength: 'Length',
+		timeLengths: { 60: '1 h', 90: '1 h 30' },
+		timeAgreed: 'We agreed in the chat',
+		timeAgreedHint: 'The change applies straight away and the others are only told.',
+		timeSend: 'Propose this time',
+		timeApply: 'Move the game',
+		cancel: 'Cancel',
+		asked: {
+			swap: 'You asked to swap. Waiting for an answer.',
+			time: 'You proposed a new time. Waiting for the others.'
+		},
+		// The request card.
+		requestSwap: (from: string) => `${from} asks to swap`,
+		requestTime: (from: string) => `${from} proposes a new time`,
+		yourGame: 'Your game',
+		theirGame: 'Their game',
+		viewMatch: 'View the match',
+		nowAt: 'Now',
+		proposedAt: 'Proposed'
 	},
 
 	// A new version was deployed while this page was open.

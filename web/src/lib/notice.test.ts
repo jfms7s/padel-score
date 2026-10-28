@@ -83,6 +83,71 @@ describe('noticeText for the board kinds', () => {
 	});
 });
 
+describe('noticeText for the game action kinds', () => {
+	const base = {
+		url: '/b/tok',
+		title: 'Thursday padel',
+		start: Date.UTC(2026, 10, 4, 20) / 1000,
+		end: Date.UTC(2026, 10, 4, 21, 30) / 1000,
+		new_start: Date.UTC(2026, 10, 4, 21) / 1000,
+		new_end: Date.UTC(2026, 10, 4, 22, 30) / 1000
+	};
+	const utc = { timeZone: 'UTC' };
+	const old = 'Wed 4 · 20:00–21:30 · Thursday padel';
+	const moved = 'Wed 4 · 21:00–22:30 · Thursday padel';
+
+	it('says someone gave you their place, with the game you are in now', () => {
+		const n = noticeText({ kind: 'place_given', name: 'Rui', ...base }, utc);
+		expect(n.title).toBe('Rui gave you their place');
+		expect(n.body).toBe(moved);
+		expect(n.url).toBe('/b/tok');
+		expect(noticeText({ kind: 'place_given', url: '/b/tok' }, utc).title).toBe('Someone gave you their place');
+	});
+
+	it('says someone asks to swap, with your game', () => {
+		const n = noticeText({ kind: 'swap_asked', name: 'Marta', ...base }, utc);
+		expect(n.title).toBe('Marta asks to swap');
+		expect(n.body).toBe(old);
+	});
+
+	it('says a swap was accepted or declined', () => {
+		expect(noticeText({ kind: 'swap_answered', accepted: true, name: 'Rui', ...base }, utc).title).toBe(
+			'Swap accepted'
+		);
+		const no = noticeText({ kind: 'swap_answered', accepted: false, name: 'Rui', ...base }, utc);
+		expect(no.title).toBe('Swap declined');
+		expect(no.body).toBe(old);
+	});
+
+	it('says someone proposes a new time, with the proposed one', () => {
+		const n = noticeText({ kind: 'time_asked', name: 'Joana', ...base }, utc);
+		expect(n.title).toBe('Joana proposes a new time');
+		expect(n.body).toBe(moved);
+	});
+
+	it('says a new time was accepted or declined, with the current one', () => {
+		expect(noticeText({ kind: 'time_answered', accepted: true, ...base }, utc).title).toBe('New time accepted');
+		const no = noticeText({ kind: 'time_answered', accepted: false, name: 'Rui', ...base }, utc);
+		expect(no.title).toBe('New time declined');
+		expect(no.body).toBe(old);
+	});
+
+	it('says the game moved, with the new time', () => {
+		const n = noticeText({ kind: 'time_changed', name: 'Rui', ...base }, utc);
+		expect(n.title).toBe('Game moved');
+		expect(n.body).toBe(moved);
+	});
+
+	it('prints the new time in the device zone', () => {
+		const n = noticeText({ kind: 'time_changed', ...base }, { timeZone: 'Asia/Tokyo' });
+		expect(n.body).toBe('Thu 5 · 06:00–07:30 · Thursday padel');
+	});
+
+	it('keeps the old game time when a payload lacks the new one', () => {
+		expect(noticeText({ kind: 'time_changed', ...base, new_start: undefined, new_end: undefined }, utc).body).toBe(old);
+	});
+});
+
 describe('safeNoticeUrl', () => {
 	it('notice_url_must_be_a_same_origin_path', () => {
 		for (const bad of [

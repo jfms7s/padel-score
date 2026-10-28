@@ -5,7 +5,7 @@
 import { accountRequest, ApiError } from './api';
 import { authMessage } from './auth';
 import { strings } from './strings';
-import type { BoardChange, BoardOut, BoardView, NewBoard } from './types';
+import type { BoardChange, BoardOut, BoardView, NewBoard, StartPlayers } from './types';
 
 const enc = encodeURIComponent;
 const board = (token: string, rest = '') => `/api/boards/${enc(token)}${rest}`;
@@ -47,6 +47,71 @@ export function addRange(token: string, start: number, end: number): Promise<Boa
 
 export function removeRange(token: string, start: number, end: number): Promise<BoardView> {
 	return accountRequest(board(token, '/ranges/remove'), { ...signedIn, method: 'POST', body: { start, end } });
+}
+
+// ---- game actions ------------------------------------------------------------------------
+// Each sends the game's `version` from the view the player saw: a stale one is 409
+// `game_changed`, and nothing moves. They answer with the board as it is after.
+
+const game = (token: string, gameId: string, action: string) => board(token, `/games/${enc(gameId)}/${action}`);
+
+/** 409 `game_changed`, `game_played`, `game_started`, `board_over`. Removes my free time for it too. */
+export function leaveGame(token: string, gameId: string, version: number): Promise<BoardView> {
+	return accountRequest(game(token, gameId, 'leave'), { ...signedIn, method: 'POST', body: { version } });
+}
+
+/** 409 `nobody_can_take`, `too_late`. */
+export function giveGame(token: string, gameId: string, version: number): Promise<BoardView> {
+	return accountRequest(game(token, gameId, 'give'), { ...signedIn, method: 'POST', body: { version } });
+}
+
+/** Take an open place in a short game: 409 `busy`, `game_full`, `already_in_game`. */
+export function takeGame(token: string, gameId: string, version: number): Promise<BoardView> {
+	return accountRequest(game(token, gameId, 'take'), { ...signedIn, method: 'POST', body: { version } });
+}
+
+/** Ask a player of an overlapping game to trade places: 409 `cannot_swap`, `request_pending`. */
+export function askSwap(
+	token: string,
+	gameId: string,
+	version: number,
+	otherGameId: string,
+	otherUserId: string
+): Promise<BoardView> {
+	const body = { version, other_game_id: otherGameId, other_user_id: otherUserId };
+	return accountRequest(game(token, gameId, 'swap'), { ...signedIn, method: 'POST', body });
+}
+
+/**
+ * Propose `[start, end)` for the game, or with `agreed` move it at once and only tell the others.
+ * 409 `too_soon`, `players_busy`, `request_pending`, 422 `range`.
+ */
+export function askTime(
+	token: string,
+	gameId: string,
+	version: number,
+	start: number,
+	end: number,
+	agreed: boolean
+): Promise<BoardView> {
+	return accountRequest(game(token, gameId, 'time'), {
+		...signedIn,
+		method: 'POST',
+		body: { version, start, end, agreed }
+	});
+}
+
+/** Accept or decline a request addressed to me; answers with the request's board. */
+export function answerRequest(requestId: string, accept: boolean): Promise<BoardView> {
+	return accountRequest(`/api/board-requests/${enc(requestId)}/${accept ? 'accept' : 'decline'}`, {
+		...signedIn,
+		method: 'POST'
+	});
+}
+
+/** The four players for New match: 409 `not_yet`, `game_over`, `game_short`, `already_started`. */
+export function startGame(token: string, gameId: string): Promise<StartPlayers> {
+	return accountRequest(game(token, gameId, 'start'), { ...signedIn, method: 'POST' });
 }
 
 /** The boards I am a member of or made, soonest week first. */

@@ -36,11 +36,14 @@ export interface NoticeOptions {
 }
 
 /** "Wed 4 · 20:00–21:30 · Thursday padel", leaving out what the payload lacks. */
-function gameBody(p: NoticePayload, opts: NoticeOptions): string {
+function gameBody(p: NoticePayload, opts: NoticeOptions, moved = false): string {
+	// The kinds that move a game say where it is now (`new_*`), when the payload has it.
+	const start = moved && p.new_start !== undefined ? p.new_start : p.start;
+	const end = moved && p.new_start !== undefined ? p.new_end : p.end;
 	const parts: string[] = [];
-	if (p.start !== undefined) {
-		parts.push(dayLabel(p.start, opts.timeZone, opts.locale));
-		if (p.end !== undefined) parts.push(timeRange(p.start, p.end, opts.timeZone, opts.locale));
+	if (start !== undefined) {
+		parts.push(dayLabel(start, opts.timeZone, opts.locale));
+		if (end !== undefined) parts.push(timeRange(start, end, opts.timeZone, opts.locale));
 	}
 	if (p.title) parts.push(p.title);
 	return parts.join(' · ');
@@ -63,6 +66,18 @@ export function noticeText(p: NoticePayload, opts: NoticeOptions = {}): NoticeTe
 			return made(t.playerLeft(p.name), gameBody(p, opts));
 		case 'board_deleted':
 			return made(t.boardDeleted, gameBody(p, opts));
+		case 'place_given':
+			return made(t.placeGiven(p.name), gameBody(p, opts, true));
+		case 'swap_asked':
+			return made(t.swapAsked(p.name), gameBody(p, opts));
+		case 'swap_answered':
+			return made(p.accepted === false ? t.swapAnswered.declined : t.swapAnswered.accepted, gameBody(p, opts));
+		case 'time_asked':
+			return made(t.timeAsked(p.name), gameBody(p, opts, true));
+		case 'time_answered':
+			return made(p.accepted === false ? t.timeAnswered.declined : t.timeAnswered.accepted, gameBody(p, opts));
+		case 'time_changed':
+			return made(t.timeChanged, gameBody(p, opts, true));
 		default:
 			return made(t.appName, t.fallback);
 	}

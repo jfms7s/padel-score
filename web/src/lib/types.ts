@@ -792,7 +792,30 @@ export type ReplayResult = { ok: Score } | { err: EngineError };
 // ---- game boards (crates/server/src/boards/mod.rs, boards_api.rs) -------------------------
 
 /** The board routes' 409 codes (the 422 fields are `range`, `title`, `place`, `time_zone`, `week`). */
-export type BoardErrorCode = 'board_over' | 'board_full' | 'too_many_boards' | 'creator_only' | 'too_many_ranges';
+export type BoardErrorCode =
+	'board_over' | 'board_full' | 'too_many_boards' | 'creator_only' | 'too_many_ranges' | GameErrorCode;
+
+/** The game actions' 409 codes (crates/server/src/boards/actions.rs, starting.rs). */
+export type GameErrorCode =
+	| 'game_changed'
+	| 'nobody_can_take'
+	| 'too_late'
+	| 'cannot_swap'
+	| 'players_busy'
+	| 'too_soon'
+	| 'request_pending'
+	| 'request_expired'
+	| 'already_answered'
+	| 'not_yet'
+	| 'game_over'
+	| 'game_short'
+	| 'already_started'
+	| 'not_in_game'
+	| 'game_played'
+	| 'game_started'
+	| 'already_in_game'
+	| 'game_full'
+	| 'busy';
 
 export interface NewBoard {
 	title: string;
