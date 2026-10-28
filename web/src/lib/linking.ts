@@ -6,6 +6,7 @@
 // public call: it needs no credential, so it leaves `signedIn` off and a 401 never redirects.
 
 import { accountRequest, ApiError } from './api';
+import { monthYear } from './dates';
 import { playerMessage } from './players';
 import { strings } from './strings';
 import type {
@@ -156,8 +157,6 @@ export function linkMessage(e: unknown): string {
 }
 
 // ---- pure helpers ------------------------------------------------------------------------
-
-const monthYear = (secs: number) => new Date(secs * 1000).toLocaleDateString('en', { month: 'short', year: 'numeric' });
 
 /** "5 matches · 2 events · Mar 2026 – Oct 2026"; one date when both fall in the same month. */
 export function previewText(p: ClaimPreview): string {

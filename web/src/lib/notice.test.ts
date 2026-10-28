@@ -24,6 +24,59 @@ describe('noticeText', () => {
 	});
 });
 
+describe('noticeText for the board kinds', () => {
+	const game = {
+		url: '/b/tok',
+		title: 'Thursday padel',
+		start: Date.UTC(2026, 10, 4, 20) / 1000,
+		end: Date.UTC(2026, 10, 4, 21, 30) / 1000
+	};
+	const utc = { timeZone: 'UTC' };
+
+	it('says a game formed', () => {
+		const n = noticeText({ kind: 'game_formed', ...game }, utc);
+		expect(n.title).toBe('Game formed');
+		expect(n.body).toBe('Wed 4 · 20:00–21:30 · Thursday padel');
+		expect(n.url).toBe('/b/tok');
+		expect(n.tag).toBe('game_formed:/b/tok');
+	});
+
+	it('says you moved into a game', () => {
+		const n = noticeText({ kind: 'moved_in', ...game }, utc);
+		expect(n.title).toBe("You're in a game");
+		expect(n.body).toBe('Wed 4 · 20:00–21:30 · Thursday padel');
+	});
+
+	it('names who left', () => {
+		const n = noticeText({ kind: 'player_left', name: 'Rui', ...game }, utc);
+		expect(n.title).toBe('Rui left your game');
+		expect(n.body).toBe('Wed 4 · 20:00–21:30 · Thursday padel');
+	});
+
+	it('says a board was deleted', () => {
+		const n = noticeText({ kind: 'board_deleted', ...game, url: '/calendar' }, utc);
+		expect(n.title).toBe('Board deleted');
+		expect(n.body).toBe('Wed 4 · 20:00–21:30 · Thursday padel');
+		expect(n.url).toBe('/calendar');
+	});
+
+	it('prints the time in the zone and locale it is given', () => {
+		const tokyo = noticeText({ kind: 'game_formed', ...game }, { timeZone: 'Asia/Tokyo' });
+		expect(tokyo.body).toBe('Thu 5 · 05:00–06:30 · Thursday padel');
+		const lisbon = noticeText({ kind: 'game_formed', ...game }, { timeZone: 'Europe/Lisbon' });
+		expect(lisbon.body).toBe('Wed 4 · 20:00–21:30 · Thursday padel');
+		const fr = noticeText({ kind: 'game_formed', ...game }, { timeZone: 'UTC', locale: 'fr' });
+		expect(fr.body).toBe('mer. 4 · 20:00–21:30 · Thursday padel');
+	});
+
+	it('leaves out what the payload lacks instead of printing undefined', () => {
+		const n = noticeText({ kind: 'game_formed', url: '/b/tok' }, utc);
+		expect(n.title).toBe('Game formed');
+		expect(n.body).toBe('');
+		expect(noticeText({ kind: 'player_left', url: '/b/tok' }, utc).title).toBe('Someone left your game');
+	});
+});
+
 describe('safeNoticeUrl', () => {
 	it('notice_url_must_be_a_same_origin_path', () => {
 		for (const bad of [

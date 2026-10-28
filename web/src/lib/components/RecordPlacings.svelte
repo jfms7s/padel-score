@@ -1,6 +1,7 @@
 <script lang="ts">
 	// A record as three big numbers, then any placings: the top of a player's own results and of a
 	// public profile.
+	import { dateText } from '#lib/dates.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { LinkedPlacing, PlayerRecord } from '#lib/types.ts';
 
@@ -27,7 +28,7 @@
 				<!-- The event's name only where the viewer may see it (their own, or this coordinator's). -->
 				<span>{p.event_name ? t.placingIn(p.event_name, placing) : placing}</span>
 				<time class="hint" datetime={new Date(p.finished_at * 1000).toISOString()}
-					>{new Date(p.finished_at * 1000).toLocaleDateString()}</time
+					>{dateText(p.finished_at)}</time
 				>
 			</li>
 		{/each}
