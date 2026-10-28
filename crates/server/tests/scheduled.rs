@@ -793,3 +793,147 @@ async fn other_users_owner_routes_are_404() {
     .await;
     assert_eq!(anon.status, StatusCode::UNAUTHORIZED);
 }
+
+// ---- D5 fix wave ----
+
+async fn link(pool: &SqlitePool, player: &str, user: &str) {
+    sqlx::query("UPDATE players SET linked_user_id = ? WHERE id = ?")
+        .bind(user)
+        .bind(player)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// A full match whose slot 0 is a pre-filled entry "Pre" (not yet linked), slots 1-3 joined.
+async fn with_prefilled() -> (
+    Store,
+    SqlitePool,
+    String,
+    ScheduledView,
+    String,
+    Vec<String>,
+) {
+    let (s, pool) = setup().await;
+    let owner = user(&s, "Owner").await;
+    let (pre, _) = s.create_or_get_player(&owner, "Pre", 1).await.unwrap();
+    let mut new = new_at(START);
+    new.places = [Some(pre.id.clone()), None, None, None];
+    let v = s.create_scheduled(&owner, new, T0).await.unwrap();
+    let mut who = Vec::new();
+    for n in ["Ana", "Rui", "Marta"] {
+        let id = user(&s, n).await;
+        s.join_scheduled(&v.join_token, &id, T0 + 1).await.unwrap();
+        who.push(id);
+    }
+    (s, pool, owner, v, pre.id, who)
+}
+
+#[tokio::test]
+async fn line_member_linked_later_is_not_promoted_twice() {
+    let (s, pool, _owner, v, pre, who) = with_prefilled().await;
+    let t = &v.join_token;
+    let dup = user(&s, "Dup").await;
+    let next = user(&s, "Next").await;
+    s.join_scheduled(t, &dup, T0 + 2).await.unwrap();
+    s.join_scheduled(t, &next, T0 + 3).await.unwrap();
+    // Dup is first in line; the owner's pre-filled entry then gets linked to them.
+    link(&pool, &pre, &dup).await;
+    clear_outbox(&pool).await;
+    s.leave_scheduled(t, &who[0], T0 + 10).await.unwrap();
+    let seen = view(&s, t, None, T0 + 10).await;
+    assert_eq!(seen.places[1].name.as_deref(), Some("Next"));
+    assert!(seen.line.is_empty());
+    assert_eq!(users_of(&outbox(&pool).await, "place_opened"), vec![next]);
+}
+
+#[tokio::test]
+async fn start_refuses_the_same_person_twice() {
+    let (s, pool, owner, v, pre, _who) = with_prefilled().await;
+    let ana: String = sqlx::query_scalar("SELECT id FROM users WHERE display_name = 'Ana'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    // Linked after Ana joined: the pre-filled entry is Ana again.
+    link(&pool, &pre, &ana).await;
+    assert!(matches!(
+        s.start_scheduled(&owner, &v.id, START).await,
+        Err(StoreError::Conflict("same_player_twice"))
+    ));
+}
+
+#[tokio::test]
+async fn edit_later_fills_open_places_from_the_line() {
+    let (s, _pool, owner, v, who) = full().await;
+    let t = &v.join_token;
+    let q = user(&s, "Quin").await;
+    s.join_scheduled(t, &q, T0 + 2).await.unwrap();
+    // Inside the last hour a place opens and stays open.
+    let now = START - HOUR + 1;
+    s.leave_scheduled(t, &who[0], now).await.unwrap();
+    assert_eq!(view(&s, t, None, now).await.places[0].name, None);
+    // Moving the match two hours later reopens the line's claim.
+    let out = s
+        .update_scheduled(
+            &owner,
+            &v.id,
+            ScheduledChange {
+                starts_at: Some(START + 2 * HOUR),
+                place: None,
+            },
+            now,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.places[0].name.as_deref(), Some("Quin"));
+    assert!(out.line.is_empty());
+}
+
+#[tokio::test]
+async fn the_line_is_first_come_within_one_second() {
+    let (s, _pool, _owner, v, who) = full().await;
+    let t = &v.join_token;
+    // User ids are random uuids: order by arrival, not by id.
+    let mut line = Vec::new();
+    for i in 0..6 {
+        let u = user(&s, &format!("Same{i}")).await;
+        s.join_scheduled(t, &u, T0 + 2).await.unwrap();
+        line.push(format!("Same{i}"));
+    }
+    for i in 0..3 {
+        s.leave_scheduled(t, &who[i], T0 + 10).await.unwrap();
+        let seen = view(&s, t, None, T0 + 10).await;
+        assert_eq!(seen.places[i].name.as_deref(), Some(line[i].as_str()));
+    }
+}
+
+#[tokio::test]
+async fn starting_a_short_match_over_http_is_refused() {
+    let (state, _pool) = state().await;
+    let app = app_from(&state, 3);
+    let (owner_id, owner) = fast_user(&state, "o@x.test", "Owner").await;
+    let t = now();
+    let created = state
+        .store
+        .create_scheduled(&owner_id, new_at(t + 600), t)
+        .await
+        .unwrap();
+    let body = json!({
+        "format": one_set(),
+        "start": Start { first_server: Player { team: Team::A, index: 0 }, other_first_server: 0 },
+        "teams": { "a": ["A", "B"], "b": ["C", "D"] },
+        "from": { "kind": "scheduled", "id": created.id },
+    });
+    let res = send(
+        &app,
+        as_session(&state, &owner, Method::POST, "/api/matches", Some(body)),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::CONFLICT);
+    assert_eq!(res.body["error"], "match_short");
+    let live: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM matches")
+        .fetch_one(&_pool)
+        .await
+        .unwrap();
+    assert_eq!(live, 0);
+}

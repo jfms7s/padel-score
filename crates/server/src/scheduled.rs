@@ -237,7 +237,7 @@ async fn line_in(
 ) -> Result<Vec<(String, String)>, StoreError> {
     Ok(sqlx::query_as(
         "SELECT l.user_id, u.display_name FROM scheduled_line l JOIN users u ON u.id = l.user_id \
-         WHERE l.scheduled_id = ? ORDER BY l.joined_at, l.user_id",
+         WHERE l.scheduled_id = ? ORDER BY l.joined_at, l.rowid",
     )
     .bind(id)
     .fetch_all(&mut *conn)
@@ -403,17 +403,28 @@ async fn fill_from_line_in(
     if row.starts_at.saturating_sub(now) < FILL_CUTOFF_SECS {
         return Ok(());
     }
-    let first: Option<String> = sqlx::query_scalar(
-        "SELECT user_id FROM scheduled_line WHERE scheduled_id = ? \
-         ORDER BY joined_at, user_id LIMIT 1",
+    let queue: Vec<String> = sqlx::query_scalar(
+        "SELECT user_id FROM scheduled_line WHERE scheduled_id = ? ORDER BY joined_at, rowid",
     )
     .bind(&row.id)
-    .fetch_optional(&mut **tx)
+    .fetch_all(&mut **tx)
     .await?;
-    let Some(user) = first else { return Ok(()) };
-    take_place_in(tx, &row.id, &user, slot, now).await?;
-    if user != actor {
-        tell_in(tx, NoticeKind::PlaceOpened, row, vec![user], now).await?;
+    for user in queue {
+        // Someone who got a place another way (an entry linked to them after they joined the
+        // line) is dropped from the line, never given a second place.
+        if slot_of_in(tx, &row.id, &user).await?.is_some() {
+            sqlx::query("DELETE FROM scheduled_line WHERE scheduled_id = ? AND user_id = ?")
+                .bind(&row.id)
+                .bind(&user)
+                .execute(&mut **tx)
+                .await?;
+            continue;
+        }
+        take_place_in(tx, &row.id, &user, slot, now).await?;
+        if user != actor {
+            tell_in(tx, NoticeKind::PlaceOpened, row, vec![user], now).await?;
+        }
+        break;
     }
     Ok(())
 }
@@ -650,6 +661,12 @@ impl Store {
             let who = everyone_in(&mut tx, &row, owner).await?;
             tell_in(&mut tx, NoticeKind::MatchChanged, &row, who, now).await?;
         }
+        // A start moved out of the last hour reopens the line's claim on open places.
+        for slot in 0..PLACES {
+            if open_slot_in(&mut tx, &row.id).await? == Some(slot) {
+                fill_from_line_in(&mut tx, &row, slot, owner, now).await?;
+            }
+        }
         let view = view_in(&mut tx, row, Some(owner), now).await?;
         tx.commit().await?;
         Ok(view)
@@ -727,17 +744,24 @@ impl Store {
         if filled.len() < usize::from(PLACES) {
             return Err(StoreError::Conflict("match_short"));
         }
-        let mut players = Vec::with_capacity(filled.len());
+        let mut players: Vec<StartPlayer> = Vec::with_capacity(filled.len());
+        let mut accounts: Vec<String> = Vec::new();
         for place in filled {
             let player_id = match (place.player_id, place.user_id) {
                 (Some(player), _) => player,
                 (None, Some(user)) => auto_entry_in(&mut tx, owner, &user, now).await?,
                 (None, None) => return Err(StoreError::Corrupt("empty place".into())),
             };
-            let name: String = sqlx::query_scalar("SELECT name FROM players WHERE id = ?")
-                .bind(&player_id)
-                .fetch_one(&mut *tx)
-                .await?;
+            let (name, linked): (String, Option<String>) =
+                sqlx::query_as("SELECT name, linked_user_id FROM players WHERE id = ?")
+                    .bind(&player_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            let account_twice = linked.as_ref().is_some_and(|u| accounts.contains(u));
+            if account_twice || players.iter().any(|p| p.player_id == player_id) {
+                return Err(StoreError::Conflict("same_player_twice"));
+            }
+            accounts.extend(linked);
             players.push(StartPlayer { player_id, name });
         }
         tx.commit().await?;
@@ -761,7 +785,7 @@ fn check_startable(row: &Sched, now: i64) -> Result<(), StoreError> {
 }
 
 /// The checks of [`crate::starting::create_match_from`] for a scheduled match: it is the
-/// owner's, not cancelled, not started and in its window.
+/// owner's, not cancelled, not started, in its window and has four filled places.
 pub(crate) async fn check_startable_in(
     conn: &mut SqliteConnection,
     id: &str,
@@ -769,7 +793,11 @@ pub(crate) async fn check_startable_in(
     now: i64,
 ) -> Result<(), StoreError> {
     let row = owned_in(conn, owner, id).await?;
-    check_startable(&row, now)
+    check_startable(&row, now)?;
+    if filled_in(conn, &row.id).await?.len() < usize::from(PLACES) {
+        return Err(StoreError::Conflict("match_short"));
+    }
+    Ok(())
 }
 
 /// Mark the match started by `match_id`, once.
