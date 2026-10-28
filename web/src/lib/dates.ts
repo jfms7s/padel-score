@@ -101,7 +101,10 @@ export function addDays(date: string, n: number): string {
 export function localMidnight(date: string, timeZone: string): number {
 	const guess = utcDay(date);
 	const first = guess - offsetAt(guess, timeZone);
-	return guess - offsetAt(first, timeZone);
+	const found = guess - offsetAt(first, timeZone);
+	if (localDate(found, timeZone) === date) return found;
+	// Midnight does not exist (the clocks jump forward at 00:00): the day starts when they land.
+	return found + offsetAt(found + 7200, timeZone) - offsetAt(found, timeZone);
 }
 
 /** The Monday after `today` ("YYYY-MM-DD"): never today, so a Monday gives the next one. */

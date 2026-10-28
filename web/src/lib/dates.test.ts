@@ -55,6 +55,28 @@ describe('dates', () => {
 		expect(localMidnight('2026-11-05', 'Asia/Tokyo')).toBe(Date.UTC(2026, 10, 4, 15) / 1000);
 	});
 
+	it('localMidnight is the first instant of the day where the clocks jump at midnight', () => {
+		// Each zone has no 00:00 on the given day: the day starts at 01:00.
+		for (const [date, zone] of [
+			['2027-03-28', 'Atlantic/Azores'],
+			['2026-04-24', 'Africa/Cairo'],
+			['2026-09-06', 'America/Santiago']
+		] as const) {
+			const m = localMidnight(date, zone);
+			expect(localDate(m, zone)).toBe(date);
+			expect(localDate(m - 1, zone)).not.toBe(date);
+		}
+		// Azores: 01:00 UTC is when the clocks go from 00:00 (UTC-1) to 01:00 (UTC+0).
+		expect(localMidnight('2027-03-28', 'Atlantic/Azores')).toBe(Date.UTC(2027, 2, 28, 1) / 1000);
+	});
+
+	it('a week across a midnight spring-forward has a 23-hour Sunday and no lost Saturday hour', () => {
+		const tz = 'Atlantic/Azores';
+		const days = weekDays(localMidnight('2027-03-22', tz), localMidnight('2027-03-29', tz), tz);
+		expect(days.map((d) => d.end - d.start)).toEqual([86400, 86400, 86400, 86400, 86400, 86400, 82800]);
+		expect(new Set(days.map((d) => dayLabel(d.start, tz))).size).toBe(7);
+	});
+
 	it('nextMonday is the Monday after today, never today', () => {
 		expect(nextMonday('2026-10-26')).toBe('2026-11-02');
 		expect(nextMonday('2026-10-25')).toBe('2026-10-26');

@@ -49,7 +49,8 @@ function gameBody(p: NoticePayload, opts: NoticeOptions): string {
 /** Words for a push payload; `opts` sets the zone and locale instants are printed in. */
 export function noticeText(p: NoticePayload, opts: NoticeOptions = {}): NoticeText {
 	const url = safeNoticeUrl(p.url);
-	const tag = `${String(p.kind)}:${url}`;
+	// The start keeps two notices from one board from replacing each other on the phone.
+	const tag = `${String(p.kind)}:${url}:${p.start ?? ''}`;
 	const made = (title: string, body: string): NoticeText => ({ title, body, url, tag });
 	switch (p.kind) {
 		case 'test':

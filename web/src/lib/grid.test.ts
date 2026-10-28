@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { localMidnight, weekDays } from './dates';
+import { localMidnight, timeText, weekDays } from './dates';
 import {
 	dayCells,
 	freeAt,
 	heatMap,
+	layoutGames,
 	mergedRanges,
 	orientation,
 	othersFreeCount,
@@ -98,6 +99,21 @@ describe('dayCells', () => {
 	});
 });
 
+describe('a week across a midnight spring-forward', () => {
+	it('puts Saturday 23:00 in Saturday s column and none of it in Sunday s', () => {
+		const tz = 'Atlantic/Azores';
+		const days = weekDays(localMidnight('2027-03-22', tz), localMidnight('2027-03-29', tz), tz);
+		expect(days).toHaveLength(7);
+		const sat = dayCells(days[5]!, tz);
+		const sun = dayCells(days[6]!, tz);
+		const at2300 = days[5]!.end - 3600;
+		expect(timeText(at2300, tz)).toBe('23:00');
+		expect(sat.some((c) => c.t === at2300)).toBe(true);
+		expect(sun.some((c) => c.t === at2300)).toBe(false);
+		expect(sun).toHaveLength(46);
+	});
+});
+
 describe('rangeFromCells', () => {
 	it('is order free and ends after the later cell', () => {
 		const a = T0 + 20 * H;
@@ -168,6 +184,58 @@ describe('free counts with games', () => {
 			expect(heat.get(t) ?? 0).toBe(listed);
 			expect(othersFreeCount(pieces, 'ana', t, games)).toBe(listed);
 		}
+	});
+});
+
+describe('heat in a zone with a quarter-hour offset', () => {
+	it('lines up with the board s grid, not the epoch s', () => {
+		// Kathmandu is UTC+5:45: local midnight is 18:15 UTC the day before.
+		const tz = 'Asia/Kathmandu';
+		const start = localMidnight('2026-11-02', tz);
+		expect(start % 1800).toBe(900);
+		const pieces = [piece('rui', start + 20 * H, start + 22 * H), piece('marta', start + 21 * H, start + 23 * H)];
+		const map = heatMap(pieces, 'ana');
+		for (let t = start + 19 * H; t < start + 24 * H; t += 1800) {
+			expect(map.get(t) ?? 0).toBe(othersFreeCount(pieces, 'ana', t));
+		}
+		expect(map.get(start + 21 * H)).toBe(2);
+	});
+});
+
+describe('layoutGames', () => {
+	const g = (id: string, start: number, end: number, who: string[] = []) => ({
+		id,
+		start,
+		end,
+		players: who.map((user_id) => ({ user_id, name: user_id }))
+	});
+	const lanes = (list: ReturnType<typeof layoutGames>) =>
+		Object.fromEntries(list.map((l) => [l.id, [l.lane, l.lanes]]));
+
+	it('leaves a lone game the whole column', () => {
+		expect(lanes(layoutGames([g('a', T0, T0 + H)], null))).toEqual({ a: [0, 1] });
+	});
+
+	it('splits the column between two simultaneous games, the viewer s own first', () => {
+		const out = layoutGames([g('a', T0, T0 + H, ['x']), g('b', T0, T0 + H, ['me'])], 'me');
+		expect(lanes(out)).toEqual({ b: [0, 2], a: [1, 2] });
+		expect(out.map((l) => l.id)).toEqual(['b', 'a']);
+	});
+
+	it('splits among three, then by start and by the order they came in', () => {
+		const out = layoutGames([g('c', T0, T0 + H), g('a', T0, T0 + H), g('b', T0 - 1800, T0 + H)], null);
+		expect(lanes(out)).toEqual({ b: [0, 3], c: [1, 3], a: [2, 3] });
+	});
+
+	it('gives a game that only partly overlaps its own lane and reuses a free lane after', () => {
+		const out = layoutGames([g('a', T0, T0 + 2 * H), g('b', T0 + H, T0 + 3 * H), g('c', T0 + 2 * H, T0 + 4 * H)], null);
+		// a and b overlap, b and c overlap: one cluster of 2 lanes; c reuses a's lane.
+		expect(lanes(out)).toEqual({ a: [0, 2], b: [1, 2], c: [0, 2] });
+	});
+
+	it('does not narrow games that do not overlap', () => {
+		const out = layoutGames([g('a', T0, T0 + H), g('b', T0 + H, T0 + 2 * H)], null);
+		expect(lanes(out)).toEqual({ a: [0, 1], b: [0, 1] });
 	});
 });
 

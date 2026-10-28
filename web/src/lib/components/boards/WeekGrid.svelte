@@ -8,6 +8,7 @@
 		SLOT_SECS,
 		dayCells,
 		freeAt,
+		layoutGames,
 		heatMap,
 		mergedRanges,
 		orientation,
@@ -116,7 +117,13 @@
 	}
 
 	const mineSegments = $derived(mine.flatMap((range) => segments(range).map((s, i) => ({ range, ...s, first: i === 0 }))));
-	const gameSegments = $derived(view.games.flatMap((game) => segments(game).map((s, i) => ({ game, ...s, first: i === 0 }))));
+	// Games at the same time sit side by side, the viewer's own first.
+	const gameSegments = $derived.by(() => {
+		const lanes = new Map(layoutGames(view.games, me).map((l) => [l.id, l]));
+		return view.games.flatMap((game) =>
+			segments(game).map((s, i) => ({ game, ...s, first: i === 0, lane: lanes.get(game.id)?.lane ?? 0, lanes: lanes.get(game.id)?.lanes ?? 1 }))
+		);
+	});
 
 	/** Where something sits in the CSS grid: a day, and a run of rows on the other axis. */
 	function place(di: number, r0: number, r1 = r0): string {
@@ -408,7 +415,7 @@
 
 			{#each gameSegments as seg (`${seg.game.id}:${seg.di}:${seg.r0}`)}
 				<!-- An outline that lets taps through to the range under it; the button opens the game. -->
-				<div class="game" style={place(seg.di, seg.r0, seg.r1)}>
+				<div class="game" class:shared={seg.lanes > 1} style="{place(seg.di, seg.r0, seg.r1)} --lane: {seg.lane}; --lanes: {seg.lanes};">
 					{#if seg.first}
 						<button
 							type="button"
@@ -680,6 +687,9 @@
 		position: relative;
 		z-index: 3;
 		pointer-events: none;
+		align-self: start;
+		height: calc(100% / var(--lanes, 1));
+		transform: translateY(calc(var(--lane, 0) * 100%));
 		min-height: 0;
 		margin: 1px;
 		padding: 0;
@@ -689,6 +699,19 @@
 		box-shadow: 0 0 0 1px var(--ink);
 	}
 
+	.grid.cols .game {
+		align-self: stretch;
+		justify-self: start;
+		height: auto;
+		width: calc(100% / var(--lanes, 1));
+		transform: translateX(calc(var(--lane, 0) * 100%));
+	}
+	.game.shared .gopen {
+		width: 16px;
+		min-height: 16px;
+		height: 16px;
+		font-size: 8px;
+	}
 	.gopen {
 		position: absolute;
 		left: 0;

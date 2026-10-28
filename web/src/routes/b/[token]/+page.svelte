@@ -157,6 +157,18 @@
 	}
 
 	let menuOpen = $state(false);
+	let confirmEl: HTMLElement | undefined = $state();
+	let menuButton: HTMLElement | undefined = $state();
+
+	// The confirmation takes focus when it opens and hands it back to the menu button on cancel.
+	$effect(() => {
+		if (confirming && confirmEl) confirmEl.focus();
+	});
+
+	function closeConfirm() {
+		confirming = null;
+		queueMicrotask(() => menuButton?.focus());
+	}
 
 	function ask(what: 'leave' | 'delete') {
 		menuOpen = false;
@@ -218,7 +230,7 @@
 				<button type="button" class="secondary" onclick={share}>{t.share}</button>
 				{#if (member || creator) && !over}
 					<details class="menu" bind:open={menuOpen}>
-						<summary class="secondary" aria-label={t.menu}>
+						<summary class="secondary" aria-label={t.menu} bind:this={menuButton}>
 							<span aria-hidden="true">⋯</span>
 						</summary>
 						<div class="items">
@@ -239,13 +251,13 @@
 		<div aria-live="polite">{#if shareNote}<p class="ok">{shareNote}</p>{/if}</div>
 
 		{#if confirming}
-			<div class="confirm" role="alertdialog" aria-label={confirming === 'delete' ? t.delete : t.leave}>
+			<div class="confirm" role="alertdialog" tabindex="-1" bind:this={confirmEl} aria-label={confirming === 'delete' ? t.delete : t.leave}>
 				<p>{confirming === 'delete' ? t.deleteConfirm : t.leaveConfirm}</p>
 				<div class="actions">
 					<button type="button" class="danger" onclick={confirming === 'delete' ? destroy : leave}>
 						{confirming === 'delete' ? t.delete : t.leave}
 					</button>
-					<button type="button" class="secondary" onclick={() => (confirming = null)}>{t.cancel}</button>
+					<button type="button" class="secondary" onclick={closeConfirm}>{t.cancel}</button>
 				</div>
 			</div>
 		{/if}

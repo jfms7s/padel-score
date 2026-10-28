@@ -75,7 +75,8 @@ export function heatMap(pieces: PieceOut[], me: string | null, games: Busy[] = [
 	const people = new Map<number, Set<string>>();
 	for (const p of pieces) {
 		if (p.user_id === me) continue;
-		for (let t = Math.ceil(p.start / SLOT_SECS) * SLOT_SECS; t < p.end; t += SLOT_SECS) {
+		// Pieces sit on the board's grid, which is not epoch-aligned in a :15 or :45 zone.
+		for (let t = p.start; t < p.end; t += SLOT_SECS) {
 			if (inGame(games, p.user_id, t)) continue;
 			const set = people.get(t) ?? new Set<string>();
 			set.add(p.user_id);
@@ -132,4 +133,62 @@ export function mergedRanges(pieces: PieceOut[], userId: string): Range[] {
 /** Days across and hours down on a phone; days down and hours across from tablet width. */
 export function orientation(width: number): 'rows' | 'columns' {
 	return width < NARROW_PX ? 'columns' : 'rows';
+}
+
+export interface GameLane {
+	id: string;
+	/** 0-based lane across the column (or down the row) the game is drawn in. */
+	lane: number;
+	/** How many lanes the games it overlaps (directly or through others) share. */
+	lanes: number;
+}
+
+/**
+ * Where to draw games that overlap in time so that each keeps its own outline and button: side
+ * by side, the column split among them. The viewer's own games come first, then earlier starts,
+ * then the order given (formed order). A game takes the first lane free of the games it
+ * overlaps; the games linked by overlap share one lane count.
+ */
+export function layoutGames(
+	games: { id: string; start: number; end: number; players: { user_id: string }[] }[],
+	me: string | null
+): GameLane[] {
+	const ordered = games
+		.map((g, i) => ({ g, i, mine: me !== null && g.players.some((p) => p.user_id === me) }))
+		.sort((a, b) => Number(b.mine) - Number(a.mine) || a.g.start - b.g.start || a.i - b.i);
+	const lane = new Map<string, number>();
+	for (const { g } of ordered) {
+		const taken = new Set(
+			ordered
+				.filter(({ g: o }) => o.id !== g.id && lane.has(o.id) && o.start < g.end && g.start < o.end)
+				.map(({ g: o }) => lane.get(o.id))
+		);
+		let n = 0;
+		while (taken.has(n)) n++;
+		lane.set(g.id, n);
+	}
+	// Group by overlap (a connected cluster) so a cluster's games share one width.
+	const cluster = new Map<string, number>();
+	let next = 0;
+	for (const { g } of ordered) {
+		if (cluster.has(g.id)) continue;
+		const id = next++;
+		const stack = [g];
+		while (stack.length > 0) {
+			const cur = stack.pop();
+			if (!cur || cluster.has(cur.id)) continue;
+			cluster.set(cur.id, id);
+			for (const { g: o } of ordered) if (!cluster.has(o.id) && o.start < cur.end && cur.start < o.end) stack.push(o);
+		}
+	}
+	const lanesOf = new Map<number, number>();
+	for (const { g } of ordered) {
+		const c = cluster.get(g.id) ?? 0;
+		lanesOf.set(c, Math.max(lanesOf.get(c) ?? 0, (lane.get(g.id) ?? 0) + 1));
+	}
+	return ordered.map(({ g }) => ({
+		id: g.id,
+		lane: lane.get(g.id) ?? 0,
+		lanes: lanesOf.get(cluster.get(g.id) ?? 0) ?? 1
+	}));
 }

@@ -7,7 +7,7 @@ describe('noticeText', () => {
 		expect(n.title).toBe('Notifications are on');
 		expect(n.body).toBe("You'll get game and event updates on this device.");
 		expect(n.url).toBe('/account');
-		expect(n.tag).toBe('test:/account');
+		expect(n.tag).toBe('test:/account:');
 	});
 
 	it('falls back for a kind this build does not know', () => {
@@ -15,12 +15,12 @@ describe('noticeText', () => {
 		expect(n.title).toBe('Padel score');
 		expect(n.body).toBe('Something changed — tap to see');
 		expect(n.url).toBe('/b/abc');
-		expect(n.tag).toBe('from_the_future:/b/abc');
+		expect(n.tag).toBe('from_the_future:/b/abc:');
 	});
 
 	it('opens the calendar when the payload has no usable url', () => {
 		expect(noticeText({ kind: 'test' }).url).toBe('/calendar');
-		expect(noticeText({ kind: 'test', url: 'https://evil.test/x' }).tag).toBe('test:/calendar');
+		expect(noticeText({ kind: 'test', url: 'https://evil.test/x' }).tag).toBe('test:/calendar:');
 	});
 });
 
@@ -38,7 +38,13 @@ describe('noticeText for the board kinds', () => {
 		expect(n.title).toBe('Game formed');
 		expect(n.body).toBe('Wed 4 · 20:00–21:30 · Thursday padel');
 		expect(n.url).toBe('/b/tok');
-		expect(n.tag).toBe('game_formed:/b/tok');
+		expect(n.tag).toBe(`game_formed:/b/tok:${game.start}`);
+	});
+
+	it('gives two games on one board different tags so one does not replace the other', () => {
+		const a = noticeText({ kind: 'game_formed', ...game }, utc);
+		const b = noticeText({ kind: 'game_formed', ...game, start: game.start + 86400 }, utc);
+		expect(a.tag).not.toBe(b.tag);
 	});
 
 	it('says you moved into a game', () => {
