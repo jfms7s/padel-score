@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gameActions, requestCards, swapTargets, timeOptions, type GameAction } from './gamesheet';
+import { gameActions, requestCards, requestsOnGame, swapTargets, timeOptions, type GameAction } from './gamesheet';
 import type { BoardView, GameOut, PieceOut, RequestOut } from './types';
 
 const H = 3600;
@@ -242,5 +242,41 @@ describe('requestCards', () => {
 			requests: [asked({ needs_my_answer: false }), asked({ id: 'r2', game_id: 'zz' })]
 		});
 		expect(requestCards(v)).toEqual([]);
+	});
+});
+
+describe('requestsOnGame', () => {
+	const req = (over: Partial<RequestOut>): RequestOut => ({
+		id: 'r1',
+		kind: 'time',
+		from: person('ana'),
+		game_id: 'g1',
+		other_game_id: null,
+		new_start: G + H,
+		new_end: G + 2 * H,
+		needs_my_answer: false,
+		...over
+	});
+
+	it('shows what I asked', () => {
+		const v = view([mine()], [], {
+			requests: [req({}), req({ id: 'r2', kind: 'swap', game_id: 'g9', other_game_id: 'g1' })]
+		});
+		expect(requestsOnGame(v, 'g1', 'ana')).toEqual([
+			{ id: 'r1', state: 'time' },
+			{ id: 'r2', state: 'swap' }
+		]);
+	});
+
+	it('shows a proposal I accepted as accepted, not as mine', () => {
+		const v = view([mine()], [], { requests: [req({ from: person('rui') })] });
+		expect(requestsOnGame(v, 'g1', 'ana')).toEqual([{ id: 'r1', state: 'accepted' }]);
+	});
+
+	it('leaves out what waits for my answer and other games', () => {
+		const v = view([mine()], [], {
+			requests: [req({ from: person('rui'), needs_my_answer: true }), req({ id: 'r3', game_id: 'g9' })]
+		});
+		expect(requestsOnGame(v, 'g1', 'ana')).toEqual([]);
 	});
 });

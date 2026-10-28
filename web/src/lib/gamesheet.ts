@@ -171,3 +171,25 @@ export function requestCards(view: BoardView): RequestCardData[] {
 	}
 	return out;
 }
+
+/**
+ * My pending requests on a game, for the sheet: ones I asked, and time proposals I already
+ * accepted (the server keeps those until the others answer). A swap I was asked and have not
+ * answered is a card, not a note.
+ */
+export function requestsOnGame(
+	view: BoardView,
+	gameId: string,
+	me: string
+): { id: string; state: 'swap' | 'time' | 'accepted' }[] {
+	const out: { id: string; state: 'swap' | 'time' | 'accepted' }[] = [];
+	for (const r of view.requests) {
+		if (r.needs_my_answer) continue;
+		if (r.from.user_id === me) {
+			if (r.game_id === gameId || r.other_game_id === gameId) out.push({ id: r.id, state: r.kind });
+		} else if (r.kind === 'time' && r.game_id === gameId) {
+			out.push({ id: r.id, state: 'accepted' });
+		}
+	}
+	return out;
+}

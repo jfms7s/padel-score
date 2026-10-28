@@ -1073,15 +1073,12 @@ export const strings = {
 		lineEmpty: 'Nobody in line',
 		you: 'you',
 		playersLabel: 'Players',
-		close: 'Close',
 		leave: 'Leave',
 		give: 'Give my place',
 		swap: 'Swap',
 		time: 'Change time',
 		take: 'Take the open place',
 		start: 'Start match',
-		working: 'Working…',
-		justChanged: 'This game just changed',
 		leaveNote: 'Your free time for this game is removed.',
 		reasons: {
 			give: 'Nobody can take your place right now. Use Leave instead.',
@@ -1105,7 +1102,8 @@ export const strings = {
 		cancel: 'Cancel',
 		asked: {
 			swap: 'You asked to swap. Waiting for an answer.',
-			time: 'You proposed a new time. Waiting for the others.'
+			time: 'You proposed a new time. Waiting for the others.',
+			accepted: 'You accepted the new time. Waiting for the others.'
 		},
 		// The request card.
 		requestSwap: (from: string) => `${from} asks to swap`,

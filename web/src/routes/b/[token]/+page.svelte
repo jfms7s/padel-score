@@ -130,6 +130,7 @@
 				if (next) {
 					latest += 1;
 					view = next;
+					now = Math.floor(Date.now() / 1000);
 				}
 			})
 			.catch((e) => {
@@ -303,7 +304,7 @@
 		{/if}
 
 		{#if over}<p class="hint">{t.over}</p>{/if}
-		{#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
+		{#if actionError && !openGame}<p class="error" role="alert">{actionError}</p>{/if}
 
 		{#if !signedIn && !over}
 			<div class="join">
@@ -342,6 +343,7 @@
 					</ul>
 				{/if}
 				{#if openGame}
+					{#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
 					<div class="sheetbox" tabindex="-1" bind:this={sheetEl}>
 						<GameSheet
 							{view}

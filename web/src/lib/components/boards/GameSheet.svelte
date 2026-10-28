@@ -6,7 +6,7 @@
 	import { goto } from '$app/navigation';
 	import { askSwap, askTime, giveGame, leaveGame, startGame, takeGame } from '#lib/boards.ts';
 	import { dayLabel, timeRange, timeText } from '#lib/dates.ts';
-	import { gameActions, swapTargets, timeOptions, type GameAction } from '#lib/gamesheet.ts';
+	import { gameActions, requestsOnGame, swapTargets, timeOptions, type GameAction } from '#lib/gamesheet.ts';
 	import { fromParam, putStartHandoff } from '#lib/handoff.ts';
 	import { matchViewPath } from '#lib/events.ts';
 	import { strings } from '#lib/strings.ts';
@@ -118,9 +118,7 @@
 	};
 	const ORDER: GameAction[] = ['start', 'take', 'give', 'swap', 'time', 'leave'];
 	const shownActions = $derived(ORDER.filter((a) => actions[a].shown));
-	const asked = $derived(
-		view.requests.filter((r) => !r.needs_my_answer && (r.game_id === gameId || r.other_game_id === gameId))
-	);
+	const asked = $derived(me ? requestsOnGame(view, gameId, me) : []);
 </script>
 
 {#if game}
@@ -148,7 +146,7 @@
 		{/if}
 
 		{#each asked as r (r.id)}
-			<p class="hint" role="status">{t.asked[r.kind]}</p>
+			<p class="hint" role="status">{t.asked[r.state]}</p>
 		{/each}
 
 		{#if game.match_spectator_token}

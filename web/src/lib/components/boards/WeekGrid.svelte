@@ -674,9 +674,10 @@
 		position: absolute;
 		inset: -10px;
 	}
-	/* The phone's ✕ is 22 px, so its hit area reaches 13 px past it: 48 px in all. */
+	/* The phone's ✕ is 22 px in a column about 46 px wide: its hit area grows down and to the
+	   left, inside its own column, so it never takes taps from the next column or the cell above. */
 	.grid.cols .x::before {
-		inset: -13px;
+		inset: 0 0 -26px -18px;
 	}
 	.grid.cols .x {
 		top: 0;
