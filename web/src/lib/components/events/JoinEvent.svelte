@@ -19,6 +19,8 @@
 		note,
 		invite,
 		inviteGone,
+		inviteFailed,
+		onretry,
 		onjoin,
 		onleave,
 		onsignin,
@@ -38,6 +40,9 @@
 		invite: PartnerInvite | null;
 		/** The partner link in the address does not work (any more). */
 		inviteGone: boolean;
+		/** The invitation could not be read (not a missing link): nothing is shown to join alone. */
+		inviteFailed: boolean;
+		onretry: () => void;
 		onjoin: (as: JoinAs) => void;
 		onleave: () => void;
 		onsignin: () => void;
@@ -85,6 +90,9 @@
 
 {#if inviteGone}
 	<p class="error" role="alert">{t.inviteGone}</p>
+{:else if inviteFailed}
+	<p class="error" role="alert">{t.inviteFailed}</p>
+	<button class="secondary" type="button" onclick={onretry}>{t.retry}</button>
 {:else if invite}
 	<section class="card" aria-labelledby="h-invite">
 		<h2 id="h-invite">{t.inviteTitle(invite.inviter_name, invite.event_name)}</h2>
@@ -125,7 +133,7 @@
 			<button class="danger" type="button" disabled={working} onclick={() => (confirmLeave = true)}>{t.leave}</button>
 		{/if}
 	</section>
-{:else if open && !inviteGone && !invite}
+{:else if open && !inviteGone && !inviteFailed && !invite}
 	<section class="card" aria-label={t.signupsLabel}>
 		{#if !signedIn}
 			<button class="primary" type="button" onclick={onsignin}>{t.signInToJoin}</button>

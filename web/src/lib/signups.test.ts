@@ -5,6 +5,7 @@ import {
 	declinePartner,
 	deadlineDefault,
 	defaultDeadlineInputs,
+	draftErrorText,
 	draftFromSchedule,
 	getJoin,
 	getPartnerInvite,
@@ -278,6 +279,53 @@ describe('the schedule draft', () => {
 		expect(scheduleInput({ ...d, date: '2026-11-10', time: '18:30', signups: 'public' }, null, 'UTC')).toEqual({
 			error: 'max_teams'
 		});
+	});
+
+	it('keeps a saved start that the fields cannot say exactly when only the place changes', () => {
+		// 18:30:20: the time field only holds minutes.
+		const current = {
+			...empty,
+			starts_at: START + 20,
+			signups: 'private',
+			max_teams: 8,
+			deadline_at: START - 86_400
+		} as const;
+		const d = { ...draftFromSchedule(current, 'UTC'), place: 'Club' };
+		expect(scheduleInput(d, current, 'UTC')).toEqual({
+			ok: { starts_at: START + 20, place: 'Club', signups: 'private', min_teams: 4, max_teams: 8 }
+		});
+		// Moving the time does re-read it.
+		expect(scheduleInput({ ...d, time: '19:00' }, current, 'UTC')).toMatchObject({
+			ok: { starts_at: START + 1800, deadline_at: null }
+		});
+	});
+
+	it('keeps the second occurrence of a repeated hour when the start is not edited', () => {
+		// Lisbon 2026-10-25 01:30 happens twice; this is the second (WET, 01:30Z).
+		const second = Date.UTC(2026, 9, 25, 1, 30) / 1000;
+		const current = {
+			...empty,
+			starts_at: second,
+			signups: 'private',
+			max_teams: 8,
+			deadline_at: second - 3600
+		} as const;
+		const d = { ...draftFromSchedule(current, 'Europe/Lisbon'), place: 'x' };
+		expect(scheduleInput(d, current, 'Europe/Lisbon')).toMatchObject({ ok: { starts_at: second } });
+	});
+
+	it('refuses a deadline that was touched and then emptied', () => {
+		const d = {
+			...draftFromSchedule(null, 'UTC'),
+			date: '2026-11-10',
+			time: '18:30',
+			signups: 'private' as const,
+			max: 8
+		};
+		const result = scheduleInput({ ...d, deadlineTouched: true, deadlineDate: '', deadlineTime: '10:00' }, null, 'UTC');
+		expect(result).toEqual({ error: 'deadline_at' });
+		expect(draftErrorText('deadline_at')).toBe(strings.signups.fields.deadline_at);
+		expect(draftErrorText('needsDate')).toBe(strings.signups.needsDate);
 	});
 
 	it('suggests the default deadline for a start', () => {

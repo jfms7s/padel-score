@@ -1265,6 +1265,8 @@ export const strings = {
 		accept: 'Accept',
 		decline: 'Decline',
 		signInToAnswer: 'Sign in to answer',
+		inviteFailed: 'Couldn’t load the invitation. Check the connection and try again.',
+		retry: 'Try again',
 		inviteGone: 'This partner link does not work any more. Ask for a new one.',
 		declined: 'You declined. Your partner can send you a new link.',
 		share: 'Share',

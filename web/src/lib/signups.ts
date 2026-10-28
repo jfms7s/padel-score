@@ -191,7 +191,12 @@ export function defaultDeadlineInputs(
 	return toLocalInputs(deadlineDefault(fromLocalInputs(d.date, d.time, timeZone), now), timeZone);
 }
 
-export type DraftError = 'bothDateAndTime' | 'needsDate' | 'max_teams';
+export type DraftError = 'bothDateAndTime' | 'needsDate' | 'max_teams' | 'deadline_at';
+
+/** The words for a draft that can't be sent yet. */
+export function draftErrorText(e: DraftError): string {
+	return e === 'max_teams' || e === 'deadline_at' ? strings.signups.fields[e] : strings.signups[e];
+}
 
 /**
  * What the draft asks the server to change, or why it can't be asked yet. `current` is the
@@ -204,7 +209,14 @@ export function scheduleInput(
 	timeZone: string | undefined
 ): { ok: ScheduleInput | undefined } | { error: DraftError } {
 	if ((d.date === '') !== (d.time === '')) return { error: 'bothDateAndTime' };
-	const startsAt = d.date === '' ? null : fromLocalInputs(d.date, d.time, timeZone);
+	// A start the organiser did not touch is kept as it is: re-reading the fields would round it
+	// to the minute, or pick the wrong hour of a clock change.
+	const savedStart = current?.starts_at ?? null;
+	const startKept =
+		savedStart !== null &&
+		d.date === toLocalInputs(savedStart, timeZone).date &&
+		d.time === toLocalInputs(savedStart, timeZone).time;
+	const startsAt = d.date === '' ? null : startKept ? savedStart : fromLocalInputs(d.date, d.time, timeZone);
 	const place = d.place.trim() === '' ? null : d.place.trim();
 	if (current === null && startsAt === null && place === null && d.signups === 'off') return { ok: undefined };
 	if (d.signups !== 'off') {
@@ -219,8 +231,10 @@ export function scheduleInput(
 		max_teams: d.max
 	};
 	if (d.signups !== 'off' && startsAt !== null) {
-		if (d.deadlineTouched) input.deadline_at = fromLocalInputs(d.deadlineDate, d.deadlineTime, timeZone);
-		else if (current === null || current.starts_at !== startsAt) input.deadline_at = null;
+		if (d.deadlineTouched) {
+			if (d.deadlineDate === '' || d.deadlineTime === '') return { error: 'deadline_at' };
+			input.deadline_at = fromLocalInputs(d.deadlineDate, d.deadlineTime, timeZone);
+		} else if (current === null || current.starts_at !== startsAt) input.deadline_at = null;
 	}
 	return { ok: input };
 }

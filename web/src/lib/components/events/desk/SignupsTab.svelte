@@ -8,6 +8,7 @@
 	import ScheduleFields from '#lib/components/events/ScheduleFields.svelte';
 	import { browserTimeZone } from '#lib/dates.ts';
 	import {
+		draftErrorText,
 		draftFromSchedule,
 		joinLink,
 		scheduleInput,
@@ -62,7 +63,13 @@
 	const setup = $derived(ev.status === 'setup');
 	const cancelled = $derived(ev.status === 'cancelled');
 	const link = $derived(detail.join_token === null ? null : joinLink(origin, detail.join_token));
-	const closed = $derived(setup && schedule.signups !== 'off' && (schedule.deadline_at ?? Infinity) <= Math.floor(Date.now() / 1000));
+	// Seconds since the epoch, ticking so the closed note appears when the deadline passes.
+	let now = $state(Math.floor(Date.now() / 1000));
+	$effect(() => {
+		const timer = setInterval(() => (now = Math.floor(Date.now() / 1000)), 15_000);
+		return () => clearInterval(timer);
+	});
+	const closed = $derived(setup && schedule.signups !== 'off' && (schedule.deadline_at ?? Infinity) <= now);
 
 	// ---- the schedule form ---------------------------------------------------------------
 
@@ -85,7 +92,7 @@
 		savedNote = false;
 		const result = scheduleInput(draft, schedule, browserTimeZone());
 		if ('error' in result) {
-			formError = result.error === 'max_teams' ? strings.signups.fields.max_teams : t[result.error];
+			formError = draftErrorText(result.error);
 			return;
 		}
 		formError = null;
@@ -142,7 +149,7 @@
 
 	<div class="layout">
 		<div class="main">
-			{#if link && !cancelled}
+			{#if link && !cancelled && schedule.signups !== 'off'}
 				<div class="link">
 					<h3>{t.linkTitle}</h3>
 					<p class="hint">{t.linkHint}</p>

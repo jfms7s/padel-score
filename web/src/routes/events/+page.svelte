@@ -7,7 +7,7 @@
 	import { browserTimeZone } from '#lib/dates.ts';
 	import { requireSignedIn, session } from '#lib/session.ts';
 	import { DECIDING_SETS, DEUCE_RULES, MAX_NAME_LENGTH, SETS_FORMATS } from '#lib/setup.ts';
-	import { draftFromSchedule, scheduleInput, scheduleText, signupMessage } from '#lib/signups.ts';
+	import { draftErrorText, draftFromSchedule, scheduleInput, scheduleText, signupMessage } from '#lib/signups.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { DecidingSet, DeuceRule, EventKind, EventSummary, Format, SetsFormat } from '#lib/types.ts';
 
@@ -68,7 +68,7 @@
 		failure = null;
 		const asked = scheduleInput(schedule, null, browserTimeZone());
 		if ('error' in asked) {
-			failure = asked.error === 'max_teams' ? strings.signups.fields.max_teams : strings.signups[asked.error];
+			failure = draftErrorText(asked.error);
 			return;
 		}
 		busy = true;

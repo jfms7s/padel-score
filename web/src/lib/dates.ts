@@ -149,6 +149,10 @@ export function fromLocalInputs(date: string, time: string, timeZone?: string): 
 	const zoneName = timeZone ?? browserTimeZone();
 	const [h, m] = time.split(':').map(Number);
 	const wall = utcDay(date) + (h ?? 0) * 3600 + (m ?? 0) * 60;
-	const first = wall - offsetAt(wall, zoneName);
-	return wall - offsetAt(first, zoneName);
+	// The offsets either side of the wall time; an instant is right when its own offset is the one used.
+	const before = offsetAt(wall - DAY_SECS, zoneName);
+	const after = offsetAt(wall + DAY_SECS, zoneName);
+	const fits = [before, after].map((o) => wall - o).filter((at) => wall - offsetAt(at, zoneName) === at);
+	// Twice (the clocks went back): the first. Never (skipped): the old offset, which lands after the jump.
+	return fits.length > 0 ? Math.min(...fits) : wall - before;
 }

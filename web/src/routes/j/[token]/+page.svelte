@@ -36,6 +36,7 @@
 	let working = $state(false);
 	let invite = $state<PartnerInvite | null>(null);
 	let inviteGone = $state(false);
+	let inviteFailed = $state(false);
 
 	const signedIn = $derived($session.status === 'signed_in');
 
@@ -58,12 +59,15 @@
 	async function loadInvite(forPartner: string | null) {
 		invite = null;
 		inviteGone = false;
+		inviteFailed = false;
 		if (forPartner === null) return;
 		try {
 			const found = await getPartnerInvite(forPartner);
 			if (forPartner === partnerToken) invite = found;
 		} catch (e) {
-			if (forPartner === partnerToken) inviteGone = e instanceof ApiError && e.code === 'not_found';
+			if (forPartner !== partnerToken) return;
+			if (e instanceof ApiError && e.code === 'not_found') inviteGone = true;
+			else inviteFailed = true;
 		}
 	}
 
@@ -152,6 +156,8 @@
 			{note}
 			{invite}
 			{inviteGone}
+			{inviteFailed}
+			onretry={() => void loadInvite(partnerToken)}
 			onjoin={join}
 			onleave={leave}
 			onsignin={redirectToSignIn}

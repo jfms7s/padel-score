@@ -164,6 +164,11 @@ describe('local date and time inputs', () => {
 		] as const) {
 			expect(toLocalInputs(fromLocalInputs(date, time, 'Europe/Lisbon'), 'Europe/Lisbon')).toEqual({ date, time });
 		}
+		// New York skips 02:00-03:00 on 2027-03-14: 02:30 becomes 03:30.
+		expect(toLocalInputs(fromLocalInputs('2027-03-14', '02:30', 'America/New_York'), 'America/New_York')).toEqual({
+			date: '2027-03-14',
+			time: '03:30'
+		});
 		// 01:30 on 2026-03-29 never happened in Lisbon.
 		const gap = fromLocalInputs('2026-03-29', '01:30', 'Europe/Lisbon');
 		expect(toLocalInputs(gap, 'Europe/Lisbon')).toEqual({ date: '2026-03-29', time: '02:30' });
