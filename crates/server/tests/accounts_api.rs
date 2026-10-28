@@ -708,8 +708,8 @@ async fn auth_responses_have_no_referrer_policy() {
 }
 
 #[tokio::test]
-async fn anonymous_quick_match_still_works_after_setup() {
-    let (_state, app, _) = with_admin().await;
+async fn scoring_by_token_needs_no_sign_in() {
+    let (state, app, raw) = with_admin().await;
     let body = json!({
         "format": Format::Sets(SetRules {
             deuce: DeuceRule::Advantage,
@@ -722,8 +722,11 @@ async fn anonymous_quick_match_still_works_after_setup() {
         },
         "teams": { "a": ["Ana", "Bea"], "b": ["Cris", "Dani"] },
     });
+    // Starting the match needs the account; scoring it by its token needs nothing.
     let create = Request::post("/api/matches")
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, cookie(&state, &raw))
+        .header("sec-fetch-site", "same-origin")
         .body(Body::from(body.to_string()))
         .unwrap();
     let res = send(&app, create).await;

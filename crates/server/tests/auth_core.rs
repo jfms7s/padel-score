@@ -528,7 +528,7 @@ async fn bearer_post_skips_csrf() {
 }
 
 #[tokio::test]
-async fn anonymous_quick_match_still_works() {
+async fn signed_out_create_match_is_401() {
     let state = state_with(&[]).await;
     let app = router(state);
     let body = json!({
@@ -549,28 +549,9 @@ async fn anonymous_quick_match_still_works() {
         .header("sec-fetch-site", "cross-site")
         .body(Body::from(body.to_string()))
         .unwrap();
-    let (status, _, created) = send(&app, create).await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
-    let scorer = created["scorer_token"].as_str().unwrap();
-    let point = json!({
-        "client_id": "c1", "batch": false, "base_revision": 0,
-        "commands": [{ "kind": "point", "team": "a" }],
-    });
-    let cmd = Request::post(format!("/api/score/{scorer}/commands"))
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(point.to_string()))
-        .unwrap();
-    let (status, _, applied) = send(&app, cmd).await;
-    assert_eq!(status, StatusCode::OK, "{applied}");
-    let (status, _, view) = send(
-        &app,
-        Request::get(format!("/api/score/{scorer}"))
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(view["revision"], json!(1), "{view}");
+    let (status, _, res) = send(&app, create).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{res}");
+    assert_eq!(res["error"], "unauthorized");
 }
 
 #[tokio::test]

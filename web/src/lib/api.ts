@@ -287,10 +287,7 @@ export function finalOutcome(status: number, body: unknown): FinalOutcome | null
 }
 
 export function createMatch(req: CreateMatchRequest): Promise<CreatedMatch> {
-	// From a game the caller must be signed in (the server answers 401 otherwise), so that is
-	// a signed-in call: an ended session goes to sign-in.
-	if (req.from) return accountRequest('/api/matches', { method: 'POST', body: req, ok: 201, signedIn: true });
-	return request('/api/matches', 201, post(req));
+	return accountRequest('/api/matches', { method: 'POST', body: req, ok: 201, signedIn: true });
 }
 
 /** The scorer's view; the token must be a scoring token. */

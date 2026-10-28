@@ -18,8 +18,9 @@ use axum::http::{Method, Request, StatusCode, header};
 use http_body_util::BodyExt;
 use padel_score_server::AppState;
 use padel_score_server::accounts_store::OWNED_MATCH_CANDIDATES;
-use padel_score_server::api::now;
+use padel_score_server::api::{CreateMatchRequest, now};
 use padel_score_server::commands::{Authority, FinalRequest, record_final};
+use padel_score_server::store::NewMatch;
 use padel_scoring::{DecidingSet, DeuceRule, Format, Player, SetRules, SetsFormat, Start, Team};
 use serde_json::{Value, json};
 use support::*;
@@ -71,13 +72,22 @@ async fn create_as(state: &AppState, app: &Router, raw: &str, body: Value) -> Cr
     created(&res)
 }
 
-async fn create_anon(app: &Router) -> Created {
-    let res = send(
-        app,
-        req(Method::POST, "/api/matches", Some(default_body()), &[]),
-    )
-    .await;
-    created(&res)
+/// An ownerless match, as made before starting one needed an account: straight into the store.
+async fn create_anon(state: &AppState) -> Created {
+    let req: CreateMatchRequest = serde_json::from_value(default_body()).unwrap();
+    let new = NewMatch {
+        format: req.format,
+        start: req.start,
+        teams: req.teams,
+        owner_user_id: None,
+        players: req.players,
+    };
+    let m = state.store.create_match(new, now()).await.unwrap();
+    Created {
+        id: m.id,
+        scorer: m.scorer_token,
+        spectator: m.spectator_token,
+    }
 }
 
 fn point(client_id: &str, team: &str, n: usize) -> Value {
@@ -134,29 +144,12 @@ async fn signed_in_create_sets_owner() {
 }
 
 #[tokio::test]
-async fn anonymous_create_unchanged() {
-    let (state, _, app, _, _) = with_admin().await;
-    let res = send(
-        &app,
-        req(Method::POST, "/api/matches", Some(default_body()), &[]),
-    )
-    .await;
-    let m = created(&res);
-    let keys: Vec<&String> = res.body.as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["id", "scorer_token", "spectator_token"]);
-    assert_eq!(
-        res.header(header::LOCATION),
-        Some(&*format!("/s/{}", m.scorer))
-    );
-    let stored = state.store.by_scorer_token(&m.scorer).await.unwrap();
-    assert_eq!(stored.unwrap().owner_user_id, None);
-}
-
-#[tokio::test]
-async fn bad_cookie_create_is_anonymous_not_401() {
-    let (state, _, app, _, _) = with_admin().await;
+async fn signed_out_create_is_401() {
+    let (state, pool, app, _, admin) = with_admin().await;
     let bad_cookie = cookie(&state, "not-a-session");
+    let good_cookie = cookie(&state, &admin);
     let requests = [
+        req(Method::POST, "/api/matches", Some(default_body()), &[]),
         req(
             Method::POST,
             "/api/matches",
@@ -172,13 +165,40 @@ async fn bad_cookie_create_is_anonymous_not_401() {
     ];
     for request in requests {
         let res = send(&app, request).await;
-        let m = created(&res);
-        let stored = state.store.by_scorer_token(&m.scorer).await.unwrap();
-        assert_eq!(stored.unwrap().owner_user_id, None);
+        assert_eq!(res.status, StatusCode::UNAUTHORIZED, "{}", res.body);
     }
+    // A cross-site POST carrying the cookie never acts as the user.
+    let cross_site = Request::post("/api/matches")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, &good_cookie)
+        .header("sec-fetch-site", "cross-site")
+        .body(Body::from(default_body().to_string()))
+        .unwrap();
+    assert_eq!(send(&app, cross_site).await.status, StatusCode::FORBIDDEN);
+    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM matches")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
 }
 
-// The list.
+#[tokio::test]
+async fn device_create_sets_owner() {
+    let (state, _, app, admin_id, _) = with_admin().await;
+    let token = device_token(&state.store, &admin_id).await;
+    let res = send(
+        &app,
+        as_device(&token, Method::POST, "/api/matches", Some(default_body())),
+    )
+    .await;
+    let m = created(&res);
+    assert_eq!(
+        res.header(header::LOCATION),
+        Some(&*format!("/s/{}", m.scorer))
+    );
+    let stored = state.store.by_scorer_token(&m.scorer).await.unwrap();
+    assert_eq!(stored.unwrap().owner_user_id.as_deref(), Some(&*admin_id));
+}
 
 #[tokio::test]
 async fn me_matches_lists_only_own_live_newest_first() {
@@ -193,7 +213,7 @@ async fn me_matches_lists_only_own_live_newest_first() {
     )
     .await;
     let beas = create_as(&state, &app, &bea, default_body()).await;
-    let anon = create_anon(&app).await;
+    let anon = create_anon(&state).await;
     // The older match was scored most recently, so it comes first.
     let t = now();
     for (id, at) in [(&older.id, t + 20), (&newer.id, t + 10)] {
@@ -455,7 +475,7 @@ async fn other_user_cannot_see_stream_or_score() {
     let (state, _, app, _, admin) = with_admin().await;
     let (_, bea, bea_token) = user_and_device(&state, &app, &admin).await;
     let m = create_as(&state, &app, &admin, default_body()).await;
-    let anon = create_anon(&app).await;
+    let anon = create_anon(&state).await;
 
     let res = list_by_session(&state, &app, &bea).await;
     assert_eq!(res.body, json!([]));
@@ -688,8 +708,8 @@ async fn stalled_reread_does_not_hold_pool_connection() {
 /// The same for the phase 2 per-match stream's re-read after it lags.
 #[tokio::test]
 async fn stalled_lag_reread_does_not_hold_pool_connection() {
-    let (_, pool, app, _, _) = with_admin().await;
-    let m = create_anon(&app).await;
+    let (state, pool, app, _, _) = with_admin().await;
+    let m = create_anon(&state).await;
     let path = format!("/api/view/{}/stream", m.spectator);
     let mut stream = Sse::open(&app, req(Method::GET, &path, None, &[])).await;
     assert_eq!(stream.next("state").await["revision"], json!(0));
