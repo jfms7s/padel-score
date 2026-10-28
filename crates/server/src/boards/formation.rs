@@ -385,8 +385,8 @@ pub fn can_swap(
 }
 
 /// Whether the game can move to `[start, end)`. `"range"` unless it is an hour or an hour and a
-/// half on the board's half-hour grid inside its week; `"too_soon"` when it starts less than
-/// [`LEAD_SECS`] from `now`; `"players_busy"` when one of its players is in another game then.
+/// half on the board's half-hour grid inside its week, and not the time it already has;
+/// `"too_soon"` when it starts less than [`LEAD_SECS`] from `now`; `"players_busy"` when one of its players is in another game then.
 pub fn check_new_time(
     state: &BoardState,
     game_id: &str,
@@ -402,7 +402,8 @@ pub fn check_new_time(
         && start >= state.starts_at
         && end <= state.ends_at;
     let game = state.games.iter().find(|g| g.id == game_id);
-    let Some(game) = game.filter(|_| ok) else {
+    // Moving a game to the time it already has would only mark it moved and tell everyone.
+    let Some(game) = game.filter(|g| ok && (g.start, g.end) != (start, end)) else {
         return Err("range");
     };
     if start < now.saturating_add(LEAD_SECS) {
@@ -1202,6 +1203,20 @@ mod tests {
         assert_eq!(
             check_new_time(&state, "nope", at(12, 0), at(13, 0), T0),
             Err("range")
+        );
+    }
+
+    #[test]
+    fn new_time_must_differ_from_the_games_own() {
+        let state = week_state();
+        assert_eq!(
+            check_new_time(&state, "g1", at(10, 0), at(11, 0), T0),
+            Err("range")
+        );
+        // The same start with the other length is a change.
+        assert_eq!(
+            check_new_time(&state, "g1", at(10, 0), at(11, 30), T0),
+            Ok(())
         );
     }
 

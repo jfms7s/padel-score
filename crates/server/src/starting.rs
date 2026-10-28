@@ -1,7 +1,7 @@
 //! Starting a match from something that was planned: the hand-off between "Start match" on a
 //! board game and the New match page.
 //!
-//! [`Store::start_game`] answers the page: the game's four players as the starter's own player
+//! [`Store::start_game`] answers the page: the game's players (four, or two or three when short) as the starter's own player
 //! entries, in seat order. [`create_match_from`] then makes the match and marks the source
 //! played in the same transaction, so a source starts at most one match.
 
@@ -142,10 +142,9 @@ async fn mark_played_in(
 }
 
 impl Store {
-    /// The four players of a board game for `user`, who must be one of them, as `user`'s own
+    /// The two to four players of a board game for `user`, who must be one of them, as `user`'s own
     /// player entries (made, linked automatically, where there is none yet). The board must not
-    /// be over, the game not played and `now` in its start window; a game without four players
-    /// is `game_short`.
+    /// be over, the game not played and `now` in its start window.
     pub async fn start_game(
         &self,
         token: &str,
@@ -168,10 +167,9 @@ impl Store {
             return Err(StoreError::Conflict("already_started"));
         }
         check_window(game.start, game.end, now)?;
-        if seated.len() != 4 {
-            return Err(StoreError::Conflict("game_short"));
-        }
-        let mut players = Vec::with_capacity(4);
+        // A short game can be started too (spec: Short -> Played): the starter fills the open
+        // seats on New match.
+        let mut players = Vec::with_capacity(seated.len());
         for who in &seated {
             let player_id = auto_entry_in(&mut tx, user, who, now).await?;
             let name: String = sqlx::query_scalar("SELECT name FROM players WHERE id = ?")

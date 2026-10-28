@@ -957,7 +957,7 @@ async fn time_change_refusals() {
     };
     let err = ask(START + 2 * HOUR, START + 2 * HOUR + HALF, T0 + 20, &who[0]).await;
     assert!(matches!(err, Err(StoreError::InvalidField("range"))));
-    let err = ask(START, START + HOUR, START - HALF, &who[0]).await;
+    let err = ask(START, START + HOUR + HALF, START - HALF, &who[0]).await;
     assert_eq!(code(err.unwrap_err()), "too_soon");
     let outsider = user(&s, "Zed").await;
     let err = ask(START + 2 * HOUR, START + 3 * HOUR, T0 + 20, &outsider).await;
@@ -968,6 +968,129 @@ async fn time_change_refusals() {
         .unwrap();
     let err = ask(START + 3 * HOUR, START + 4 * HOUR, T0 + 21, &who[0]).await;
     assert_eq!(code(err.unwrap_err()), "request_pending");
+}
+
+#[tokio::test]
+async fn a_time_change_to_the_games_own_time_is_refused() {
+    let (s, pool, token, who) = formed().await;
+    let v = view(&s, &token, &who[0], T0 + 20).await;
+    let (g, ver) = (v.games[0].id.clone(), v.games[0].version);
+    clear_outbox(&pool).await;
+    for agreed in [false, true] {
+        let err = s
+            .ask_time(
+                &token,
+                &g,
+                &who[0],
+                ver,
+                START,
+                START + HOUR,
+                agreed,
+                T0 + 20,
+            )
+            .await;
+        assert!(matches!(err, Err(StoreError::InvalidField("range"))));
+    }
+    // Nothing moved, nobody was told, and the game is as it was.
+    let after = view(&s, &token, &who[0], T0 + 21).await;
+    assert_eq!(after.games[0].version, ver);
+    assert!(!after.games[0].moved);
+    assert!(outbox(&pool).await.is_empty());
+}
+
+#[tokio::test]
+async fn answering_after_the_game_started_is_request_expired_and_nobody_moves() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    let asked = ask_later(
+        &s,
+        &token,
+        &[a.clone(), b.clone(), c.clone(), d.clone()],
+        false,
+        T0 + 20,
+    )
+    .await;
+    let id = first_request(&asked).id.clone();
+    let err = s
+        .answer_request(&id, &b, true, START + 1)
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "request_expired");
+    assert_eq!(request_status(&pool, &id).await, "expired");
+    let g = &view(&s, &token, &a, START + 2).await.games[0];
+    assert!(!g.moved);
+    assert_eq!((g.start, g.end), (START, START + HOUR));
+}
+
+#[tokio::test]
+async fn a_time_request_whose_slot_filled_since_is_players_busy_and_expires() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    let asked = ask_later(
+        &s,
+        &token,
+        &[a.clone(), b.clone(), c.clone(), d.clone()],
+        false,
+        T0 + 20,
+    )
+    .await;
+    let id = first_request(&asked).id.clone();
+    // Rui and three newcomers are free then, so a game forms at the proposed time with Rui in it.
+    for (i, who) in [b.clone()].into_iter().enumerate() {
+        s.add_free(
+            &token,
+            &who,
+            START + 2 * HOUR,
+            START + 3 * HOUR,
+            T0 + 21 + i as i64,
+        )
+        .await
+        .unwrap();
+    }
+    for (i, name) in ["Zed", "Eva", "Tom"].into_iter().enumerate() {
+        let u = user(&s, name).await;
+        s.add_free(
+            &token,
+            &u,
+            START + 2 * HOUR,
+            START + 3 * HOUR,
+            T0 + 30 + i as i64,
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(view(&s, &token, &a, T0 + 40).await.games.len(), 2);
+    s.answer_request(&id, &c, true, T0 + 41).await.unwrap();
+    s.answer_request(&id, &d, true, T0 + 42).await.unwrap();
+    let err = s.answer_request(&id, &b, true, T0 + 43).await.unwrap_err();
+    assert_eq!(code(err), "players_busy");
+    assert_eq!(request_status(&pool, &id).await, "expired");
+    let after = view(&s, &token, &a, T0 + 44).await;
+    let g = after
+        .games
+        .iter()
+        .find(|g| g.start == START)
+        .expect("the game stays");
+    assert!(!g.moved);
+}
+
+#[tokio::test]
+async fn a_time_request_staled_by_a_leave_is_request_expired() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    let asked = ask_later(
+        &s,
+        &token,
+        &[a.clone(), b.clone(), c.clone(), d.clone()],
+        false,
+        T0 + 20,
+    )
+    .await;
+    let id = first_request(&asked).id.clone();
+    let g = view(&s, &token, &c, T0 + 21).await.games[0].clone();
+    s.leave_game(&token, &g.id, &c, g.version, T0 + 22)
+        .await
+        .unwrap();
+    let err = s.answer_request(&id, &b, true, T0 + 23).await.unwrap_err();
+    assert_eq!(code(err), "request_expired");
+    assert_eq!(request_status(&pool, &id).await, "expired");
 }
 
 #[tokio::test]
@@ -1148,7 +1271,7 @@ async fn non_player_cannot_start() {
 }
 
 #[tokio::test]
-async fn a_short_game_cannot_be_started() {
+async fn a_short_game_starts_with_the_players_it_has() {
     let (s, _pool, token, [a, ..]) = formed().await;
     let game = first_game(&s, &token, &a, T0).await;
     let c = &formed_ids(&s, &token, &game).await[3];
@@ -1161,8 +1284,8 @@ async fn a_short_game_cannot_be_started() {
     )
     .await
     .unwrap();
-    let res = s.start_game(&token, &game, &a, START).await;
-    assert!(matches!(res, Err(StoreError::Conflict("game_short"))));
+    let out = s.start_game(&token, &game, &a, START).await.unwrap();
+    assert_eq!(out.players.len(), 3);
 }
 
 async fn formed_ids(s: &Store, token: &str, game: &str) -> Vec<String> {
