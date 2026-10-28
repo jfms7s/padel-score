@@ -108,7 +108,8 @@ describe('signupMessage', () => {
 			'not_solo',
 			'signup_taken',
 			'not_public',
-			'not_auto_paired'
+			'not_auto_paired',
+			'nothing_to_take'
 		] as const) {
 			expect(signupMessage(err(code))).toBe(e[code]);
 			expect(e[code]).not.toBe('');

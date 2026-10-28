@@ -535,6 +535,8 @@ export interface EventSummary {
 	court_count: number;
 	schedule: Schedule;
 	cancelled_at: number | null;
+	/** When sign-ups closed: the deadline ran, or the organiser took the teams. */
+	signups_closed_at: number | null;
 }
 
 export interface TeamPlayer {
@@ -954,7 +956,8 @@ export type SignupErrorCode =
 	| 'not_solo'
 	| 'signup_taken'
 	| 'not_public'
-	| 'not_auto_paired';
+	| 'not_auto_paired'
+	| 'nothing_to_take';
 
 /** Where a user stands in an event. Places are 1-based. */
 export type MyEntry =

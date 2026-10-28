@@ -69,7 +69,11 @@
 		const timer = setInterval(() => (now = Math.floor(Date.now() / 1000)), 15_000);
 		return () => clearInterval(timer);
 	});
-	const closed = $derived(setup && schedule.signups !== 'off' && (schedule.deadline_at ?? Infinity) <= now);
+	const closed = $derived(
+		setup &&
+			schedule.signups !== 'off' &&
+			(ev.signups_closed_at !== null || (schedule.deadline_at ?? Infinity) <= now)
+	);
 
 	// ---- the schedule form ---------------------------------------------------------------
 
@@ -134,6 +138,26 @@
 		queueMicrotask(() => cancelButton?.focus());
 	}
 
+	// ---- take teams ----------------------------------------------------------------------
+
+	let confirmingTake = $state(false);
+	let takeConfirmEl: HTMLElement | undefined = $state();
+	let takeButton: HTMLElement | undefined = $state();
+
+	$effect(() => {
+		if (confirmingTake && takeConfirmEl) takeConfirmEl.focus();
+	});
+
+	function closeTakeConfirm() {
+		confirmingTake = false;
+		queueMicrotask(() => takeButton?.focus());
+	}
+
+	function take() {
+		confirmingTake = false;
+		ontake();
+	}
+
 	const names = (e: SignupTeam) => e.players.map((p) => p.name).join(' / ');
 	const complete = $derived((list?.teams.length ?? 0) + (list?.line.length ?? 0));
 </script>
@@ -195,8 +219,20 @@
 			{/if}
 			{#if setup && schedule.signups !== 'off'}
 				<div class="take">
-					<button class="primary" type="button" disabled={busy} onclick={ontake}>{busy ? t.taking : t.takeTeams}</button>
-					<p class="hint">{t.takeHint}</p>
+					{#if confirmingTake}
+						<div class="confirm" role="alertdialog" tabindex="-1" bind:this={takeConfirmEl} aria-label={t.takeTeams}>
+							<p>{t.takeConfirm}</p>
+							<div class="actions">
+								<button class="primary" type="button" disabled={busy} onclick={take}>{busy ? t.taking : t.takeTeams}</button>
+								<button class="secondary" type="button" onclick={closeTakeConfirm}>{t.keepOpen}</button>
+							</div>
+						</div>
+					{:else}
+						<button class="primary" type="button" disabled={busy} bind:this={takeButton} onclick={() => (confirmingTake = true)}>
+							{busy ? t.taking : t.takeTeams}
+						</button>
+						<p class="hint">{t.takeHint}</p>
+					{/if}
 				</div>
 			{/if}
 		</div>

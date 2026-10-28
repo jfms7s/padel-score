@@ -168,13 +168,13 @@
 	{#if !anyone}
 		<p class="hint">{t.none}</p>
 	{/if}
-	{#each [[t.groups.teams, view.list.teams, true], [t.groups.line, view.list.line, true], [t.groups.solos, view.list.solos, false]] as const as [title, entries, numbered] (title)}
+	{#each [[t.groups.teams, view.list.teams, true, view.list.hand_added], [t.groups.line, view.list.line, true, 0], [t.groups.solos, view.list.solos, false, 0]] as const as [title, entries, numbered, before] (title)}
 		{#if entries.length > 0}
 			<h3>{title}</h3>
 			<ul class="list" aria-label={title}>
 				{#each entries as entry, i (entry.id)}
 					<li class="row">
-						<span class="what"><strong>{numbered ? `${i + 1}. ` : ''}{names(entry)}</strong></span>
+						<span class="what"><strong>{numbered ? `${before + i + 1}. ` : ''}{names(entry)}</strong></span>
 					</li>
 				{/each}
 			</ul>

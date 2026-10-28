@@ -1145,7 +1145,8 @@ export const strings = {
 			not_solo: 'Only people waiting for a partner can be paired.',
 			signup_taken: 'This sign-up is already a team of the event.',
 			not_public: 'This event is not public.',
-			not_auto_paired: 'Only an automatic pair can be split.'
+			not_auto_paired: 'Only an automatic pair can be split.',
+			nothing_to_take: 'There are not enough complete sign-ups to make teams yet.'
 		},
 		fields: {
 			starts_at: 'Choose a start in the future.',
@@ -1219,6 +1220,9 @@ export const strings = {
 		pairPicked: (n: number) => `${n} of 2 picked`,
 		takeTeams: 'Take teams from sign-ups',
 		taking: 'Taking…',
+		takeConfirm:
+			'Sign-ups close for good, and complete sign-ups without a place are told they have no place. This can’t be undone.',
+		keepOpen: 'Keep sign-ups open',
 		takeHint: 'Makes teams of the complete sign-ups, as many as the event can run, and closes sign-ups.',
 		takeReport: (taken: number, skipped: number, line: number) => {
 			const parts = [taken === 1 ? '1 team taken' : `${taken} teams taken`];
