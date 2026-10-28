@@ -414,6 +414,10 @@ describe('homeEvents', () => {
 		expect(ids(homeEvents([ev('f', 'finished', 9), ev('s', 'setup', 1)]))).toEqual(['s']);
 	});
 
+	it('leaves cancelled events out', () => {
+		expect(ids(homeEvents([ev('c', 'cancelled', 9), ev('s', 'setup', 1)]))).toEqual(['s']);
+	});
+
 	it('shows at most five', () => {
 		const list = Array.from({ length: 8 }, (_, i) => ev(`e${i}`, 'running', i));
 		expect(ids(homeEvents(list))).toEqual(['e7', 'e6', 'e5', 'e4', 'e3']);

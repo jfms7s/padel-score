@@ -6,6 +6,7 @@
 <script lang="ts">
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import { rulesText } from '#lib/events.ts';
+	import { scheduleText } from '#lib/signups.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { EventDetail } from '#lib/types.ts';
 
@@ -48,8 +49,9 @@
 		<h1>{ev.name}</h1>
 		<p class="meta">
 			<span>{t.kinds[ev.kind]}</span>
-			<span class="badge" class:off={status === 'finished'}>{t.status[status]}</span>
+			<span class="badge" class:off={status === 'finished' || status === 'cancelled'}>{t.status[status]}</span>
 		</p>
+		{#if scheduleText(ev.schedule) !== ''}<p class="when">{scheduleText(ev.schedule)}</p>{/if}
 		<p class="hint">{rulesText(ev.format)}</p>
 	</div>
 	<div class="acts">
@@ -90,6 +92,10 @@
 		align-items: center;
 		gap: 4px;
 		margin: 0 0 4px;
+	}
+	.when {
+		margin: 0 0 4px;
+		font-weight: 650;
 	}
 	.title .hint {
 		margin: 0;

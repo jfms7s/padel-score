@@ -542,7 +542,7 @@ export const strings = {
 		intro: 'Run a tournament or a non-stop: teams, courts with their own phones, and the results.',
 		none: "You haven't made any events yet.",
 		kinds: { tournament: 'Tournament', non_stop: 'Non-stop' },
-		status: { setup: 'Setting up', running: 'Running', finished: 'Finished' },
+		status: { setup: 'Setting up', running: 'Running', finished: 'Finished', cancelled: 'Cancelled' },
 		counts: (teams: number, courts: number) =>
 			`${teams === 1 ? '1 team' : `${teams} teams`} · ${courts === 1 ? '1 court' : `${courts} courts`}`,
 		openLabel: (name: string) => `Open ${name}`,
@@ -685,6 +685,7 @@ export const strings = {
 		errors: {
 			already_started: 'This match has already started.',
 			event_started: 'The event has started, so its teams can’t change.',
+			event_cancelled: 'This event is cancelled, so it can’t change.',
 			event_not_running: 'Matches can only be made while the event is running.',
 			event_finished: 'The event is finished.',
 			too_few_teams: 'Add at least two teams first.',
@@ -963,7 +964,14 @@ export const strings = {
 		swapAnswered: { accepted: 'Swap accepted', declined: 'Swap declined' },
 		timeAsked: (name: string | undefined) => `${name ?? 'Someone'} proposes a new time`,
 		timeAnswered: { accepted: 'New time accepted', declined: 'New time declined' },
-		timeChanged: 'Game moved'
+		timeChanged: 'Game moved',
+		eventCancelled: 'Event cancelled',
+		eventChanged: 'Event changed',
+		teamComplete: 'Your team is complete',
+		movedUp: "You're in the event",
+		movedDown: "You're on the waiting list",
+		partnerLeft: (name: string | undefined) => `${name ?? 'Someone'} left your team`,
+		noPlace: 'No place this time'
 	},
 
 	// Game boards: the board page, the week grid and the new-board form.
@@ -1124,6 +1132,146 @@ export const strings = {
 	},
 
 	// The coordinator desk and the spectator page: the court tile and the match list.
+	// Event dates and sign-ups: the schedule fields, the desk's Sign-ups tab, the join page and the
+	// partner link page (/j/{token}).
+	signups: {
+		errors: {
+			signups_closed: 'Sign-ups are closed.',
+			signups_full: 'This event has too many sign-ups.',
+			signups_off: 'This event is not taking sign-ups.',
+			signups_exist: 'People have signed up, so sign-ups can’t be turned off. Remove them first.',
+			own_link: 'This is your own partner link. Send it to your partner.',
+			already_signed_up: 'You are already signed up for this event.',
+			not_solo: 'Only people waiting for a partner can be paired.',
+			signup_taken: 'This sign-up is already a team of the event.',
+			not_public: 'This event is not public.',
+			not_auto_paired: 'Only an automatic pair can be split.'
+		},
+		fields: {
+			starts_at: 'Choose a start in the future.',
+			place: 'Enter a place of up to 80 characters.',
+			signups: 'Choose who can sign up.',
+			min_teams: 'Choose a minimum that suits this kind of event, and no more than the maximum.',
+			max_teams: 'Choose a maximum that suits this kind of event.',
+			deadline_at: 'The deadline must be in the future and no later than the start.',
+			partner_name: 'Enter your partner’s name, up to 40 characters.'
+		},
+		entry: {
+			solo: 'Waiting for a partner',
+			pending: 'Waiting for your partner to accept',
+			team: (place: number) => `In the event · place ${place}`,
+			line: (place: number) => `On the waiting list · ${place}`
+		},
+
+		// The schedule fields.
+		schedule: 'Date and sign-ups',
+		date: 'Date',
+		time: 'Start time',
+		timeZoneNote: (zone: string) => `Times are in your time zone, ${zone}.`,
+		place: 'Place (optional)',
+		placePlaceholder: 'Club or court',
+		signupsLabel: 'Sign-ups',
+		modes: { off: 'Off', private: 'Link only', public: 'Public' },
+		modeHints: {
+			off: 'You add the teams yourself.',
+			private: 'Only people with the link can sign up.',
+			public: 'Sign-ups are also listed for everyone.'
+		},
+		needsDate: 'Set a date and time before turning on sign-ups.',
+		bothDateAndTime: 'Set both the date and the time, or leave both empty.',
+		minTeams: 'Minimum teams',
+		maxTeams: 'Maximum teams',
+		deadline: 'Sign-ups close',
+		deadlineHint: 'By default a day before the start, or at the start when that is nearer.',
+		saveSchedule: 'Save',
+		saving: 'Saving…',
+		saved: 'Saved',
+
+		// The desk's Sign-ups tab.
+		tabTitle: 'Sign-ups',
+		undated: 'No date yet. Set one to open sign-ups.',
+		cancelledNote: 'This event is cancelled. Everyone who signed up was told.',
+		closedNote: 'Sign-ups are closed.',
+		linkTitle: 'Sign-up link',
+		linkHint: 'Anyone with this link can sign up.',
+		copyLink: 'Copy link',
+		shareLink: 'Share link',
+		shareTitle: (name: string) => `${name}: sign up`,
+		groups: {
+			teams: 'In the event',
+			line: 'Waiting list',
+			solos: 'Waiting for a partner',
+			pending: 'Waiting for a partner to accept'
+		},
+		summary: (taken: number, max: number | null) =>
+			max === null ? `${taken} in the event` : `${taken} of ${max} places`,
+		handAdded: (n: number) => (n === 1 ? '1 team added by you' : `${n} teams added by you`),
+		none: 'Nobody has signed up yet.',
+		autoPaired: 'Paired automatically',
+		held: 'Held for you to pair',
+		remove: 'Remove',
+		removeLabel: (names: string) => `Remove ${names}`,
+		split: 'Split',
+		splitLabel: (names: string) => `Split ${names}`,
+		pair: 'Pair',
+		pairHint: 'Pick two people who are waiting, then pair them.',
+		pickForPair: (name: string) => `Pick ${name} to pair`,
+		pairPicked: (n: number) => `${n} of 2 picked`,
+		takeTeams: 'Take teams from sign-ups',
+		taking: 'Taking…',
+		takeHint: 'Makes teams of the complete sign-ups, as many as the event can run, and closes sign-ups.',
+		takeReport: (taken: number, skipped: number, line: number) => {
+			const parts = [taken === 1 ? '1 team taken' : `${taken} teams taken`];
+			if (skipped > 0)
+				parts.push(
+					skipped === 1
+						? '1 skipped: a player is already in a team'
+						: `${skipped} skipped: a player is already in a team`
+				);
+			if (line > 0) parts.push(`${line} still waiting`);
+			return `${parts.join(' · ')}.`;
+		},
+		cancelEvent: 'Cancel event',
+		cancelling: 'Cancelling…',
+		cancelConfirm: 'Everyone who signed up is told, and the event can’t be started. This can’t be undone.',
+		keepEvent: 'Keep event',
+
+		// The join page.
+		loading: 'Loading the event…',
+		notFound: 'This link does not work. Ask for a new one.',
+		by: (name: string) => `Organised by ${name}`,
+		cancelledBanner: 'This event is cancelled.',
+		startedBanner: 'This event has started.',
+		closedBanner: 'Sign-ups are closed.',
+		joinAlone: 'Join alone',
+		joinWithPartner: 'Join with a partner',
+		joining: 'Joining…',
+		partnerNamePlaceholder: 'Partner’s name',
+		partnerNameLabel: 'Your partner’s name, if they have no account',
+		partnerNameHint: 'Leave it empty to send your partner a link instead.',
+		continueWithPartner: 'Continue',
+		partnerLinkTitle: 'Your partner’s link',
+		partnerLinkHint: 'Send it to your partner. They open it, sign in and accept.',
+		shareLinkPartner: 'Share link',
+		sharePartnerTitle: (name: string) => `${name}: join my team`,
+		signInToJoin: 'Sign in to join',
+		leave: 'Leave',
+		leaveConfirm: 'Leave this event?',
+		leaving: 'Leaving…',
+		joinNote: 'Your games will appear in the organiser’s player list.',
+		listTitle: 'Who’s in',
+		inviteTitle: (inviter: string, event: string) => `${inviter} invites you to play ${event}`,
+		inviteHint: 'Accept to be their partner in this event.',
+		accept: 'Accept',
+		decline: 'Decline',
+		signInToAnswer: 'Sign in to answer',
+		inviteGone: 'This partner link does not work any more. Ask for a new one.',
+		declined: 'You declined. Your partner can send you a new link.',
+		share: 'Share',
+		you: 'You',
+		kindLine: (kind: string, rules: string) => `${kind} · ${rules}`
+	},
+
 	desk: {
 		live: 'Live',
 		finished: 'Finished',
@@ -1152,6 +1300,7 @@ export const strings = {
 			matches: 'Matches',
 			kind: { tournament: 'Bracket', non_stop: 'Standings' },
 			teams: 'Teams',
+			signups: 'Sign-ups',
 			courts: 'Courts & phones',
 			courtsShort: 'Courts',
 			finish: 'Finish'

@@ -6,12 +6,14 @@ import { scoreText } from './players';
 import type { EventMatch, EventStatus, EventTeam, EventViewMatch, Score, Team } from './types';
 import { pointLabel } from './view';
 
-export type DeskTab = 'live' | 'matches' | 'kind' | 'teams' | 'courts' | 'finish';
+export type DeskTab = 'live' | 'matches' | 'kind' | 'teams' | 'signups' | 'courts' | 'finish';
 
 const TABS: Record<EventStatus, DeskTab[]> = {
-	setup: ['teams', 'courts', 'kind'],
+	setup: ['teams', 'signups', 'courts', 'kind'],
 	running: ['live', 'matches', 'kind', 'teams', 'courts', 'finish'],
-	finished: ['live', 'matches', 'kind', 'teams']
+	finished: ['live', 'matches', 'kind', 'teams'],
+	// A cancelled event only has its sign-ups: who was in, and the cancelled notice.
+	cancelled: ['signups']
 };
 
 /** The tabs an event offers in its status. The page hides an empty `kind` tab. */
@@ -20,6 +22,7 @@ export function deskTabs(status: EventStatus): DeskTab[] {
 }
 
 export function defaultTab(status: EventStatus): DeskTab {
+	if (status === 'cancelled') return 'signups';
 	return status === 'setup' ? 'teams' : 'live';
 }
 

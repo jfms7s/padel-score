@@ -79,7 +79,8 @@ describe('jump key', () => {
 
 describe('tabs', () => {
 	it('lists the tabs per status', () => {
-		expect(deskTabs('setup')).toEqual(['teams', 'courts', 'kind']);
+		expect(deskTabs('setup')).toEqual(['teams', 'signups', 'courts', 'kind']);
+		expect(deskTabs('cancelled')).toEqual(['signups']);
 		expect(deskTabs('running')).toEqual(['live', 'matches', 'kind', 'teams', 'courts', 'finish']);
 		expect(deskTabs('finished')).toEqual(['live', 'matches', 'kind', 'teams']);
 	});
@@ -88,6 +89,9 @@ describe('tabs', () => {
 		expect(resolveTab('kind', 'running')).toBe('kind');
 		expect(resolveTab('finish', 'setup')).toBe('teams');
 		expect(resolveTab('nonsense', 'running')).toBe('live');
+		expect(resolveTab('signups', 'setup')).toBe('signups');
+		expect(resolveTab('teams', 'cancelled')).toBe('signups');
+		expect(resolveTab(null, 'cancelled')).toBe('signups');
 		expect(resolveTab(null, 'finished')).toBe('live');
 	});
 });

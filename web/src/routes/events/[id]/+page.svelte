@@ -12,6 +12,7 @@
 	import FinishTab from '#lib/components/events/desk/FinishTab.svelte';
 	import LiveTab from '#lib/components/events/desk/LiveTab.svelte';
 	import MatchesTab from '#lib/components/events/desk/MatchesTab.svelte';
+	import SignupsTab from '#lib/components/events/desk/SignupsTab.svelte';
 	import TeamsTab from '#lib/components/events/desk/TeamsTab.svelte';
 	import { defaultTab, deskTabs, resolveTab, type DeskTab } from '#lib/desk.ts';
 	import {
@@ -19,6 +20,7 @@
 		addTeam,
 		advanceCourt,
 		assignMatch,
+		cancelEvent,
 		createEventMatch,
 		deleteTeam,
 		eventLink,
@@ -30,13 +32,36 @@
 		postEventResult,
 		rotateCourt,
 		startEvent,
+		updateEvent,
 		updateTeam
 	} from '#lib/events.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { requireSignedIn, session } from '#lib/session.ts';
+	import { shareLink } from '#lib/share.ts';
+	import {
+		getSignups,
+		pairSignups,
+		removeSignup,
+		signupMessage,
+		splitSignup,
+		takeTeams
+	} from '#lib/signups.ts';
 	import { openSseStream, type StreamStatus } from '#lib/stream.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { CourtOut, EventDetail, EventMatch, EventTeam, NewEventMatch, Place, Player, TypedScore } from '#lib/types.ts';
+	import type {
+		CourtOut,
+		EventDetail,
+		EventMatch,
+		EventTeam,
+		NewEventMatch,
+		Place,
+		Player,
+		ScheduleInput,
+		SignupList,
+		SignupTeam,
+		TakeReport,
+		TypedScore
+	} from '#lib/types.ts';
 
 	const t = strings.events;
 
@@ -52,7 +77,7 @@
 	let players = $state<Player[] | null>(null);
 	let playersFailed = $state(false);
 
-	type Section = 'teams' | 'courts' | 'matches' | 'lifecycle';
+	type Section = 'teams' | 'signups' | 'courts' | 'matches' | 'lifecycle';
 	let busy = $state(false);
 	let failures = $state<Partial<Record<Section, string>>>({});
 
@@ -103,7 +128,7 @@
 			await run();
 			return true;
 		} catch (e) {
-			failures = { [section]: eventMessage(e) };
+			failures = { [section]: section === 'signups' ? signupMessage(e) : eventMessage(e) };
 			return false;
 		} finally {
 			busy = false;
@@ -134,10 +159,24 @@
 		failures = message === null ? {} : { [section]: message };
 	}
 
+	async function share(link: string) {
+		copyFailed = null;
+		const result = await shareLink(link, strings.signups.shareTitle(ev?.name ?? ''));
+		if (result === 'failed') copyFailed = 'join';
+		else if (result === 'copied') {
+			copied = 'join';
+			setTimeout(() => {
+				if (copied === 'join') copied = null;
+			}, 2000);
+		}
+	}
+
 	// ---- tabs ------------------------------------------------------------------------------
 
 	/** A non-stop has nothing to show in its kind tab until it starts. */
-	const tabs = $derived(deskTabs(status).filter((tab) => !(tab === 'kind' && ev?.kind === 'non_stop' && status === 'setup')));
+	const tabs = $derived(
+		deskTabs(status).filter((tab) => !(tab === 'kind' && ev?.kind === 'non_stop' && status === 'setup'))
+	);
 	const active = $derived.by(() => {
 		const tab = resolveTab(page.url.searchParams.get('tab'), status);
 		return tabs.includes(tab) ? tab : defaultTab(status);
@@ -178,6 +217,68 @@
 		void act('teams', async () => {
 			await deleteTeam(id, team.id);
 			await refresh();
+		});
+	}
+
+	// ---- sign-ups --------------------------------------------------------------------------
+
+	let signups = $state<SignupList | null>(null);
+	let takeReport = $state<TakeReport | null>(null);
+	/** A response only counts if nothing newer was asked for since. */
+	let latestSignups = 0;
+	/** A non-stop's legs set how many teams fit. */
+	const legs = $derived(typeof ev?.settings.legs === 'number' ? ev.settings.legs : 1);
+
+	async function loadSignups() {
+		const mine = ++latestSignups;
+		try {
+			const next = await getSignups(id);
+			if (mine === latestSignups) signups = next;
+		} catch (e) {
+			if (mine === latestSignups) failures = { signups: signupMessage(e) };
+		}
+	}
+
+	// The list is read when the tab opens and again on each event-stream message (a person
+	// signing up or leaving tells the stream) and after the organiser's own changes.
+	$effect(() => {
+		if (active === 'signups' && detail) void loadSignups();
+	});
+
+	function saveSchedule(schedule: ScheduleInput, done: () => void) {
+		void act('signups', async () => {
+			detail = await updateEvent(id, { schedule });
+			done();
+		});
+	}
+
+	function cancel() {
+		void act('signups', async () => {
+			detail = await cancelEvent(id);
+			takeReport = null;
+		});
+	}
+
+	/** A change to one entry; the list it returns replaces ours. */
+	function changeEntry(run: () => Promise<SignupList | void>) {
+		void act('signups', async () => {
+			const next = await run();
+			if (next) {
+				latestSignups += 1;
+				signups = next;
+			} else await loadSignups();
+		});
+	}
+
+	const removeEntry = (entry: SignupTeam) => changeEntry(() => removeSignup(id, entry.id));
+	const splitEntry = (entry: SignupTeam) => changeEntry(() => splitSignup(id, entry.id));
+	const pairEntries = (a: SignupTeam, b: SignupTeam) => changeEntry(() => pairSignups(id, a.id, b.id));
+
+	function take() {
+		void act('signups', async () => {
+			takeReport = await takeTeams(id);
+			await refresh();
+			await loadSignups();
 		});
 	}
 
@@ -289,6 +390,26 @@
 					onrename={renameTeam}
 					onremove={removeTeam}
 					onplayer={added}
+				/>
+			{:else if active === 'signups'}
+				<SignupsTab
+					{detail}
+					list={signups}
+					{origin}
+					{legs}
+					{busy}
+					failure={failures.signups}
+					report={takeReport}
+					{copied}
+					{copyFailed}
+					onsave={saveSchedule}
+					onremove={removeEntry}
+					onsplit={splitEntry}
+					onpair={pairEntries}
+					ontake={take}
+					oncancel={cancel}
+					onshare={share}
+					oncopy={(link) => copy('join', link)}
 				/>
 			{:else if active === 'courts'}
 				<CourtsTab

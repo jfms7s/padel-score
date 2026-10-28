@@ -2,9 +2,12 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import KindSettings from '#lib/components/events/KindSettings.svelte';
+	import ScheduleFields from '#lib/components/events/ScheduleFields.svelte';
 	import { createEvent, eventMessage, listEvents, rulesText } from '#lib/events.ts';
+	import { browserTimeZone } from '#lib/dates.ts';
 	import { requireSignedIn, session } from '#lib/session.ts';
 	import { DECIDING_SETS, DEUCE_RULES, MAX_NAME_LENGTH, SETS_FORMATS } from '#lib/setup.ts';
+	import { draftFromSchedule, scheduleInput, scheduleText, signupMessage } from '#lib/signups.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { DecidingSet, DeuceRule, EventKind, EventSummary, Format, SetsFormat } from '#lib/types.ts';
 
@@ -22,9 +25,11 @@
 	let deciding = $state<DecidingSet>('super_tie_break');
 	let drawsAllowed = $state(false);
 	let settings = $state<Record<string, unknown>>({});
+	let schedule = $state(draftFromSchedule(null));
 	let busy = $state(false);
 	let failure = $state<string | null>(null);
 
+	const legs = $derived(typeof settings.legs === 'number' ? settings.legs : 1);
 	const oneSet = $derived(sets === 'one');
 	const format = $derived<Format>(
 		kind === 'tournament'
@@ -60,13 +65,24 @@
 		event.preventDefault();
 		const trimmed = name.trim();
 		if (busy || trimmed === '') return;
-		busy = true;
 		failure = null;
+		const asked = scheduleInput(schedule, null, browserTimeZone());
+		if ('error' in asked) {
+			failure = asked.error === 'max_teams' ? strings.signups.fields.max_teams : strings.signups[asked.error];
+			return;
+		}
+		busy = true;
 		try {
-			const created = await createEvent({ name: trimmed, kind, format, settings });
+			const created = await createEvent({
+				name: trimmed,
+				kind,
+				format,
+				settings,
+				...(asked.ok === undefined ? {} : { schedule: asked.ok })
+			});
 			await goto(`/events/${encodeURIComponent(created.event.id)}`);
 		} catch (e) {
-			failure = eventMessage(e);
+			failure = signupMessage(e);
 		} finally {
 			busy = false;
 		}
@@ -94,8 +110,9 @@
 							<span class="what">
 								<strong>{ev.name}</strong>
 								<span class="hint">{t.kinds[ev.kind]} · {t.counts(ev.team_count, ev.court_count)}</span>
+								{#if scheduleText(ev.schedule) !== ''}<span class="hint">{scheduleText(ev.schedule)}</span>{/if}
 							</span>
-							<span class="badge" class:off={ev.status === 'finished'}>{t.status[ev.status]}</span>
+							<span class="badge" class:off={ev.status === 'finished' || ev.status === 'cancelled'}>{t.status[ev.status]}</span>
 						</a>
 					</li>
 				{/each}
@@ -163,6 +180,8 @@
 			<p class="hint">{rulesText(format)}</p>
 
 			<KindSettings {kind} {settings} onchange={(s) => (settings = s)} />
+
+			<ScheduleFields bind:draft={schedule} {kind} {legs} prefix="new" />
 
 			{#if failure}<p class="error" role="alert">{failure}</p>{/if}
 			<button class="primary" type="submit" disabled={busy}>{busy ? t.creating : t.create}</button>
