@@ -459,6 +459,48 @@ async fn leaving_sends_partner_back_to_solos_with_their_own_time() {
 }
 
 #[tokio::test]
+async fn sign_ups_in_one_second_keep_their_arrival_order() {
+    let w = world(4).await;
+    // Arrive in descending id order, all in the same second: an id tie-break would reverse them.
+    let mut users = Vec::new();
+    for n in ["T1", "T2", "T3", "T4", "T5", "T6"] {
+        users.push((w.user(n).await, n));
+    }
+    users.sort_by(|a, b| b.0.cmp(&a.0));
+    for (id, n) in &users {
+        w.named(id, &format!("P{n}"), T0 + 5).await;
+    }
+    let list = w.list().await;
+    let first = |t: &SignupTeam| names(t)[0].to_owned();
+    let teams: Vec<_> = list.teams.iter().map(first).collect();
+    let line: Vec<_> = list.line.iter().map(first).collect();
+    let arrived: Vec<_> = users.iter().map(|(_, n)| (*n).to_owned()).collect();
+    assert_eq!(teams, arrived[..4]);
+    assert_eq!(line, arrived[4..]);
+}
+
+#[tokio::test]
+async fn solos_in_one_second_pair_in_arrival_order() {
+    let w = world(8).await;
+    let mut users = Vec::new();
+    for n in ["S1", "S2", "S3", "S4"] {
+        users.push((w.user(n).await, n));
+    }
+    users.sort_by(|a, b| b.0.cmp(&a.0));
+    for (id, _) in &users {
+        w.solo(id, T0 + 5).await;
+    }
+    let list = w.list().await;
+    let pairs: Vec<Vec<String>> = list
+        .teams
+        .iter()
+        .map(|t| names(t).iter().map(|n| (*n).to_owned()).collect())
+        .collect();
+    let n = |i: usize| users[i].1.to_owned();
+    assert_eq!(pairs, [vec![n(0), n(1)], vec![n(2), n(3)]]);
+}
+
+#[tokio::test]
 async fn line_moves_up_when_a_team_leaves() {
     let w = world(4).await;
     let mut users = Vec::new();

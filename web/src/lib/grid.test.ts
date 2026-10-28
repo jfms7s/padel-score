@@ -99,6 +99,37 @@ describe('dayCells', () => {
 	});
 });
 
+describe('a viewer whose zone is not a whole half hour from the board', () => {
+	it('keeps every cell on the board s half-hour grid (Kathmandu viewing a Lisbon board)', () => {
+		const board = 'Europe/Lisbon';
+		const viewer = 'Asia/Kathmandu';
+		const startsAt = localMidnight('2026-11-02', board) + 18 * H;
+		const endsAt = localMidnight('2026-11-09', board);
+		const days = weekDays(startsAt, endsAt, viewer);
+		for (const day of days) {
+			const cells = dayCells(day, viewer, startsAt);
+			expect(cells.length).toBeGreaterThanOrEqual(47);
+			for (const c of cells) {
+				// What the server checks of an add: (t - board.starts_at) % 1800 == 0.
+				expect((((c.t - startsAt) % 1800) + 1800) % 1800).toBe(0);
+				expect(c.t).toBeGreaterThanOrEqual(day.start);
+				expect(c.t).toBeLessThan(day.end);
+			}
+			expect(new Set(cells.map((c) => c.row)).size).toBe(cells.length);
+		}
+		// Without the anchor the cells are 15 minutes off the board's grid.
+		expect((dayCells(days[1]!, viewer)[0]!.t - startsAt) % 1800).not.toBe(0);
+		// The labels show the viewer's clock.
+		expect(timeText(dayCells(days[1]!, viewer, startsAt)[1]!.t, viewer)).toMatch(/:(15|45)$/);
+	});
+
+	it('changes nothing when the zones agree', () => {
+		const tz = 'Europe/Lisbon';
+		const day = weekDays(localMidnight('2026-10-19', tz), localMidnight('2026-10-26', tz), tz)[6]!;
+		expect(dayCells(day, tz, localMidnight('2026-10-19', tz) + 18 * H)).toEqual(dayCells(day, tz));
+	});
+});
+
 describe('a week across a midnight spring-forward', () => {
 	it('puts Saturday 23:00 in Saturday s column and none of it in Sunday s', () => {
 		const tz = 'Atlantic/Azores';

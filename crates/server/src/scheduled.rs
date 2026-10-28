@@ -7,6 +7,10 @@
 //! is one `BEGIN IMMEDIATE` transaction and only queues notices ([`queue_in`]); the HTTP layer
 //! wakes the push sender. No notice goes to the user whose request caused it.
 
+mod calendar;
+
+pub(crate) use calendar::{calendar_matches_in, open_matches_in, queue_short_matches_in};
+
 use padel_scoring::Format;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection};
@@ -280,6 +284,28 @@ async fn open_slot_in(conn: &mut SqliteConnection, id: &str) -> Result<Option<u8
     Ok((0..PLACES).find(|slot| !taken.contains(&i64::from(*slot))))
 }
 
+/// A match's state as of `now`: cancelled, then started, then past, else full or open by how many
+/// places are filled.
+fn state_of(
+    cancelled: bool,
+    started: bool,
+    starts_at: i64,
+    filled: usize,
+    now: i64,
+) -> ScheduledState {
+    if cancelled {
+        ScheduledState::Cancelled
+    } else if started {
+        ScheduledState::Started
+    } else if starts_at.saturating_add(MATCH_SECS) <= now {
+        ScheduledState::Past
+    } else if filled == usize::from(PLACES) {
+        ScheduledState::Full
+    } else {
+        ScheduledState::Open
+    }
+}
+
 async fn view_in(
     conn: &mut SqliteConnection,
     row: Sched,
@@ -308,17 +334,7 @@ async fn view_in(
             .map(|f| f.slot),
         in_line: line.iter().any(|(u, _)| u == v),
     });
-    let state = if row.cancelled {
-        ScheduledState::Cancelled
-    } else if row.started {
-        ScheduledState::Started
-    } else if row.starts_at.saturating_add(MATCH_SECS) <= now {
-        ScheduledState::Past
-    } else if filled.len() == usize::from(PLACES) {
-        ScheduledState::Full
-    } else {
-        ScheduledState::Open
-    };
+    let state = state_of(row.cancelled, row.started, row.starts_at, filled.len(), now);
     let line = (0u8..)
         .zip(line)
         .map(|(slot, (user, name))| PlaceOut {

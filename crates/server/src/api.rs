@@ -88,6 +88,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::boards_api::routes())
         .merge(crate::signups_api::routes())
         .merge(crate::scheduled_api::routes())
+        .merge(crate::calendar_api::routes())
 }
 
 #[derive(Debug)]

@@ -281,6 +281,9 @@ pub enum NoticeKind {
     MatchChanged,
     MatchCancelled,
     RemovedFromMatch,
+    ShortGame,
+    EventSoon,
+    MatchShort,
 }
 
 /// What a notification says, as data. `url` is always a same-origin path (`/b/{token}`,

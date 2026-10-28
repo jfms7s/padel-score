@@ -62,7 +62,7 @@
 		const byKey = new Map<string, GridCell>();
 		const byTime = new Map<number, GridCell>();
 		days.forEach((day, di) => {
-			for (const c of dayCells(day, zone)) {
+			for (const c of dayCells(day, zone, view.board.starts_at)) {
 				const others = heat.get(c.t) ?? 0;
 				const when = `${dayLabel(c.t, zone)} ${timeText(c.t, zone)}${c.row >= 48 ? ` ${t.secondTime}` : ''}`;
 				const cell = {

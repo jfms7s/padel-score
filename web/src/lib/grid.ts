@@ -14,10 +14,14 @@ export interface Range {
 	end: number;
 }
 
-/** The half-hour starts of a local day: 48, or 46 or 50 where the clocks change. */
-export function slotsOfDay(day: { start: number; end: number }): number[] {
+/** The half-hour starts of a local day: 48, or 46 or 50 where the clocks change. With an
+ *  `anchor` (the board's start) the cells sit on the grid that instant sets. */
+export function slotsOfDay(day: { start: number; end: number }, anchor?: number): number[] {
 	const out: number[] = [];
-	for (let t = day.start; t < day.end; t += SLOT_SECS) out.push(t);
+	// The server takes a time only on the board's own half-hour grid, which a viewer in a zone
+	// that is not a whole half hour from the board's starts the day part way through a clock half hour.
+	const offset = anchor === undefined ? 0 : (((anchor - day.start) % SLOT_SECS) + SLOT_SECS) % SLOT_SECS;
+	for (let t = day.start + offset; t < day.end; t += SLOT_SECS) out.push(t);
 	return out;
 }
 
@@ -34,10 +38,10 @@ const CLOCK_ROWS = 48;
  * a time is read twice: its second reading goes on an extra row after the 48 clock rows. Where
  * they go forward the skipped rows have no cell.
  */
-export function dayCells(day: Pick<Day, 'start' | 'end'>, timeZone: string): Cell[] {
+export function dayCells(day: Pick<Day, 'start' | 'end'>, timeZone: string, anchor?: number): Cell[] {
 	const seen = new Set<number>();
 	let extra = CLOCK_ROWS;
-	return slotsOfDay(day).map((t) => {
+	return slotsOfDay(day, anchor).map((t) => {
 		const [h, m] = timeText(t, timeZone).split(':').map(Number);
 		const clock = (h ?? 0) * 2 + ((m ?? 0) >= 30 ? 1 : 0);
 		if (!seen.has(clock)) {

@@ -16,6 +16,8 @@ pub struct TickReport {
     pub expired_requests: usize,
     /// Events whose sign-up deadline ran: closed, or cancelled for too few teams.
     pub closed_signups: usize,
+    /// Reminders queued: short games and matches, and events starting within the day.
+    pub reminders: usize,
 }
 
 /// One tick as of `now`.
@@ -39,8 +41,12 @@ pub async fn tick_once(state: &AppState, now: i64) -> TickReport {
         }
         Err(error) => tracing::error!(%error, "sign-up deadline job failed"),
     }
-    if report.closed_signups > 0 {
-        // A cancelled event queued notices.
+    match state.store.queue_reminders(now).await {
+        Ok(queued) => report.reminders = queued,
+        Err(error) => tracing::error!(%error, "24h reminder job failed"),
+    }
+    if report.closed_signups + report.reminders > 0 {
+        // A cancelled event or a reminder queued notices.
         state.push.wake();
     }
     report
@@ -56,11 +62,12 @@ pub async fn run(state: AppState) {
             _ = ticker.tick() => {}
         }
         let report = tick_once(&state, crate::api::now()).await;
-        if report.pruned + report.expired_requests + report.closed_signups > 0 {
+        if report.pruned + report.expired_requests + report.closed_signups + report.reminders > 0 {
             tracing::info!(
                 pruned = report.pruned,
                 expired_requests = report.expired_requests,
                 closed_signups = report.closed_signups,
+                reminders = report.reminders,
                 "tick done"
             );
         }

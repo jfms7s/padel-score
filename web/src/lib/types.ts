@@ -1094,3 +1094,100 @@ export interface TakeReport {
 	skipped: string[];
 	left_on_line: number;
 }
+
+// ---- the calendar (crates/server/src/calendar.rs) -----------------------------------------
+
+export type CalendarRole = 'organiser' | 'player' | 'line';
+
+export type CalendarItem =
+	| {
+			kind: 'game';
+			board_token: string;
+			board_title: string;
+			game_id: string;
+			start: number;
+			end: number;
+			players: string[];
+			state: GameState;
+	  }
+	| {
+			kind: 'event';
+			/** Set for the organiser only. */
+			event_id: string | null;
+			join_token: string | null;
+			name: string;
+			event_kind: EventKind;
+			starts_at: number;
+			place: string | null;
+			role: CalendarRole;
+			team: string[] | null;
+			place_in_line: number | null;
+			status: EventStatus;
+	  }
+	| {
+			kind: 'match';
+			join_token: string;
+			starts_at: number;
+			place: string | null;
+			role: CalendarRole;
+			/** The four places in order; null is an open place. */
+			players: (string | null)[];
+			state: ScheduledState;
+	  };
+
+export type WaitingItem =
+	| {
+			kind: 'swap';
+			request_id: string;
+			board_token: string;
+			from_name: string;
+			/** [start, end] of my game. */
+			my_game: [number, number];
+			/** [start, end] of the asker's game. */
+			their_game: [number, number];
+	  }
+	| {
+			kind: 'time';
+			request_id: string;
+			board_token: string;
+			from_name: string;
+			game: [number, number];
+			new: [number, number];
+	  }
+	| { kind: 'partner'; join_token: string; event_name: string; partner_token: string };
+
+export interface BoardStrip {
+	token: string;
+	title: string;
+	starts_at: number;
+	ends_at: number;
+	/** My games on it that have not ended. */
+	my_games: number;
+}
+
+export type OpenItem =
+	| {
+			kind: 'event';
+			join_token: string;
+			name: string;
+			event_kind: EventKind;
+			starts_at: number;
+			place: string | null;
+			teams: number;
+			max_teams: number;
+	  }
+	| {
+			kind: 'match';
+			join_token: string;
+			owner_name: string;
+			starts_at: number;
+			place: string | null;
+			open_places: number;
+	  };
+
+export interface Calendar {
+	waiting: WaitingItem[];
+	items: CalendarItem[];
+	boards: BoardStrip[];
+	open: OpenItem[];
+}

@@ -226,3 +226,38 @@ describe('noticeText for the scheduled match kinds', () => {
 		expect(noticeText({ kind: 'match_cancelled', url: '/j/tok' }, utc).body).toBe('');
 	});
 });
+
+describe('noticeText for the reminders', () => {
+	const utc = { timeZone: 'UTC' };
+	const start = Date.UTC(2026, 10, 4, 20) / 1000;
+
+	it('says a game is one player short, with its time', () => {
+		const n = noticeText({ kind: 'short_game', url: '/b/tok', title: 'Thursday padel', start, end: start + 5400 }, utc);
+		expect(n.title).toBe('One player missing');
+		expect(n.body).toBe('Wed 4 · 20:00–21:30 · Thursday padel');
+		expect(n.url).toBe('/b/tok');
+		expect(n.tag).toBe(`short_game:/b/tok:${start}`);
+	});
+
+	it('says an event starts in 24 hours, in the device zone', () => {
+		const n = noticeText({ kind: 'event_soon', url: '/j/tok', title: 'Sunday cup', start }, utc);
+		expect(n.title).toBe('Starts in 24 hours');
+		expect(n.body).toBe('Wed 4 20:00 · Sunday cup');
+		expect(n.url).toBe('/j/tok');
+		const tokyo = noticeText(
+			{ kind: 'event_soon', url: '/j/tok', title: 'Sunday cup', start },
+			{ timeZone: 'Asia/Tokyo' }
+		);
+		expect(tokyo.body).toBe('Thu 5 05:00 · Sunday cup');
+	});
+
+	it('keeps the same-origin guard first for the new kinds', () => {
+		expect(noticeText({ kind: 'short_game', url: '//evil.test/x' }, utc).url).toBe('/calendar');
+		expect(noticeText({ kind: 'event_soon', url: 'https://evil.test' }, utc).url).toBe('/calendar');
+	});
+
+	it('leaves out what the payload lacks', () => {
+		expect(noticeText({ kind: 'short_game', url: '/b/tok' }, utc).body).toBe('');
+		expect(noticeText({ kind: 'event_soon', url: '/j/tok' }, utc).body).toBe('');
+	});
+});

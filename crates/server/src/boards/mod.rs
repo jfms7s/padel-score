@@ -10,6 +10,7 @@ pub mod formation;
 pub mod ranges;
 
 use actions::{GameRow, leave_in, requests_in};
+pub(crate) use calendar::{calendar_games_in, queue_short_games_in, waiting_and_strips_in};
 
 use std::collections::HashMap;
 
@@ -180,6 +181,8 @@ macro_rules! select_board {
         )
     };
 }
+
+mod calendar;
 
 impl BoardRow {
     fn from_tuple(t: BoardTuple) -> BoardRow {
@@ -651,15 +654,7 @@ async fn view_in(
             let (version, played, match_spectator_token) =
                 extras.get(&g.id).cloned().unwrap_or((0, false, None));
             let past = g.end <= now;
-            let state_of = if played {
-                GameState::Played
-            } else if past {
-                GameState::Past
-            } else if g.players.len() >= PLACES {
-                GameState::Full
-            } else {
-                GameState::Short
-            };
+            let state_of = game_state(played, g.end, g.players.len(), now);
             GameOut {
                 id: g.id.clone(),
                 start: g.start,
@@ -712,6 +707,20 @@ async fn view_in(
         games,
         requests,
     })
+}
+
+/// A game's state as of `now`: played once a match was started from it, past once it ended, else
+/// full or short by its players.
+pub(crate) fn game_state(played: bool, end: i64, players: usize, now: i64) -> GameState {
+    if played {
+        GameState::Played
+    } else if end <= now {
+        GameState::Past
+    } else if players >= PLACES {
+        GameState::Full
+    } else {
+        GameState::Short
+    }
 }
 
 /// The user's own pieces on a board.

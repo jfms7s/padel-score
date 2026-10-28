@@ -893,17 +893,19 @@ async fn edit_later_fills_open_places_from_the_line() {
 async fn the_line_is_first_come_within_one_second() {
     let (s, _pool, _owner, v, who) = full().await;
     let t = &v.join_token;
-    // User ids are random uuids: order by arrival, not by id.
-    let mut line = Vec::new();
+    // Join in descending id order, so an id tie-break would always put them in reverse.
+    let mut users = Vec::new();
     for i in 0..6 {
-        let u = user(&s, &format!("Same{i}")).await;
-        s.join_scheduled(t, &u, T0 + 2).await.unwrap();
-        line.push(format!("Same{i}"));
+        users.push((user(&s, &format!("Same{i}")).await, format!("Same{i}")));
+    }
+    users.sort_by(|a, b| b.0.cmp(&a.0));
+    for (id, _) in &users {
+        s.join_scheduled(t, id, T0 + 2).await.unwrap();
     }
     for i in 0..3 {
         s.leave_scheduled(t, &who[i], T0 + 10).await.unwrap();
         let seen = view(&s, t, None, T0 + 10).await;
-        assert_eq!(seen.places[i].name.as_deref(), Some(line[i].as_str()));
+        assert_eq!(seen.places[i].name.as_deref(), Some(users[i].1.as_str()));
     }
 }
 
