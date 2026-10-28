@@ -63,6 +63,8 @@ export function scheduledMessage(e: unknown): string {
 		const fields: Record<string, string> = strings.scheduled.fields;
 		if (e.code === 'validation' && e.field !== undefined && Object.hasOwn(fields, e.field)) return fields[e.field]!;
 		if (Object.hasOwn(errors, e.code)) return errors[e.code]!;
+		const reasons: Record<string, string> = strings.scheduled.invalidMatch;
+		if (e.code === 'invalid_match' && Object.hasOwn(reasons, e.message)) return reasons[e.message]!;
 	}
 	return signupMessage(e);
 }
@@ -122,13 +124,15 @@ export interface MatchActions {
 export function matchActions(view: ScheduledView, now: number): MatchActions {
 	const me = view.me;
 	const live = view.state === 'open' || view.state === 'full';
+	const anOpenPlace = view.places.some((p) => p.name === null);
 	const isIn = me !== null && (me.slot !== null || me.in_line);
 	const owner = me?.owner === true;
 	const filled = view.places.length === 4 && view.places.every((p) => p.name !== null);
 	const inWindow = now >= view.starts_at - START_WINDOW_SECS && now < view.starts_at + MATCH_SECS;
 	return {
-		join: me !== null && !isIn && live,
-		leave: isIn,
+		// Someone on the line may still take an open place by hand.
+		join: me !== null && me.slot === null && live && (!me.in_line || anOpenPlace),
+		leave: isIn && live,
 		start: owner && live && filled && inWindow,
 		edit: owner && live
 	};

@@ -165,11 +165,20 @@
 			busy = false;
 			return;
 		}
+		let made;
 		try {
-			const made = await createScheduled(toNewScheduled(setup, { startsAt, place: later.place, listing: later.listing }));
-			await goto(`/j/${encodeURIComponent(made.join_token)}`);
+			made = await createScheduled(toNewScheduled(setup, { startsAt, place: later.place, listing: later.listing }));
 		} catch (e) {
 			failure = scheduledMessage(e);
+			busy = false;
+			return;
+		}
+		// The match exists now: a failed navigation must not read as a failed save (a retry would duplicate it).
+		const path = `/j/${encodeURIComponent(made.join_token)}`;
+		try {
+			await goto(path);
+		} catch {
+			stranded = path;
 		}
 		busy = false;
 	}
@@ -262,7 +271,7 @@
 										onadd={added}
 									/>
 								{:else}
-									<input bind:value={setup.teams[team][slot.index]} placeholder={later.on ? t.open : t.player(slot.n)} aria-label={slot.label} autocomplete="off" maxlength={MAX_NAME_LENGTH} disabled={later.on} />
+									<input bind:value={setup.teams[team][slot.index]} placeholder={t.player(slot.n)} aria-label={slot.label} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
 								{/if}
 							</div>
 						{/each}
@@ -435,9 +444,6 @@
 	}
 	.hint.top {
 		margin: 0 0 8px;
-	}
-	.team-in input:disabled {
-		cursor: not-allowed;
 	}
 	.slot + .slot {
 		border-top: 1px solid var(--line);

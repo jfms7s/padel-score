@@ -96,7 +96,9 @@ describe('matchActions', () => {
 	it('join_hidden_when_already_in_or_cancelled', () => {
 		expect(matchActions(view(), START - 3600).join).toBe(true);
 		expect(matchActions(view({ me: me({ slot: 2 }) }), START - 3600).join).toBe(false);
-		expect(matchActions(view({ me: me({ in_line: true }) }), START - 3600).join).toBe(false);
+		expect(matchActions(view({ me: me({ in_line: true }), state: 'full', places: places(4) }), START - 3600).join).toBe(
+			false
+		);
 		for (const state of ['cancelled', 'started', 'past'] as ScheduledState[]) {
 			expect(matchActions(view({ state }), START - 3600).join).toBe(false);
 		}
@@ -104,6 +106,19 @@ describe('matchActions', () => {
 		expect(matchActions(view({ me: null }), START - 3600).join).toBe(false);
 		// A full match still takes people on the line.
 		expect(matchActions(view({ state: 'full', places: places(4) }), START - 3600).join).toBe(true);
+	});
+
+	it('a line member can take an open place by hand, not while the match is full', () => {
+		const inLine = me({ in_line: true });
+		expect(matchActions(view({ me: inLine, places: places(3) }), START).join).toBe(true);
+		expect(matchActions(view({ me: inLine, state: 'full', places: places(4) }), START).join).toBe(false);
+		expect(matchActions(view({ me: inLine, state: 'cancelled', places: places(3) }), START).join).toBe(false);
+	});
+
+	it('no leave once the match is cancelled, started or past', () => {
+		for (const state of ['cancelled', 'started', 'past'] as ScheduledState[]) {
+			expect(matchActions(view({ state, me: me({ slot: 1 }) }), START).leave).toBe(false);
+		}
 	});
 
 	it('leave shows for a place or the line', () => {
@@ -187,6 +202,12 @@ describe('scheduledMessage', () => {
 				'already_started'
 			])
 		);
+	});
+
+	it('says why a create was refused', () => {
+		const bad = (m: string) => new ApiError(422, 'invalid_match', m);
+		expect(scheduledMessage(bad('unknown player'))).toBe(strings.scheduled.invalidMatch['unknown player']);
+		expect(scheduledMessage(bad('same player twice'))).toBe(strings.scheduled.invalidMatch['same player twice']);
 	});
 
 	it('names the field of a 422 and falls back to the sign-up wording', () => {

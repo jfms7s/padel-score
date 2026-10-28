@@ -1309,6 +1309,11 @@ export const strings = {
 			starts_at: 'Choose a start in the future.',
 			place: 'Enter a place of up to 80 characters.'
 		},
+		// 422 `invalid_match` on create, by the server's message.
+		invalidMatch: {
+			'unknown player': 'One of the players is not in your list any more. Pick them again.',
+			'same player twice': 'The same player is in two places.'
+		},
 		// Play later fields on New match.
 		fieldsTitle: 'When and where',
 		date: 'Date',
@@ -1325,8 +1330,6 @@ export const strings = {
 		},
 		// The match page.
 		title: 'Padel match',
-		loading: 'Loading the match…',
-		notFound: 'This match link does not work. Ask for a new one.',
 		by: (name: string) => `Organised by ${name}`,
 		cancelledBanner: 'This match is cancelled.',
 		startedBanner: 'This match has started.',
@@ -1334,7 +1337,6 @@ export const strings = {
 		watch: 'Watch the match',
 		placesTitle: 'Places',
 		openPlace: 'Open',
-		placeNumber: (n: number) => `Place ${n}`,
 		you: 'You',
 		short: (missing: number) => (missing === 1 ? 'One player missing' : `${missing} players missing`),
 		lineTitle: 'Waiting list',
@@ -1367,7 +1369,6 @@ export const strings = {
 		saving: 'Saving…',
 		cancelEdit: 'Cancel',
 		editTitle: 'Change the time or place',
-		saved: 'Saved',
 		remove: 'Remove',
 		removeLabel: (name: string) => `Remove ${name}`,
 		removeConfirm: (name: string) => `Remove ${name} from the match?`,

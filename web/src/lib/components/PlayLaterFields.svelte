@@ -74,6 +74,20 @@
 		font-size: 13px;
 		color: var(--muted);
 	}
+	input:not([type='radio']) {
+		min-height: var(--tap);
+		width: 100%;
+		padding: 0 12px;
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		background: var(--panel);
+		font-size: 16px;
+		color: var(--ink);
+	}
+	input:not([type='radio']):focus-visible {
+		outline: 2px solid var(--a);
+		outline-offset: 2px;
+	}
 	.pair {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
