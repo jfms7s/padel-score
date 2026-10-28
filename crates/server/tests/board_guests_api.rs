@@ -364,3 +364,198 @@ async fn guest_takes_and_gives_a_place() {
     assert_eq!(taken["state"], "full", "{taken}");
     assert!(seated(&taken, &taker), "{taken}");
 }
+
+fn post_guest(token: &str, name: &str) -> Request<Body> {
+    req(
+        Method::POST,
+        &format!("/api/boards/{token}/guests"),
+        Some(json!({ "name": name })),
+        &[],
+    )
+}
+
+#[tokio::test]
+async fn join_as_guest_route() {
+    let (state, app, token, ..) = setup().await;
+    let res = send(&app, post_guest(&token, "Gus")).await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
+    assert!(!res.body["guest_key"].as_str().unwrap().is_empty());
+    assert_eq!(res.body["view"]["me"]["guest"], true);
+
+    let (b, _) = fast_user(&state, "b@x.test", "Bia").await;
+    let start = week_start();
+    let closed = state
+        .store
+        .create_board(
+            &b,
+            NewBoard {
+                allow_guests: false,
+                title: "Closed".to_owned(),
+                place: None,
+                time_zone: "Europe/Lisbon".to_owned(),
+                starts_at: start,
+                ends_at: start + WEEK_SECS,
+            },
+            now() - 7200,
+        )
+        .await
+        .unwrap()
+        .board
+        .token;
+    let off = send(&app, post_guest(&closed, "Gus")).await;
+    assert_eq!(off.status, StatusCode::CONFLICT);
+    assert_eq!(off.body["error"], "guests_off");
+
+    let empty = send(&app, post_guest(&token, "   ")).await;
+    assert_eq!(
+        empty.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        empty.body
+    );
+    assert_eq!(empty.body["field"], "name");
+}
+
+#[tokio::test]
+async fn pick_route_gives_a_working_key() {
+    let (state, app, token, ..) = setup().await;
+    let (id, _) = guest(&state, &token, "Gus").await;
+    let res = send(
+        &app,
+        req(
+            Method::POST,
+            &format!("/api/boards/{token}/guests/{id}/pick"),
+            None,
+            &[],
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let key = res.body["guest_key"].as_str().unwrap().to_owned();
+    let add = send(
+        &app,
+        as_guest(
+            &key,
+            Method::POST,
+            &format!("/api/boards/{token}/ranges"),
+            Some(range(week_start() + 7200)),
+        ),
+    )
+    .await;
+    assert_eq!(add.status, StatusCode::OK, "{}", add.body);
+}
+
+#[tokio::test]
+async fn remove_route_is_creator_only() {
+    let (state, app, token, _, a_raw) = setup().await;
+    let (id, _) = guest(&state, &token, "Gus").await;
+    let (_, b_raw) = fast_user(&state, "b@x.test", "Bia").await;
+    let path = format!("/api/boards/{token}/guests/{id}");
+    let join = send(
+        &app,
+        as_session(
+            &state,
+            &b_raw,
+            Method::POST,
+            &format!("/api/boards/{token}/join"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(join.status, StatusCode::OK, "{}", join.body);
+
+    let denied = send(
+        &app,
+        as_session(&state, &b_raw, Method::DELETE, &path, None),
+    )
+    .await;
+    assert_eq!(denied.status, StatusCode::CONFLICT);
+    assert_eq!(denied.body["error"], "creator_only");
+
+    let ok = send(
+        &app,
+        as_session(&state, &a_raw, Method::DELETE, &path, None),
+    )
+    .await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
+}
+
+#[tokio::test]
+async fn claim_route_moves_the_guest() {
+    let (state, app, token, ..) = setup().await;
+    let (id, _) = guest(&state, &token, "Gus").await;
+    let (b, b_raw) = fast_user(&state, "b@x.test", "Bia").await;
+    let res = send(
+        &app,
+        as_session(
+            &state,
+            &b_raw,
+            Method::POST,
+            &format!("/api/boards/{token}/guests/{id}/claim"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    let members = res.body["members"].as_array().unwrap();
+    assert!(members.iter().all(|m| m["user_id"] != id), "{members:?}");
+    assert!(members.iter().any(|m| m["user_id"] == b), "{members:?}");
+}
+
+#[tokio::test]
+async fn guest_join_is_rate_limited() {
+    let (state, app, token, ..) = setup().await;
+    for i in 0..20 {
+        let res = send(&app, post_guest(&token, &format!("Gus{i}"))).await;
+        assert_eq!(res.status, StatusCode::CREATED, "{i}: {}", res.body);
+    }
+    let limited = send(&app, post_guest(&token, "Gus20")).await;
+    assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS);
+    let other = support::app_from(&state, 2);
+    let res = send(&other, post_guest(&token, "Gus21")).await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
+}
+
+#[tokio::test]
+async fn guest_routes_send_secret_headers() {
+    let (_state, app, token, ..) = setup().await;
+    let res = send(&app, post_guest(&token, "Gus")).await;
+    assert_eq!(res.status, StatusCode::CREATED);
+    assert_eq!(
+        res.header(axum::http::header::CACHE_CONTROL),
+        Some("no-store")
+    );
+    assert_eq!(
+        res.header(axum::http::header::REFERRER_POLICY),
+        Some("no-referrer")
+    );
+}
+
+#[tokio::test]
+async fn cross_site_cookie_with_guest_key_is_403() {
+    let (state, app, token, _, a_raw) = setup().await;
+    let (_, key) = guest(&state, &token, "Gus").await;
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(format!("/api/boards/{token}/ranges"))
+        .header("sec-fetch-site", "cross-site")
+        .header("cookie", cookie(&state, &a_raw))
+        .header(KEY, key)
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(Body::from(range(week_start() + 7200).to_string()))
+        .unwrap();
+    let res = send(&app, request).await;
+    assert_eq!(res.status, StatusCode::FORBIDDEN, "{}", res.body);
+    let view = send(
+        &app,
+        as_session(
+            &state,
+            &a_raw,
+            Method::GET,
+            &format!("/api/boards/{token}"),
+            None,
+        ),
+    )
+    .await;
+    assert!(view.body["pieces"].as_array().unwrap().is_empty());
+}

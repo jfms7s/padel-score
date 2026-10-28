@@ -9,12 +9,20 @@
 //! - `POST /api/boards/{token}/join` is 200; `POST .../leave` is 204 (also as a guest).
 //! - `POST /api/boards/{token}/ranges` and `.../ranges/remove` with `{start, end}` are 200
 //!   (also as a guest).
-//! - `POST /api/boards/{token}/games/{game_id}/leave|give|take` (also as a guest) with `{version}` (the game's, from
-//!   the view the player saw; a stale one is `409 game_changed`) is 200 [`BoardView`].
+//! - `POST /api/boards/{token}/games/{game_id}/leave|give|take` with `{version}` (the game's,
+//!   from the view the player saw; a stale one is `409 game_changed`) is 200 [`BoardView`]
+//!   (also as a guest).
 //! - `POST /api/boards/{token}/games/{game_id}/swap` with `{version, other_game_id,
 //!   other_user_id}` asks a player of an overlapping game to trade places, and `.../time` with
 //!   `{version, start, end, agreed}` moves the game (at once when `agreed`, else as a request
-//!   the other players answer). Both are 200 [`BoardView`].
+//!   the other players answer). Both are 200 [`BoardView`] (also as a guest).
+//! - `POST /api/boards/{token}/guests` with `{name}` is 201 [`GuestJoined`]: the guest's key and
+//!   the board. `POST .../guests/{guest_id}/pick` is 200 [`GuestJoined`] with a new key for an
+//!   existing guest. Both are open to anyone, rate-limited per client address, and `409
+//!   guests_off` on a board that does not allow guests.
+//! - `DELETE /api/boards/{token}/guests/{guest_id}` (creator only) and `POST
+//!   .../guests/{guest_id}/claim` (a signed-in user takes the guest's place) are 200
+//!   [`BoardView`].
 //! - `POST /api/boards/{token}/games/{game_id}/start`, with no body, is 200 [`StartPlayers`]: the
 //!   game's four players as the caller's own player entries, for New match. It is allowed from
 //!   30 minutes before the game until its end; `not_yet`, `game_over`,
@@ -44,7 +52,9 @@ use crate::AppState;
 use crate::accounts;
 use crate::api::{ApiError, ApiJson, ApiPath, now};
 use crate::auth::{self, CurrentUser, OptionalUser, SessionUser};
+use crate::boards::guests::GuestJoined;
 use crate::boards::{BoardChange, BoardOut, BoardView, NewBoard};
+use crate::client_ip::{ClientIp, rate_key};
 use crate::starting::StartPlayers;
 
 pub fn routes() -> Router<AppState> {
@@ -53,6 +63,19 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/boards/{token}",
             get(read).patch(update).delete(delete),
+        )
+        .route("/api/boards/{token}/guests", post(join_as_guest))
+        .route(
+            "/api/boards/{token}/guests/{guest_id}",
+            axum::routing::delete(remove_guest),
+        )
+        .route(
+            "/api/boards/{token}/guests/{guest_id}/pick",
+            post(pick_guest),
+        )
+        .route(
+            "/api/boards/{token}/guests/{guest_id}/claim",
+            post(claim_guest),
         )
         .route("/api/boards/{token}/join", post(join))
         .route("/api/boards/{token}/leave", post(leave))
@@ -157,6 +180,12 @@ struct TimeBody {
     agreed: bool,
 }
 
+/// The body of joining as a guest.
+#[derive(Debug, Deserialize)]
+struct GuestBody {
+    name: String,
+}
+
 #[derive(Debug, Serialize)]
 struct MyBoards {
     items: Vec<BoardOut>,
@@ -226,6 +255,63 @@ async fn join(
     ApiPath(token): ApiPath<String>,
 ) -> Result<Json<BoardView>, ApiError> {
     let view = state.store.join_board(&token, &user.user.id, now()).await?;
+    Ok(Json(view))
+}
+
+/// Count one guest join or pick against the caller's address, before any store work and with no
+/// refund.
+fn limit_guests(state: &AppState, ip: std::net::IpAddr) -> Result<(), ApiError> {
+    state
+        .limits
+        .board_guest
+        .try_acquire(&rate_key(ip), now())
+        .map_err(|retry_after| ApiError::TooMany { retry_after })
+}
+
+async fn join_as_guest(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    ApiPath(token): ApiPath<String>,
+    ApiJson(body): ApiJson<GuestBody>,
+) -> Result<(StatusCode, Json<GuestJoined>), ApiError> {
+    limit_guests(&state, ip)?;
+    let joined = state.store.join_as_guest(&token, &body.name, now()).await?;
+    Ok((StatusCode::CREATED, Json(joined)))
+}
+
+async fn pick_guest(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    ApiPath((token, guest_id)): ApiPath<(String, String)>,
+) -> Result<Json<GuestJoined>, ApiError> {
+    limit_guests(&state, ip)?;
+    let joined = state.store.pick_guest(&token, &guest_id, now()).await?;
+    Ok(Json(joined))
+}
+
+async fn remove_guest(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath((token, guest_id)): ApiPath<(String, String)>,
+) -> Result<Json<BoardView>, ApiError> {
+    let view = state
+        .store
+        .remove_guest(&token, &user.user.id, &guest_id, now())
+        .await?;
+    state.push.wake();
+    Ok(Json(view))
+}
+
+async fn claim_guest(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath((token, guest_id)): ApiPath<(String, String)>,
+) -> Result<Json<BoardView>, ApiError> {
+    let view = state
+        .store
+        .claim_guest(&token, &user.user.id, &guest_id, now())
+        .await?;
+    state.push.wake();
     Ok(Json(view))
 }
 
