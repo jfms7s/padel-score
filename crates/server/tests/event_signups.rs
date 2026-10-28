@@ -17,7 +17,7 @@ use padel_score_server::accounts_store::NewUser;
 use padel_score_server::api::now;
 use padel_score_server::competitions::schedule::{ScheduleInput, Signups};
 use padel_score_server::competitions::signups::{JoinAs, MyEntry, SignupList, SignupTeam};
-use padel_score_server::competitions::{CompetitionChange, Kind, NewCompetition};
+use padel_score_server::competitions::{CompetitionChange, Kind, NewCompetition, Status};
 use padel_score_server::store::StoreError;
 use padel_scoring::{DecidingSet, DeuceRule, Format, SetRules, SetsFormat};
 use serde_json::{Value, json};
@@ -45,23 +45,37 @@ struct World {
     token: String,
 }
 
-/// A public tournament with room for `max` teams, made at `clock` and starting at `start`.
-async fn world_with(max: u32, start: i64, clock: i64) -> World {
+/// A public event of `kind` with room for `max` teams, made at `clock` and starting at `start`.
+/// A non-stop event is one leg with a minimum of two teams.
+async fn world_of(kind: Kind, max: u32, start: i64, clock: i64) -> World {
     let (state, pool) = state().await;
     let (owner, raw) = fast_user(&state, "owner@x.test", "Owner").await;
+    let (name, format, settings, min_teams) = match kind {
+        Kind::Tournament => ("Friday cup", one_set(), None, None),
+        Kind::NonStop => (
+            "Americano",
+            Format::Timed {
+                deuce: DeuceRule::Advantage,
+                draws_allowed: false,
+            },
+            Some(json!({ "legs": 1 })),
+            Some(2),
+        ),
+    };
     let ev = state
         .store
         .create_competition(
             &owner,
             NewCompetition {
-                name: "Friday cup".into(),
-                kind: Kind::Tournament,
-                format: one_set(),
-                settings: None,
+                name: name.into(),
+                kind,
+                format,
+                settings,
                 schedule: Some(ScheduleInput {
                     starts_at: Some(Some(start)),
                     signups: Some(Signups::Public),
                     max_teams: Some(Some(max)),
+                    min_teams,
                     ..Default::default()
                 }),
             },
@@ -79,6 +93,11 @@ async fn world_with(max: u32, start: i64, clock: i64) -> World {
         token: ev.join_token.unwrap(),
         event: ev.id,
     }
+}
+
+/// A public tournament with room for `max` teams, made at `clock` and starting at `start`.
+async fn world_with(max: u32, start: i64, clock: i64) -> World {
+    world_of(Kind::Tournament, max, start, clock).await
 }
 
 /// Starts in three days, so the default deadline is `T0 + 2 * DAY`.
@@ -936,4 +955,351 @@ async fn another_owner_cannot_read_the_list_over_http() {
     assert_eq!(res.status, StatusCode::NOT_FOUND);
     let res = w.anon(Method::GET, &base, None).await;
     assert_eq!(res.status, StatusCode::UNAUTHORIZED);
+}
+
+// ---- Task 14: the deadline job and "Take teams from sign-ups" ----
+
+/// A non-stop event with room for `max` teams, made at `T0`, starting in three days.
+async fn non_stop_world(max: u32) -> World {
+    world_of(Kind::NonStop, max, T0 + 3 * DAY, T0).await
+}
+
+const DEADLINE: i64 = T0 + 2 * DAY;
+
+impl World {
+    /// `n` complete teams (a user plus a partner typed by name), complete in order. Returns the
+    /// users.
+    async fn teams(&self, prefix: &str, n: i64) -> Vec<String> {
+        let mut users = Vec::new();
+        for i in 0..n {
+            let u = self.user(&format!("{prefix}{i}")).await;
+            self.named(&u, &format!("{prefix}Partner{i}"), T0 + 10 + i)
+                .await;
+            users.push(u);
+        }
+        users
+    }
+
+    async fn hand_team(&self, a: &str, b: &str) -> String {
+        let s = &self.state.store;
+        let mut ids = Vec::new();
+        for name in [a, b] {
+            ids.push(
+                s.create_or_get_player(&self.owner, name, T0)
+                    .await
+                    .unwrap()
+                    .0
+                    .id,
+            );
+        }
+        let [x, y]: [String; 2] = ids.try_into().unwrap();
+        s.add_team(&self.owner, &self.event, [x, y], None, T0 + 5)
+            .await
+            .unwrap()
+            .id
+    }
+
+    async fn event_now(&self) -> padel_score_server::competitions::Competition {
+        self.state
+            .store
+            .competition(&self.owner, &self.event)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    async fn team_rows(&self) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM competition_teams WHERE event_id = ?")
+            .bind(&self.event)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap()
+    }
+
+    async fn taken_rows(&self) -> i64 {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM event_signups WHERE event_id = ? AND taken_team_id IS NOT NULL",
+        )
+        .bind(&self.event)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap()
+    }
+
+    async fn take(
+        &self,
+        at: i64,
+    ) -> Result<padel_score_server::competitions::signups::TakeReport, StoreError> {
+        self.state
+            .store
+            .take_teams(&self.owner, &self.event, at)
+            .await
+    }
+}
+
+#[tokio::test]
+async fn deadline_below_minimum_cancels_and_tells_everyone() {
+    let w = world(16).await;
+    let mut users = w.teams("T", 3).await;
+    // A lone solo does not count as a team.
+    let solo = w.user("Solo").await;
+    w.solo(&solo, T0 + 100).await;
+    users.push(solo);
+    let s = &w.state.store;
+    assert_eq!(s.close_due_signups(DEADLINE - 1).await.unwrap(), 0);
+    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap(), 1);
+    let ev = w.event_now().await;
+    assert_eq!(ev.status, Status::Cancelled);
+    assert_eq!(ev.cancelled_at, Some(DEADLINE));
+    assert_eq!(ev.signups_closed_at, Some(DEADLINE));
+    for u in &users {
+        assert_eq!(w.kinds(u).await, ["event_cancelled"], "{u}");
+    }
+    // Done once.
+    assert_eq!(s.close_due_signups(DEADLINE + 60).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn deadline_with_enough_teams_closes_signups() {
+    let w = world(16).await;
+    let users = w.teams("T", 4).await;
+    let s = &w.state.store;
+    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap(), 1);
+    let ev = w.event_now().await;
+    assert_eq!(ev.status, Status::Setup);
+    assert_eq!(ev.signups_closed_at, Some(DEADLINE));
+    assert!(w.kinds(&users[0]).await.is_empty());
+    assert_eq!(s.close_due_signups(DEADLINE + 60).await.unwrap(), 0);
+    let late = w.user("Late").await;
+    assert!(matches!(
+        w.join(&late, JoinAs::Solo, DEADLINE + 1).await,
+        Err(StoreError::Conflict("signups_closed"))
+    ));
+}
+
+#[tokio::test]
+async fn hand_added_teams_count_toward_the_minimum() {
+    let w = world(16).await;
+    w.teams("T", 2).await;
+    w.hand_team("Hand A", "Hand B").await;
+    w.hand_team("Hand C", "Hand D").await;
+    w.state.store.close_due_signups(DEADLINE).await.unwrap();
+    let ev = w.event_now().await;
+    assert_eq!(ev.status, Status::Setup);
+    assert_eq!(ev.signups_closed_at, Some(DEADLINE));
+}
+
+#[tokio::test]
+async fn deadline_job_leaves_other_events_alone() {
+    // Not due yet, sign-ups off, already closed, and already running are all skipped.
+    let w = world(16).await;
+    let s = &w.state.store;
+    assert_eq!(s.close_due_signups(DEADLINE - 1).await.unwrap(), 0);
+    s.take_teams(&w.owner, &w.event, T0 + 5).await.unwrap();
+    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap(), 0);
+    assert_eq!(w.event_now().await.signups_closed_at, Some(T0 + 5));
+    assert_eq!(w.event_now().await.status, Status::Setup);
+}
+
+#[tokio::test]
+async fn take_teams_tournament_takes_largest_bracket() {
+    let w = world(16).await;
+    let users = w.teams("T", 11).await;
+    let report = w.take(T0 + 500).await.unwrap();
+    assert_eq!(report.taken, 8);
+    assert!(report.skipped.is_empty());
+    assert_eq!(report.left_on_line, 3);
+    assert_eq!(w.team_rows().await, 8);
+    assert_eq!(w.taken_rows().await, 8);
+    for u in &users[..8] {
+        assert!(w.kinds(u).await.is_empty(), "{u}");
+    }
+    for u in &users[8..] {
+        let notices = w.notices(u).await;
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0]["kind"], "no_place");
+        assert_eq!(notices[0]["url"], format!("/j/{}", w.token));
+        assert_eq!(notices[0]["title"], "Friday cup");
+    }
+    // A second run changes nothing.
+    let again = w.take(T0 + 600).await.unwrap();
+    assert_eq!((again.taken, again.left_on_line), (0, 3));
+    assert_eq!(w.team_rows().await, 8);
+    assert_eq!(w.kinds(&users[8]).await, ["no_place"]);
+}
+
+#[tokio::test]
+async fn take_teams_non_stop_takes_largest_even() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 7).await;
+    let report = w.take(T0 + 500).await.unwrap();
+    assert_eq!((report.taken, report.left_on_line), (6, 1));
+    assert_eq!(w.team_rows().await, 6);
+    assert_eq!(w.kinds(&users[6]).await, ["no_place"]);
+}
+
+#[tokio::test]
+async fn hand_added_teams_fill_first() {
+    let w = non_stop_world(8).await;
+    w.hand_team("Hand A", "Hand B").await;
+    w.hand_team("Hand C", "Hand D").await;
+    w.teams("T", 7).await;
+    let report = w.take(T0 + 500).await.unwrap();
+    assert_eq!((report.taken, report.left_on_line), (6, 1));
+    assert_eq!(w.team_rows().await, 8);
+    assert_eq!(w.taken_rows().await, 6);
+}
+
+#[tokio::test]
+async fn taken_players_are_auto_linked_named_partner_is_plain() {
+    let w = non_stop_world(8).await;
+    let (ana, rui, marta) = (
+        w.user("Ana").await,
+        w.user("Rui").await,
+        w.user("Marta").await,
+    );
+    w.solo(&ana, T0 + 10).await;
+    w.solo(&rui, T0 + 20).await;
+    w.named(&marta, "Bia", T0 + 30).await;
+    w.take(T0 + 500).await.unwrap();
+    let players: Vec<(String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT name, linked_user_id, link_auto FROM players WHERE owner_user_id = ? \
+         ORDER BY name",
+    )
+    .bind(&w.owner)
+    .fetch_all(&w.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        players,
+        [
+            ("Ana".to_owned(), Some(ana), true),
+            ("Bia".to_owned(), None, false),
+            ("Marta".to_owned(), Some(marta), true),
+            ("Rui".to_owned(), Some(rui), true),
+        ]
+    );
+    let teams = w
+        .state
+        .store
+        .teams(&w.owner, &w.event)
+        .await
+        .unwrap()
+        .unwrap();
+    let shown: Vec<&str> = teams.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(shown, ["Ana / Rui", "Marta / Bia"]);
+}
+
+#[tokio::test]
+async fn sign_up_clashing_with_a_hand_added_team_is_skipped() {
+    let w = non_stop_world(8).await;
+    let ana = w.user("Ana").await;
+    let ana_pair = w.named(&ana, "Bia", T0 + 10).await;
+    assert!(matches!(ana_pair, MyEntry::Team { .. }));
+    let others = w.teams("T", 3).await;
+    // The organiser has two entries for Ana's account; the hand-added team uses the older one,
+    // the sign-up would use the newest.
+    let s = &w.state.store;
+    let old = s
+        .create_or_get_player(&w.owner, "Ana Old", T0)
+        .await
+        .unwrap()
+        .0
+        .id;
+    let new = s
+        .create_or_get_player(&w.owner, "Ana New", T0 + 1)
+        .await
+        .unwrap()
+        .0
+        .id;
+    for id in [&old, &new] {
+        sqlx::query("UPDATE players SET linked_user_id = ? WHERE id = ?")
+            .bind(&ana)
+            .bind(id)
+            .execute(&w.pool)
+            .await
+            .unwrap();
+    }
+    let other = s
+        .create_or_get_player(&w.owner, "Hand B", T0)
+        .await
+        .unwrap()
+        .0
+        .id;
+    s.add_team(&w.owner, &w.event, [old, other], None, T0 + 5)
+        .await
+        .unwrap();
+    let entry: String = sqlx::query_scalar("SELECT id FROM event_signups WHERE user1_id = ?")
+        .bind(&ana)
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+    // 1 hand-added + 4 complete, max 8: four teams in all, so three come from sign-ups.
+    let report = w.take(T0 + 500).await.unwrap();
+    assert_eq!(report.skipped, [entry]);
+    assert_eq!((report.taken, report.left_on_line), (3, 1));
+    assert_eq!(w.team_rows().await, 4);
+    // Ana stays on the line and is not told "no place" (her sign-up is still waiting).
+    assert!(w.kinds(&ana).await.is_empty());
+    for u in &others {
+        assert!(w.kinds(u).await.is_empty());
+    }
+    assert_eq!(w.taken_rows().await, 3);
+}
+
+#[tokio::test]
+async fn take_teams_closes_signups() {
+    let w = world(16).await;
+    w.teams("T", 4).await;
+    // Before the deadline, too.
+    w.take(T0 + 500).await.unwrap();
+    assert_eq!(w.event_now().await.signups_closed_at, Some(T0 + 500));
+    let late = w.user("Late").await;
+    assert!(matches!(
+        w.join(&late, JoinAs::Solo, T0 + 600).await,
+        Err(StoreError::Conflict("signups_closed"))
+    ));
+    // The deadline job then has nothing to do.
+    assert_eq!(w.state.store.close_due_signups(DEADLINE).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn take_teams_needs_a_live_event_of_the_owner() {
+    let w = world(16).await;
+    w.teams("T", 4).await;
+    let stranger = w.user("Stranger").await;
+    let s = &w.state.store;
+    assert!(matches!(
+        s.take_teams(&stranger, &w.event, T0 + 500).await,
+        Err(StoreError::NotFound)
+    ));
+    s.cancel_competition(&w.owner, &w.event, T0 + 500)
+        .await
+        .unwrap();
+    assert!(matches!(
+        w.take(T0 + 600).await,
+        Err(StoreError::Conflict("event_cancelled"))
+    ));
+}
+
+#[tokio::test]
+async fn take_teams_over_http() {
+    let w = world(16).await;
+    w.teams("T", 5).await;
+    let path = format!("/api/events/{}/take-teams", w.event);
+    let res = w.call(&w.raw, Method::POST, &path, None).await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(
+        res.body,
+        json!({ "taken": 4, "skipped": [], "left_on_line": 1 })
+    );
+    assert!(
+        w.anon(Method::POST, &path, None)
+            .await
+            .status
+            .is_client_error()
+    );
+    let (_, other) = fast_user(&w.state, "other@x.test", "Other").await;
+    let res = w.call(&other, Method::POST, &path, None).await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
 }

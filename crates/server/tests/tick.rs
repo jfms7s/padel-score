@@ -155,3 +155,71 @@ async fn tick_expires_requests_of_started_games() {
     assert_eq!(status(second).await, "pending");
     assert_eq!(tick_once(&state, START + 1800).await.expired_requests, 0);
 }
+
+#[tokio::test]
+async fn tick_runs_deadlines() {
+    use padel_score_server::competitions::schedule::{ScheduleInput, Signups};
+    use padel_score_server::competitions::signups::JoinAs;
+    use padel_score_server::competitions::{Kind, NewCompetition};
+    use padel_scoring::{DecidingSet, DeuceRule, Format, SetRules, SetsFormat};
+    const T0: i64 = 1_800_000_000;
+    const DAY: i64 = 86_400;
+    let (state, pool, _app, admin, _raw) = with_admin().await;
+    let ev = state
+        .store
+        .create_competition(
+            &admin,
+            NewCompetition {
+                name: "Friday cup".into(),
+                kind: Kind::Tournament,
+                format: Format::Sets(SetRules {
+                    deuce: DeuceRule::Advantage,
+                    sets: SetsFormat::One,
+                    deciding: DecidingSet::FullSet,
+                }),
+                settings: None,
+                schedule: Some(ScheduleInput {
+                    starts_at: Some(Some(T0 + 3 * DAY)),
+                    signups: Some(Signups::Public),
+                    max_teams: Some(Some(8)),
+                    ..Default::default()
+                }),
+            },
+            T0,
+        )
+        .await
+        .unwrap();
+    let rui = state
+        .store
+        .create_user(
+            padel_score_server::accounts_store::NewUser {
+                email: "rui@x.test".into(),
+                display_name: "Rui".into(),
+                password_hash: "x".into(),
+            },
+            T0,
+        )
+        .await
+        .unwrap()
+        .id;
+    let token = ev.join_token.clone().unwrap();
+    state
+        .store
+        .join_event(&token, &rui, JoinAs::Solo, T0 + 10)
+        .await
+        .unwrap();
+    // Before the deadline nothing happens.
+    assert_eq!(tick_once(&state, T0 + DAY).await.closed_signups, 0);
+    // At the deadline one team is short of the minimum: the event is cancelled and Rui told.
+    let report = tick_once(&state, T0 + 2 * DAY).await;
+    assert_eq!(report.closed_signups, 1);
+    let kinds: Vec<String> =
+        sqlx::query_scalar("SELECT payload FROM push_outbox WHERE user_id = ?")
+            .bind(&rui)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kinds.len(), 1);
+    assert!(kinds[0].contains("event_cancelled"), "{}", kinds[0]);
+    assert_eq!(tick_once(&state, T0 + 2 * DAY + 60).await.closed_signups, 0);
+}

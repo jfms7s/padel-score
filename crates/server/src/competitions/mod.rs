@@ -460,6 +460,69 @@ async fn notify_signed_up_in(
     Ok(())
 }
 
+/// Add a team of two of the owner's players to `ev` (in setup, not cancelled: the caller
+/// checks) inside the caller's transaction. The pair rules are [`check_pair`]'s
+/// (`Conflict("player_in_team")` for a player already in a team, or one account twice), and
+/// `Conflict("too_many_teams")` past [`MAX_TEAMS`]. `name` is already cleaned.
+pub(crate) async fn add_team_in(
+    tx: &mut Tx<'_>,
+    owner: &str,
+    ev: &Competition,
+    players: [String; 2],
+    name: Option<String>,
+) -> Result<EventTeam, StoreError> {
+    let event_id = ev.id.as_str();
+    check_pair(tx, owner, event_id, &players, None).await?;
+    let (count, next): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(MAX(position) + 1, 0) FROM competition_teams \
+         WHERE event_id = ?",
+    )
+    .bind(event_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if usize::try_from(count).unwrap_or(usize::MAX) >= MAX_TEAMS {
+        return Err(StoreError::Conflict("too_many_teams"));
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO competition_teams (id, event_id, name, player1_id, player2_id, position) \
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(event_id)
+    .bind(&name)
+    .bind(&players[0])
+    .bind(&players[1])
+    .bind(next)
+    .execute(&mut **tx)
+    .await?;
+    team_in(tx, event_id, &id)
+        .await?
+        .ok_or(StoreError::NotFound)
+}
+
+/// Call `ev` off as of `now`: mark it cancelled, close its sign-ups and tell the signed-up users
+/// (not the organiser).
+pub(crate) async fn cancel_in(
+    tx: &mut Tx<'_>,
+    ev: &mut Competition,
+    now: i64,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "UPDATE competitions SET cancelled_at = ?, \
+         signups_closed_at = COALESCE(signups_closed_at, ?) WHERE id = ?",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(&ev.id)
+    .execute(&mut **tx)
+    .await?;
+    ev.status = Status::Cancelled;
+    ev.cancelled_at = Some(now);
+    ev.signups_closed_at = ev.signups_closed_at.or(Some(now));
+    notify_signed_up_in(tx, ev, NoticeKind::EventCancelled, now).await
+}
+
 /// The sign-up layout before a write that can move teams across the maximum line, or `None`
 /// for an event that never took sign-ups.
 async fn layout_before(
@@ -689,19 +752,7 @@ impl Store {
         if ev.status != Status::Setup {
             return Err(StoreError::Conflict("event_started"));
         }
-        sqlx::query(
-            "UPDATE competitions SET cancelled_at = ?, \
-             signups_closed_at = COALESCE(signups_closed_at, ?) WHERE id = ?",
-        )
-        .bind(now)
-        .bind(now)
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-        ev.status = Status::Cancelled;
-        ev.cancelled_at = Some(now);
-        ev.signups_closed_at = ev.signups_closed_at.or(Some(now));
-        notify_signed_up_in(&mut tx, &ev, NoticeKind::EventCancelled, now).await?;
+        cancel_in(&mut tx, &mut ev, now).await?;
         tx.commit().await?;
         Ok(ev)
     }
@@ -754,34 +805,8 @@ impl Store {
         if ev.status != Status::Setup {
             return Err(StoreError::Conflict("event_started"));
         }
-        check_pair(&mut tx, owner, event_id, &players, None).await?;
         let before = layout_before(&mut tx, &ev).await?;
-        let (count, next): (i64, i64) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(MAX(position) + 1, 0) FROM competition_teams \
-             WHERE event_id = ?",
-        )
-        .bind(event_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if usize::try_from(count).unwrap_or(usize::MAX) >= MAX_TEAMS {
-            return Err(StoreError::Conflict("too_many_teams"));
-        }
-        let id = uuid::Uuid::new_v4().to_string();
-        sqlx::query(
-            "INSERT INTO competition_teams (id, event_id, name, player1_id, player2_id, position) \
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(event_id)
-        .bind(&name)
-        .bind(&players[0])
-        .bind(&players[1])
-        .bind(next)
-        .execute(&mut *tx)
-        .await?;
-        let team = team_in(&mut tx, event_id, &id)
-            .await?
-            .ok_or(StoreError::NotFound)?;
+        let team = add_team_in(&mut tx, owner, &ev, players, name).await?;
         tell_moves(&mut tx, &ev, before, owner, now).await?;
         tx.commit().await?;
         Ok(team)

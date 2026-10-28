@@ -11,7 +11,9 @@
 //! - The organiser's, owner only (another user's event is 404):
 //!   `GET /api/events/{id}/signups` is the [`SignupList`]; `DELETE .../signups/{entry}` is 204;
 //!   `POST .../signups/{entry}/split` and `POST .../signups/pair` with `{entries: [a, b]}` are
-//!   200 with the fresh list.
+//!   200 with the fresh list. `POST /api/events/{id}/take-teams` makes teams of the complete
+//!   sign-ups and closes the sign-ups: 200 [`TakeReport`] (409 `signups_off`, `event_started`,
+//!   `event_cancelled`).
 //!
 //! Joining, leaving, accepting and the organiser's changes tell the event's streams and the
 //! organiser's desk, and wake the push sender after they commit. Conflicts are
@@ -28,7 +30,9 @@ use crate::AppState;
 use crate::accounts;
 use crate::api::{ApiError, ApiJson, ApiPath, now};
 use crate::auth::{OptionalUser, SessionUser};
-use crate::competitions::signups::{EventJoinInfo, JoinAs, MyEntry, PartnerInvite, SignupList};
+use crate::competitions::signups::{
+    EventJoinInfo, JoinAs, MyEntry, PartnerInvite, SignupList, TakeReport,
+};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -38,6 +42,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/partner/{ptoken}/decline", post(decline))
         .route("/api/events/{id}/signups", get(list))
         .route("/api/events/{id}/signups/pair", post(pair))
+        .route("/api/events/{id}/take-teams", post(take_teams))
         .route("/api/events/{id}/signups/{entry_id}", delete(remove))
         .route("/api/events/{id}/signups/{entry_id}/split", post(split))
         .layer(axum::middleware::map_response(accounts::secret_headers))
@@ -228,4 +233,14 @@ async fn pair(
         .pair_signups(&user.user.id, &id, a, b, now())
         .await?;
     organiser_changed(&state, &user.user.id, &id).await
+}
+
+async fn take_teams(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath(id): ApiPath<String>,
+) -> Result<Json<TakeReport>, ApiError> {
+    let report = state.store.take_teams(&user.user.id, &id, now()).await?;
+    changed(&state, &id, &user.user.id);
+    Ok(Json(report))
 }
