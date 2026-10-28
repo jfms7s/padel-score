@@ -156,34 +156,32 @@ pub(crate) async fn open_events_in(
         .map_err(StoreError::from)
 }
 
-/// `event_soon` for every dated event not cancelled that starts within the next day and has not
-/// been reminded: to each signed-up account once. Marks the event reminded. Returns how many
-/// notices were queued.
+/// `event_soon` for every dated event in setup (not cancelled, not started early) that starts
+/// within the next day: to each account in the event (a team or taken entry; not the line, a
+/// solo or a pending invitation), once per start time. The per-user dedupe key carries the
+/// start, so a sign-up inside the last day is still told and a rescheduled event reminds again;
+/// nothing else gates it. Returns how many notices were queued.
 pub(crate) async fn queue_events_soon_in(tx: &mut Tx<'_>, now: i64) -> Result<usize, StoreError> {
-    let due: Vec<(String, String, String, i64)> = sqlx::query_as(
-        "SELECT id, name, join_token, starts_at FROM competitions \
+    let due: Vec<(String, String, String, i64, Option<u32>)> = sqlx::query_as(
+        "SELECT id, name, join_token, starts_at, max_teams FROM competitions \
          WHERE starts_at > ?1 AND starts_at <= ?1 + ?2 AND cancelled_at IS NULL \
-         AND reminded_at IS NULL AND join_token IS NOT NULL ORDER BY starts_at, id",
+         AND status = 'setup' AND join_token IS NOT NULL ORDER BY starts_at, id",
     )
     .bind(now)
     .bind(crate::calendar::DAY_SECS)
     .fetch_all(&mut **tx)
     .await?;
     let mut queued = 0;
-    for (id, name, token, starts_at) in due {
-        let users: Vec<String> = sqlx::query_scalar(
-            "SELECT user1_id FROM event_signups WHERE event_id = ?1 \
-             UNION SELECT user2_id FROM event_signups WHERE event_id = ?1 AND user2_id IS NOT NULL \
-             ORDER BY 1",
-        )
-        .bind(&id)
-        .fetch_all(&mut **tx)
-        .await?;
+    for (id, name, token, starts_at, max_teams) in due {
+        let layout = layout_in(tx, &id, max_teams).await?;
+        let mut users: Vec<&str> = layout.teams.iter().flat_map(Entry::users).collect();
+        users.sort_unstable();
+        users.dedup();
         let notices: Vec<Notice> = users
             .into_iter()
             .map(|user| Notice {
-                dedupe: Some(format!("event-soon:{id}:{user}")),
-                user_id: user,
+                dedupe: Some(format!("event-soon:{id}:{starts_at}:{user}")),
+                user_id: user.to_owned(),
                 payload: Payload {
                     kind: NoticeKind::EventSoon,
                     url: format!("/j/{token}"),
@@ -194,11 +192,6 @@ pub(crate) async fn queue_events_soon_in(tx: &mut Tx<'_>, now: i64) -> Result<us
             })
             .collect();
         queued += queue_in(tx, &notices, now).await?;
-        sqlx::query("UPDATE competitions SET reminded_at = ? WHERE id = ?")
-            .bind(now)
-            .bind(&id)
-            .execute(&mut **tx)
-            .await?;
     }
     Ok(queued)
 }

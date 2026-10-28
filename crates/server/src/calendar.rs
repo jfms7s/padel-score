@@ -211,11 +211,12 @@ impl Store {
     ///   within the next day goes to every member of the board who is in no game overlapping it.
     /// - `match_short`: a scheduled match with three places filled starting within the day goes
     ///   to the people holding them.
-    /// - `event_soon`: a dated event, not cancelled, starting within the day goes once to the
-    ///   people signed up (`reminded_at` is set).
+    /// - `event_soon`: a dated event in setup starting within the day goes to the people in it
+    ///   (teams, not the line, solos or pending invitations).
     ///
-    /// Every key is per user (`short:{game}:{user}`, `match-short:{match}:{user}`,
-    /// `event-soon:{event}:{user}`) because the outbox's `dedupe` is unique across all rows.
+    /// Every key is per user (`short:{game}:{start}:{user}`,
+    /// `match-short:{match}:{start}:{user}`, `event-soon:{event}:{start}:{user}`) because the outbox's `dedupe` is unique across
+    /// all rows, and carry the start, so a moved game, edited match or rescheduled event reminds again.
     /// The caller wakes the push sender.
     pub async fn queue_reminders(&self, now: i64) -> Result<usize, StoreError> {
         let mut tx = self.begin().await?;

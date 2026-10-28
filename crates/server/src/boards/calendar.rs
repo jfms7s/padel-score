@@ -165,7 +165,7 @@ pub(crate) async fn queue_short_games_in(tx: &mut Tx<'_>, now: i64) -> Result<us
         let notices: Vec<Notice> = free
             .into_iter()
             .map(|user| Notice {
-                dedupe: Some(format!("short:{game_id}:{user}")),
+                dedupe: Some(format!("short:{game_id}:{start}:{user}")),
                 user_id: user,
                 payload: Payload {
                     kind: NoticeKind::ShortGame,

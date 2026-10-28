@@ -457,13 +457,6 @@ mod reminders {
         assert_eq!(rows[0].1["title"], "Friday cup");
         assert_eq!(rows[0].1["start"], START);
         assert_eq!(rows[0].1["url"], format!("/j/{token}"));
-        let reminded: Option<i64> =
-            sqlx::query_scalar("SELECT reminded_at FROM competitions WHERE id = ?")
-                .bind(&ev.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(reminded, Some(START - 24 * HOUR + 1));
         assert_eq!(tick_once(&state, START - 23 * HOUR).await.reminders, 0);
         assert_eq!(rows_len(&pool).await, 2);
     }
@@ -526,5 +519,198 @@ mod reminders {
         assert_eq!(rows[0].1["start"], START);
         assert_eq!(rows[0].1["name"], "Ana");
         assert_eq!(tick_once(&state, START - HOUR).await.reminders, 0);
+    }
+
+    /// A public tournament with sign-ups open until an hour before the start.
+    async fn event(state: &AppState, owner: &str) -> (String, String) {
+        let ev = state
+            .store
+            .create_competition(
+                owner,
+                NewCompetition {
+                    name: "Friday cup".into(),
+                    kind: Kind::Tournament,
+                    format: one_set(),
+                    settings: None,
+                    schedule: Some(ScheduleInput {
+                        starts_at: Some(Some(START)),
+                        signups: Some(Signups::Public),
+                        max_teams: Some(Some(8)),
+                        deadline_at: Some(Some(START - HOUR)),
+                        ..Default::default()
+                    }),
+                },
+                T0,
+            )
+            .await
+            .unwrap();
+        (ev.id, ev.join_token.unwrap())
+    }
+
+    #[tokio::test]
+    async fn event_soon_reaches_late_signups_and_a_rescheduled_event() {
+        let (state, pool, _app, admin, _raw) = with_admin().await;
+        let (id, token) = event(&state, &admin).await;
+        let mut first = Vec::new();
+        for n in ["Rui", "Ana2"] {
+            let u = user(&state, n).await;
+            state
+                .store
+                .join_event(&token, &u, JoinAs::Solo, T0 + 1)
+                .await
+                .unwrap();
+            first.push(u);
+        }
+        let inside = START - 20 * HOUR;
+        assert_eq!(tick_once(&state, inside).await.reminders, 2);
+        // A pair signing up inside the last day is told too; a lone solo is not in the event.
+        for n in ["Marta", "Joana", "Solo"] {
+            let u = user(&state, n).await;
+            state
+                .store
+                .join_event(&token, &u, JoinAs::Solo, inside + 1)
+                .await
+                .unwrap();
+        }
+        assert_eq!(tick_once(&state, inside + 60).await.reminders, 2);
+        assert_eq!(rows(&pool, "event_soon").await.len(), 4);
+        assert_eq!(tick_once(&state, inside + 120).await.reminders, 0);
+        // Moved by an hour: everyone in is told again.
+        sqlx::query("UPDATE competitions SET starts_at = starts_at + ? WHERE id = ?")
+            .bind(HOUR)
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(tick_once(&state, inside + 180).await.reminders, 4);
+    }
+
+    #[tokio::test]
+    async fn event_soon_not_for_cancelled_or_started_events() {
+        let (state, pool, _app, admin, _raw) = with_admin().await;
+        let (id, token) = event(&state, &admin).await;
+        for n in ["Rui", "Ana2"] {
+            let u = user(&state, n).await;
+            state
+                .store
+                .join_event(&token, &u, JoinAs::Solo, T0 + 1)
+                .await
+                .unwrap();
+        }
+        sqlx::query("UPDATE competitions SET cancelled_at = ? WHERE id = ?")
+            .bind(T0 + 2)
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(tick_once(&state, START - 20 * HOUR).await.reminders, 0);
+        sqlx::query("UPDATE competitions SET cancelled_at = NULL, status = 'running' WHERE id = ?")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(tick_once(&state, START - 20 * HOUR).await.reminders, 0);
+    }
+
+    #[tokio::test]
+    async fn a_moved_game_or_match_reminds_again() {
+        let (state, pool, _app, admin, _raw) = with_admin().await;
+        short_world(&state).await;
+        let (a, b, c) = (
+            user(&state, "P1").await,
+            user(&state, "P2").await,
+            user(&state, "P3").await,
+        );
+        let m = state
+            .store
+            .create_scheduled(
+                &admin,
+                NewScheduled {
+                    starts_at: START + 5 * HOUR,
+                    place: None,
+                    listing: Listing::Private,
+                    format: one_set(),
+                    places: Default::default(),
+                },
+                T0,
+            )
+            .await
+            .unwrap();
+        for u in [&a, &b, &c] {
+            state
+                .store
+                .join_scheduled(&m.join_token, u, T0 + 1)
+                .await
+                .unwrap();
+        }
+        let now = START - 10 * HOUR;
+        assert_eq!(tick_once(&state, now).await.reminders, 5);
+        assert_eq!(tick_once(&state, now + 60).await.reminders, 0);
+        sqlx::query(
+            "UPDATE board_games SET starts_at = starts_at + 3600, ends_at = ends_at + 3600",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE scheduled_matches SET starts_at = starts_at + 3600")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // The two free members and the three players are told again for the new start.
+        assert_eq!(tick_once(&state, now + 120).await.reminders, 5);
+        assert_eq!(rows(&pool, "short_game").await.len(), 4);
+        assert_eq!(rows(&pool, "match_short").await.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn nothing_for_cancelled_or_started_matches_or_played_games() {
+        let (state, pool, _app, admin, _raw) = with_admin().await;
+        short_world(&state).await;
+        let mut tokens = Vec::new();
+        for i in 0..2 {
+            let m = state
+                .store
+                .create_scheduled(
+                    &admin,
+                    NewScheduled {
+                        starts_at: START + 5 * HOUR + i * HOUR,
+                        place: None,
+                        listing: Listing::Private,
+                        format: one_set(),
+                        places: Default::default(),
+                    },
+                    T0,
+                )
+                .await
+                .unwrap();
+            for n in 0..3 {
+                let u = user(&state, &format!("P{i}{n}")).await;
+                state
+                    .store
+                    .join_scheduled(&m.join_token, &u, T0 + 1)
+                    .await
+                    .unwrap();
+            }
+            tokens.push(m.id);
+        }
+        sqlx::query("INSERT INTO matches (id, scorer_token, spectator_token, format, start, teams, created_at, last_activity_at) VALUES ('m1', 's', 'p', '{}', '{}', '{}', 1, 1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE scheduled_matches SET cancelled_at = 1 WHERE id = ?")
+            .bind(&tokens[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE scheduled_matches SET started_at = 1, match_id = 'm1' WHERE id = ?")
+            .bind(&tokens[1])
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE board_games SET match_id = 'm1', played_at = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(tick_once(&state, START - 10 * HOUR).await.reminders, 0);
     }
 }

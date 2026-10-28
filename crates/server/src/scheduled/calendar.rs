@@ -137,7 +137,7 @@ pub(crate) async fn queue_short_matches_in(tx: &mut Tx<'_>, now: i64) -> Result<
         let notices: Vec<Notice> = players
             .into_iter()
             .map(|user| Notice {
-                dedupe: Some(format!("match-short:{id}:{user}")),
+                dedupe: Some(format!("match-short:{id}:{starts_at}:{user}")),
                 user_id: user,
                 payload: Payload {
                     kind: NoticeKind::MatchShort,
