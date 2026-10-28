@@ -122,6 +122,10 @@ export function noticeText(p: NoticePayload, opts: NoticeOptions = {}): NoticeTe
 			return made(t.removedFromMatch, matchBody(p, opts));
 		case 'match_short':
 			return made(t.matchShort, matchBody(p, opts));
+		case 'short_game':
+			return made(t.shortGame, gameBody(p, opts));
+		case 'event_soon':
+			return made(t.eventSoon, eventBody(p, opts));
 		default:
 			return made(t.appName, t.fallback);
 	}

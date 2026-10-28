@@ -7,8 +7,20 @@ const current = (path: string) =>
 		.map((i) => i.href);
 
 describe('railItems', () => {
-	it('lists the five destinations in order', () => {
-		expect(railItems('/').map((i) => i.href)).toEqual(['/', '/events', '/players', '/history', '/profile']);
+	it('lists the six destinations in order', () => {
+		expect(railItems('/').map((i) => i.href)).toEqual([
+			'/',
+			'/calendar',
+			'/events',
+			'/players',
+			'/history',
+			'/profile'
+		]);
+	});
+
+	it('marks Calendar on /calendar, second in the rail', () => {
+		expect(current('/calendar')).toEqual(['/calendar']);
+		expect(railItems('/calendar').findIndex((i) => i.current)).toBe(1);
 	});
 
 	it('marks only Home on /', () => {

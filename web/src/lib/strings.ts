@@ -935,6 +935,7 @@ export const strings = {
 	nav: {
 		label: 'Main',
 		home: 'Home',
+		calendar: 'Calendar',
 		events: 'Events',
 		players: 'Players',
 		history: 'History',
@@ -986,7 +987,48 @@ export const strings = {
 		matchChanged: 'Match changed',
 		matchCancelled: 'Match cancelled',
 		removedFromMatch: 'Removed from the match',
-		matchShort: 'One player missing'
+		matchShort: 'One player missing',
+		shortGame: 'One player missing',
+		eventSoon: 'Starts in 24 hours'
+	},
+
+	// The calendar page and Next up on Home.
+	calendar: {
+		title: 'Calendar',
+		loading: 'Loading your calendar…',
+		nextUp: 'Next up',
+		waiting: 'Waiting for your answer',
+		partnerWaiting: (event: string) => `Waiting for your partner in ${event}`,
+		partnerHint: 'They have not answered yet. Send the link again if they lost it.',
+		partnerResend: 'Send the link again',
+		partnerShareTitle: (event: string) => `${event}: join my team`,
+		linkCopied: 'Link copied',
+		linkFailed: "Couldn't share the link.",
+		upcoming: 'Coming up',
+		empty: 'Nothing planned yet. Make a board, plan a match or join an event.',
+		week: 'Week',
+		weekOf: (first: string, last: string) => `${first} – ${last}`,
+		prevWeek: 'Previous week',
+		nextWeek: 'Next week',
+		thisWeek: 'This week',
+		nothingThisWeek: 'Nothing',
+		boards: 'Your boards',
+		boardGames: (n: number) => (n === 0 ? 'No games yet' : n === 1 ? '1 game' : `${n} games`),
+		openToJoin: 'Open to join',
+		openNone: 'Nothing open to join right now.',
+		newBoard: 'New board',
+		match: 'Match',
+		matchBy: (name: string) => `Match by ${name}`,
+		role: { organiser: 'You organise', player: 'You play', line: 'In line' },
+		inLine: (n: number) => `In line, number ${n}`,
+		matchState: { open: 'Open', full: 'Full', started: 'Started', cancelled: 'Cancelled', past: 'Over' },
+		teamsOpen: (teams: number, max: number) => `${teams} of ${max} teams`,
+		placesOpen: (n: number) => (n === 1 ? '1 place open' : `${n} places open`),
+		pushTitle: 'Turn on notifications on this device',
+		pushHint: 'Hear when a game forms, a player is missing or someone asks to swap.',
+		pushOn: 'Turn on',
+		pushNotNow: 'Not now',
+		failed: "Couldn't load your calendar."
 	},
 
 	// Game boards: the board page, the week grid and the new-board form.

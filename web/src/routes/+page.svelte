@@ -4,12 +4,14 @@
 	import { dateText } from '#lib/dates.ts';
 	import { homeEvents, listEvents } from '#lib/events.ts';
 	import { claimBadgeCount } from '#lib/linking.ts';
+	import { getCalendar, nextUp, startOfToday } from '#lib/calendar.ts';
+	import NextUp from '#lib/components/NextUp.svelte';
 	import { listPlayers } from '#lib/players.ts';
 	import { session } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
 	import { listRecent, removeRecent, scorerPath, type RecentMatch } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
-	import type { EventSummary, MyMatch } from '#lib/types.ts';
+	import type { CalendarItem, EventSummary, MyMatch } from '#lib/types.ts';
 
 	let recent = $state<RecentMatch[]>([]);
 	$effect(() => {
@@ -44,6 +46,22 @@
 		listPlayers({ quiet: true }).then(
 			(list) => {
 				if (live) claimCount = claimBadgeCount(list);
+			},
+			() => {}
+		);
+		return () => {
+			live = false;
+		};
+	});
+
+	// What is next on the calendar; best effort, no card on failure.
+	let next = $state<CalendarItem | null>(null);
+	$effect(() => {
+		if (!signedIn) return;
+		let live = true;
+		getCalendar(startOfToday()).then(
+			(cal) => {
+				if (live) next = nextUp(cal, Date.now() / 1000);
 			},
 			() => {}
 		);
@@ -107,6 +125,7 @@
 
 	{#if signedIn}
 		<nav class="links" aria-label={strings.yourPages}>
+			<a href="/calendar">{strings.nav.calendar}</a>
 			<a href="/players"
 				>{strings.players.title}{#if claimCount > 0}<span class="badge">{strings.linking.claimBadge(claimCount)}</span>{/if}</a
 			>
@@ -115,6 +134,7 @@
 			<a href="/boards/new">{strings.boards.newBoard}</a>
 			<a class="wide" href="/profile">{strings.linking.profile.link}</a>
 		</nav>
+		{#if next}<NextUp item={next} />{/if}
 		<h2>{strings.myMatches}</h2>
 		{#if mineFailure}
 			<p class="hint" role="alert">{mineFailure}</p>

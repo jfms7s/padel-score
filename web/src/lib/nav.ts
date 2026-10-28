@@ -6,6 +6,7 @@ export type RailItem = { href: string; label: string; current: boolean };
 
 const ITEMS = [
 	{ href: '/', label: strings.nav.home },
+	{ href: '/calendar', label: strings.nav.calendar },
 	{ href: '/events', label: strings.nav.events },
 	{ href: '/players', label: strings.nav.players },
 	{ href: '/history', label: strings.nav.history },
