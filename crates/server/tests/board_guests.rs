@@ -415,3 +415,42 @@ async fn turning_guests_off_keeps_existing_guests() {
     conflict(s.join_as_guest(&token, "Rui", NOW + 3).await, "guests_off");
     conflict(s.pick_guest(&token, &g, NOW + 3).await, "guests_off");
 }
+
+#[tokio::test]
+async fn start_game_gives_guests_plain_entries() {
+    let (s, pool) = setup().await;
+    let a = user(&s, "Ana").await;
+    let b = user(&s, "Rui").await;
+    let c = user(&s, "Marta").await;
+    let token = board(&s, &a, true).await;
+    for u in [&b, &c] {
+        s.join_board(&token, u, NOW).await.unwrap();
+    }
+    let (g, _) = guest(&s, &token, "Zé").await;
+    let people = [a.as_str(), b.as_str(), c.as_str(), g.as_str()];
+    let second_start = START + 2 * HOUR;
+    add_free_for(&s, &token, &people, START).await;
+    add_free_for(&s, &token, &people, second_start).await;
+    let v = view(&s, &token, &a, NOW + 10).await;
+    assert_eq!(v.games.len(), 2);
+
+    let mut guest_entries = Vec::new();
+    for game in &v.games {
+        let started = s
+            .start_game(&token, &game.id, &a, game.start)
+            .await
+            .unwrap();
+        assert_eq!(started.players.len(), 4);
+        let ze = started.players.iter().find(|p| p.name == "Zé").unwrap();
+        guest_entries.push(ze.player_id.clone());
+    }
+    assert_eq!(guest_entries[0], guest_entries[1]);
+    let (owner, linked): (String, Option<String>) =
+        sqlx::query_as("SELECT owner_user_id, linked_user_id FROM players WHERE id = ?")
+            .bind(&guest_entries[0])
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(owner, a);
+    assert_eq!(linked, None);
+}

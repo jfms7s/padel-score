@@ -9,7 +9,8 @@ use padel_scoring::Format;
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
 
-use crate::linking::auto_entry_in;
+use crate::boards::guests::is_guest_id;
+use crate::linking::{auto_entry_in, plain_entry_in};
 use crate::scheduled::{check_startable_in, mark_started_in};
 use crate::store::{NewMatch, Store, StoreError, StoredMatch, Tx, create_match_in};
 
@@ -158,7 +159,8 @@ async fn mark_played_in(
 
 impl Store {
     /// The two to four players of a board game for `user`, who must be one of them, as `user`'s own
-    /// player entries (made, linked automatically, where there is none yet). The board must not
+    /// player entries (made, linked automatically, where there is none yet; a guest gets a plain
+    /// unlinked entry). The board must not
     /// be over, the game not played and `now` in its start window.
     pub async fn start_game(
         &self,
@@ -186,7 +188,17 @@ impl Store {
         // seats on New match.
         let mut players = Vec::with_capacity(seated.len());
         for who in &seated {
-            let player_id = auto_entry_in(&mut tx, user, who, now).await?;
+            let player_id = if is_guest_id(who) {
+                // A guest has no account: the starter gets an unlinked entry under the guest's name.
+                let guest_name: String =
+                    sqlx::query_scalar("SELECT name FROM board_people WHERE id = ?")
+                        .bind(who)
+                        .fetch_one(&mut *tx)
+                        .await?;
+                plain_entry_in(&mut tx, user, &guest_name, now).await?
+            } else {
+                auto_entry_in(&mut tx, user, who, now).await?
+            };
             let name: String = sqlx::query_scalar("SELECT name FROM players WHERE id = ?")
                 .bind(&player_id)
                 .fetch_one(&mut *tx)
