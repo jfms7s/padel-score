@@ -270,6 +270,8 @@ pub enum NoticeKind {
     TimeAsked,
     TimeAnswered,
     TimeChanged,
+    EventCancelled,
+    EventChanged,
 }
 
 /// What a notification says, as data. `url` is always a same-origin path (`/b/{token}`,

@@ -99,7 +99,7 @@ pub async fn on_result(
             store::rewrite_placings_in(tx, ev, now).await?;
         }
         // A bracket is drawn at Start, so an event in setup has none.
-        Status::Setup => {}
+        Status::Setup | Status::Cancelled => {}
     }
     Ok(())
 }

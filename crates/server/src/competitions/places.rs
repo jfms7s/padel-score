@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection};
 
 use super::courts::{courts_in, event_matches_in};
-use super::{Competition, EventTeam, Status, competition_in, kinds, teams_in};
+use super::{Competition, EventTeam, Status, competition_in, kinds, not_cancelled, teams_in};
 use crate::store::{Store, StoreError, Tx, rotate_scorer_token_in};
 
 /// A place, or a tied range of places (`place` to `place_to`, both included).
@@ -127,6 +127,7 @@ impl Store {
         let mut ev = competition_in(&mut tx, owner, id)
             .await?
             .ok_or(StoreError::NotFound)?;
+        not_cancelled(&ev)?;
         if ev.status != Status::Setup {
             return Err(StoreError::Conflict("event_started"));
         }
@@ -165,6 +166,7 @@ impl Store {
         let mut ev = competition_in(&mut tx, owner, id)
             .await?
             .ok_or(StoreError::NotFound)?;
+        not_cancelled(&ev)?;
         if ev.status != Status::Running {
             return Err(StoreError::Conflict("event_not_running"));
         }

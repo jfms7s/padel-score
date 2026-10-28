@@ -9,6 +9,7 @@ pub mod courts;
 pub mod kinds;
 pub mod non_stop;
 pub mod places;
+pub mod schedule;
 pub mod tournament;
 pub mod view;
 
@@ -18,8 +19,10 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
 use crate::players::player_in;
+use crate::push::{Notice, NoticeKind, Payload, queue_in};
 use crate::store::{MAX_NAME_CHARS, Store, StoreError, StoredMatch, Tx, decode, encode};
 use crate::tokens::new_token;
+use schedule::{Schedule, ScheduleInput, Signups, normalize_schedule};
 
 /// The most teams one event holds.
 pub const MAX_TEAMS: usize = 64;
@@ -56,6 +59,8 @@ pub enum Status {
     Setup,
     Running,
     Finished,
+    /// Called off before it started. Stored as `setup` with `cancelled_at` set.
+    Cancelled,
 }
 
 impl Status {
@@ -64,6 +69,7 @@ impl Status {
             Status::Setup => "setup",
             Status::Running => "running",
             Status::Finished => "finished",
+            Status::Cancelled => "cancelled",
         }
     }
 
@@ -72,6 +78,7 @@ impl Status {
             "setup" => Ok(Status::Setup),
             "running" => Ok(Status::Running),
             "finished" => Ok(Status::Finished),
+            "cancelled" => Ok(Status::Cancelled),
             other => Err(sqlx::Error::Decode(
                 format!("unknown event status {other:?}").into(),
             )),
@@ -100,6 +107,12 @@ pub struct Competition {
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
+    pub schedule: Schedule,
+    /// The `/j/{token}` link, made the first time sign-ups are turned on and kept after.
+    pub join_token: Option<String>,
+    pub cancelled_at: Option<i64>,
+    /// When sign-ups closed: the deadline ran, or the organiser took the teams.
+    pub signups_closed_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -109,6 +122,8 @@ pub struct NewCompetition {
     pub format: Format,
     #[serde(default)]
     pub settings: Option<serde_json::Value>,
+    #[serde(default)]
+    pub schedule: Option<ScheduleInput>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -116,6 +131,8 @@ pub struct CompetitionChange {
     pub name: Option<String>,
     pub format: Option<Format>,
     pub settings: Option<serde_json::Value>,
+    #[serde(default)]
+    pub schedule: Option<ScheduleInput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -163,17 +180,42 @@ fn check_format(kind: Kind, format: &Format) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// The `competitions` columns [`competition_from_row`] reads.
+macro_rules! competition_columns {
+    () => {
+        "id, owner_user_id, name, kind, format, settings, status, spectator_token, \
+         created_at, started_at, finished_at, starts_at, place, signups, min_teams, max_teams, \
+         deadline_at, join_token, cancelled_at, signups_closed_at"
+    };
+}
+
 macro_rules! select_competitions {
     ($rest:literal) => {
         concat!(
-            "SELECT id, owner_user_id, name, kind, format, settings, status, spectator_token, \
-             created_at, started_at, finished_at FROM competitions ",
+            "SELECT ",
+            competition_columns!(),
+            " FROM competitions ",
             $rest
         )
     };
 }
 
+/// An event that was cancelled is refused every write (`Conflict("event_cancelled")`). Reads
+/// and deleting it stay allowed.
+pub(crate) fn not_cancelled(ev: &Competition) -> Result<(), StoreError> {
+    if ev.status == Status::Cancelled {
+        return Err(StoreError::Conflict("event_cancelled"));
+    }
+    Ok(())
+}
+
 fn competition_from_row(row: &SqliteRow) -> Result<Competition, sqlx::Error> {
+    let cancelled_at: Option<i64> = row.try_get("cancelled_at")?;
+    let status = if cancelled_at.is_some() {
+        Status::Cancelled
+    } else {
+        Status::parse(row.try_get::<&str, _>("status")?)?
+    };
     Ok(Competition {
         id: row.try_get("id")?,
         owner_user_id: row.try_get("owner_user_id")?,
@@ -181,11 +223,22 @@ fn competition_from_row(row: &SqliteRow) -> Result<Competition, sqlx::Error> {
         kind: Kind::parse(row.try_get::<&str, _>("kind")?)?,
         format: decode(row.try_get::<&str, _>("format")?)?,
         settings: decode(row.try_get::<&str, _>("settings")?)?,
-        status: Status::parse(row.try_get::<&str, _>("status")?)?,
+        status,
         spectator_token: row.try_get("spectator_token")?,
         created_at: row.try_get("created_at")?,
         started_at: row.try_get("started_at")?,
         finished_at: row.try_get("finished_at")?,
+        schedule: Schedule {
+            starts_at: row.try_get("starts_at")?,
+            place: row.try_get("place")?,
+            signups: Signups::parse(row.try_get::<&str, _>("signups")?)?,
+            min_teams: row.try_get("min_teams")?,
+            max_teams: row.try_get("max_teams")?,
+            deadline_at: row.try_get("deadline_at")?,
+        },
+        join_token: row.try_get("join_token")?,
+        cancelled_at,
+        signups_closed_at: row.try_get("signups_closed_at")?,
     })
 }
 
@@ -346,6 +399,54 @@ async fn check_pair(
     Ok(())
 }
 
+/// Whether anyone has signed up for the event.
+async fn has_signups_in(conn: &mut SqliteConnection, event_id: &str) -> Result<bool, StoreError> {
+    Ok(
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM event_signups WHERE event_id = ?)")
+            .bind(event_id)
+            .fetch_one(conn)
+            .await?,
+    )
+}
+
+/// Tell every user signed up for `ev` (but not its organiser) that it was cancelled or its
+/// start or place changed. Queued in the caller's transaction; the HTTP layer wakes the push
+/// sender. Nobody has signed up before sign-ups were first turned on, so no token means no one.
+async fn notify_signed_up_in(
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+    kind: NoticeKind,
+    now: i64,
+) -> Result<(), StoreError> {
+    let Some(token) = &ev.join_token else {
+        return Ok(());
+    };
+    let users: Vec<String> = sqlx::query_scalar(
+        "SELECT user1_id FROM event_signups WHERE event_id = ?1 \
+         UNION SELECT user2_id FROM event_signups WHERE event_id = ?1 AND user2_id IS NOT NULL",
+    )
+    .bind(&ev.id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let notices: Vec<Notice> = users
+        .into_iter()
+        .filter(|user| *user != ev.owner_user_id)
+        .map(|user_id| Notice {
+            user_id,
+            payload: Payload {
+                kind,
+                url: format!("/j/{token}"),
+                title: Some(ev.name.clone()),
+                start: ev.schedule.starts_at,
+                ..Payload::default()
+            },
+            dedupe: None,
+        })
+        .collect();
+    queue_in(tx, &notices, now).await?;
+    Ok(())
+}
+
 impl Store {
     pub async fn create_competition(
         &self,
@@ -356,6 +457,14 @@ impl Store {
         let name = clean_name(&new.name, "name")?;
         check_format(new.kind, &new.format)?;
         let settings = kinds::normalize_settings(new.kind, new.settings.as_ref())?;
+        let schedule = normalize_schedule(
+            new.kind,
+            &settings,
+            &Schedule::default(),
+            &new.schedule.unwrap_or_default(),
+            now,
+        )?;
+        let join_token = (schedule.signups != Signups::Off).then(new_token);
         let ev = Competition {
             id: uuid::Uuid::new_v4().to_string(),
             owner_user_id: owner.to_owned(),
@@ -368,11 +477,17 @@ impl Store {
             created_at: now,
             started_at: None,
             finished_at: None,
+            schedule,
+            join_token,
+            cancelled_at: None,
+            signups_closed_at: None,
         };
         let mut tx = self.begin().await?;
         sqlx::query(
             "INSERT INTO competitions (id, owner_user_id, name, kind, format, settings, status, \
-             spectator_token, created_at) VALUES (?, ?, ?, ?, ?, ?, 'setup', ?, ?)",
+             spectator_token, created_at, starts_at, place, signups, min_teams, max_teams, \
+             deadline_at, join_token) \
+             VALUES (?, ?, ?, ?, ?, ?, 'setup', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&ev.id)
         .bind(owner)
@@ -382,6 +497,13 @@ impl Store {
         .bind(encode(&ev.settings)?)
         .bind(&ev.spectator_token)
         .bind(now)
+        .bind(ev.schedule.starts_at)
+        .bind(&ev.schedule.place)
+        .bind(ev.schedule.signups.as_str())
+        .bind(ev.schedule.min_teams)
+        .bind(ev.schedule.max_teams)
+        .bind(ev.schedule.deadline_at)
+        .bind(&ev.join_token)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -393,13 +515,13 @@ impl Store {
         &self,
         owner: &str,
     ) -> Result<Vec<(Competition, usize, usize)>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT id, owner_user_id, name, kind, format, settings, status, spectator_token, \
-             created_at, started_at, finished_at, \
-             (SELECT COUNT(*) FROM competition_teams WHERE event_id = competitions.id) AS teams, \
-             (SELECT COUNT(*) FROM courts WHERE event_id = competitions.id) AS courts \
-             FROM competitions WHERE owner_user_id = ? ORDER BY created_at DESC, rowid DESC",
-        )
+        let rows = sqlx::query(concat!(
+            "SELECT ",
+            competition_columns!(),
+            ", (SELECT COUNT(*) FROM competition_teams WHERE event_id = competitions.id) AS teams, \
+                 (SELECT COUNT(*) FROM courts WHERE event_id = competitions.id) AS courts \
+                 FROM competitions WHERE owner_user_id = ? ORDER BY created_at DESC, rowid DESC"
+        ))
         .bind(owner)
         .fetch_all(self.pool())
         .await?;
@@ -426,12 +548,18 @@ impl Store {
         competition_in(&mut conn, owner, id).await
     }
 
-    /// Rename, and in `setup` only change the format or settings (else `Conflict("event_started")`).
+    /// Rename, and in `setup` only change the format, settings or schedule (else
+    /// `Conflict("event_started")`). A cancelled event is `Conflict("event_cancelled")`.
+    ///
+    /// Turning sign-ups on the first time makes the join token. Turning them off while
+    /// sign-ups exist is `Conflict("signups_exist")`. A new start or place tells the signed-up
+    /// users (not the organiser).
     pub async fn update_competition(
         &self,
         owner: &str,
         id: &str,
         change: CompetitionChange,
+        now: i64,
     ) -> Result<Competition, StoreError> {
         let name = change
             .name
@@ -442,7 +570,10 @@ impl Store {
         let mut ev = competition_in(&mut tx, owner, id)
             .await?
             .ok_or(StoreError::NotFound)?;
-        if (change.format.is_some() || change.settings.is_some()) && ev.status != Status::Setup {
+        not_cancelled(&ev)?;
+        let edits_setup =
+            change.format.is_some() || change.settings.is_some() || change.schedule.is_some();
+        if edits_setup && ev.status != Status::Setup {
             return Err(StoreError::Conflict("event_started"));
         }
         if let Some(name) = name {
@@ -455,24 +586,88 @@ impl Store {
         if change.settings.is_some() {
             ev.settings = kinds::normalize_settings(ev.kind, change.settings.as_ref())?;
         }
-        sqlx::query("UPDATE competitions SET name = ?, format = ?, settings = ? WHERE id = ?")
-            .bind(&ev.name)
-            .bind(encode(&ev.format)?)
-            .bind(encode(&ev.settings)?)
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+        let before = ev.schedule.clone();
+        if change.schedule.is_some() || change.settings.is_some() {
+            // Settings are checked too: fewer legs may no longer fit the maximum.
+            let input = change.schedule.unwrap_or_default();
+            ev.schedule = normalize_schedule(ev.kind, &ev.settings, &before, &input, now)?;
+        }
+        if ev.schedule.signups == Signups::Off
+            && before.signups != Signups::Off
+            && has_signups_in(&mut tx, id).await?
+        {
+            return Err(StoreError::Conflict("signups_exist"));
+        }
+        if ev.schedule.signups != Signups::Off && ev.join_token.is_none() {
+            ev.join_token = Some(new_token());
+        }
+        sqlx::query(
+            "UPDATE competitions SET name = ?, format = ?, settings = ?, starts_at = ?, \
+             place = ?, signups = ?, min_teams = ?, max_teams = ?, deadline_at = ?, \
+             join_token = ? WHERE id = ?",
+        )
+        .bind(&ev.name)
+        .bind(encode(&ev.format)?)
+        .bind(encode(&ev.settings)?)
+        .bind(ev.schedule.starts_at)
+        .bind(&ev.schedule.place)
+        .bind(ev.schedule.signups.as_str())
+        .bind(ev.schedule.min_teams)
+        .bind(ev.schedule.max_teams)
+        .bind(ev.schedule.deadline_at)
+        .bind(&ev.join_token)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        if ev.schedule.starts_at != before.starts_at || ev.schedule.place != before.place {
+            notify_signed_up_in(&mut tx, &ev, NoticeKind::EventChanged, now).await?;
+        }
         tx.commit().await?;
         Ok(ev)
     }
 
-    /// Delete an event still in `setup` (it has no matches yet), with its teams and courts.
+    /// Call off an event that has not started (else `Conflict("event_started")`; one already
+    /// cancelled is `Conflict("event_cancelled")`). It closes sign-ups and tells the signed-up
+    /// users (not the organiser). It can still be deleted.
+    pub async fn cancel_competition(
+        &self,
+        owner: &str,
+        id: &str,
+        now: i64,
+    ) -> Result<Competition, StoreError> {
+        let mut tx = self.begin().await?;
+        let mut ev = competition_in(&mut tx, owner, id)
+            .await?
+            .ok_or(StoreError::NotFound)?;
+        not_cancelled(&ev)?;
+        if ev.status != Status::Setup {
+            return Err(StoreError::Conflict("event_started"));
+        }
+        sqlx::query(
+            "UPDATE competitions SET cancelled_at = ?, \
+             signups_closed_at = COALESCE(signups_closed_at, ?) WHERE id = ?",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        ev.status = Status::Cancelled;
+        ev.cancelled_at = Some(now);
+        ev.signups_closed_at = ev.signups_closed_at.or(Some(now));
+        notify_signed_up_in(&mut tx, &ev, NoticeKind::EventCancelled, now).await?;
+        tx.commit().await?;
+        Ok(ev)
+    }
+
+    /// Delete an event still in `setup` (it has no matches yet) or cancelled, with its teams
+    /// and courts.
     pub async fn delete_competition(&self, owner: &str, id: &str) -> Result<(), StoreError> {
         let mut tx = self.begin().await?;
         let ev = competition_in(&mut tx, owner, id)
             .await?
             .ok_or(StoreError::NotFound)?;
-        if ev.status != Status::Setup {
+        if !matches!(ev.status, Status::Setup | Status::Cancelled) {
             return Err(StoreError::Conflict("event_started"));
         }
         sqlx::query("DELETE FROM competitions WHERE id = ?")
@@ -509,6 +704,7 @@ impl Store {
         let ev = competition_in(&mut tx, owner, event_id)
             .await?
             .ok_or(StoreError::NotFound)?;
+        not_cancelled(&ev)?;
         if ev.status != Status::Setup {
             return Err(StoreError::Conflict("event_started"));
         }
@@ -560,6 +756,7 @@ impl Store {
         let ev = competition_in(&mut tx, owner, event_id)
             .await?
             .ok_or(StoreError::NotFound)?;
+        not_cancelled(&ev)?;
         let mut team = team_in(&mut tx, event_id, team_id)
             .await?
             .ok_or(StoreError::NotFound)?;
@@ -604,6 +801,7 @@ impl Store {
         let ev = competition_in(&mut tx, owner, event_id)
             .await?
             .ok_or(StoreError::NotFound)?;
+        not_cancelled(&ev)?;
         if ev.status != Status::Setup {
             return Err(StoreError::Conflict("event_started"));
         }

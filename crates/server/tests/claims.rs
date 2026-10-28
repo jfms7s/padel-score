@@ -825,6 +825,7 @@ async fn event_world(w: &World) -> (String, [String; 2]) {
         .create_competition(
             &w.ana_id,
             NewCompetition {
+                schedule: None,
                 name: "Sunday cup".into(),
                 kind: Kind::Tournament,
                 format: format(),

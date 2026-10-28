@@ -5,8 +5,8 @@
 //! court or match is 404, as is an unknown one.
 //!
 //! - `GET /api/events` `{items:[Event]}`; `POST /api/events` `NewCompetition` → 201 `EventDetail`.
-//! - `GET|PATCH|DELETE /api/events/{id}`; `POST /api/events/{id}/start` and `/finish`
-//!   (`{places?}`) → `EventDetail`.
+//! - `GET|PATCH|DELETE /api/events/{id}`; `POST /api/events/{id}/start`, `/finish`
+//!   (`{places?}`) and `/cancel` (an event that has not started) → `EventDetail`.
 //! - `/api/events/{id}/teams[/{team_id}]` → `EventTeam`; `/courts[/{court_id}]` and
 //!   `/courts/{court_id}/rotate` → `Court`; `/courts/{court_id}/advance` → `EventDetail`.
 //! - `POST /api/events/{id}/matches` and `PATCH /matches/{match_id}` → `EventMatch`;
@@ -50,6 +50,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/events/{id}", get(read).patch(update).delete(remove))
         .route("/api/events/{id}/start", post(start))
         .route("/api/events/{id}/finish", post(finish))
+        .route("/api/events/{id}/cancel", post(cancel))
         .route("/api/events/{id}/stream", get(stream))
         .route("/api/events/{id}/teams", post(add_team))
         .route(
@@ -150,7 +151,11 @@ async fn update(
     ApiJson(change): ApiJson<CompetitionChange>,
 ) -> Result<Json<EventDetail>, ApiError> {
     let owner = &user.user.id;
-    state.store.update_competition(owner, &id, change).await?;
+    state
+        .store
+        .update_competition(owner, &id, change, now())
+        .await?;
+    state.push.wake();
     Ok(Json(changed(&state, owner, &id).await?))
 }
 
@@ -172,6 +177,17 @@ async fn start(
 ) -> Result<Json<EventDetail>, ApiError> {
     let owner = &user.user.id;
     state.store.start_competition(owner, &id, now()).await?;
+    Ok(Json(changed(&state, owner, &id).await?))
+}
+
+async fn cancel(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiPath(id): ApiPath<String>,
+) -> Result<Json<EventDetail>, ApiError> {
+    let owner = &user.user.id;
+    state.store.cancel_competition(owner, &id, now()).await?;
+    state.push.wake();
     Ok(Json(changed(&state, owner, &id).await?))
 }
 

@@ -45,6 +45,7 @@ fn timed() -> Format {
 
 fn new_event(name: &str) -> NewCompetition {
     NewCompetition {
+        schedule: None,
         name: name.to_owned(),
         kind: Kind::Tournament,
         format: sets(),
@@ -97,6 +98,7 @@ async fn kind_format_mismatch_is_refused() {
         kind: Kind::NonStop,
         format: sets(),
         settings: None,
+        schedule: None,
     };
     let err = s.create_competition(A, non_stop, 1).await.unwrap_err();
     assert!(matches!(err, StoreError::InvalidField("format")), "{err:?}");
@@ -105,7 +107,10 @@ async fn kind_format_mismatch_is_refused() {
         format: Some(timed()),
         ..Default::default()
     };
-    let err = s.update_competition(A, &ev.id, change).await.unwrap_err();
+    let err = s
+        .update_competition(A, &ev.id, change, 1_000)
+        .await
+        .unwrap_err();
     assert!(matches!(err, StoreError::InvalidField("format")), "{err:?}");
 }
 
@@ -154,7 +159,7 @@ async fn owners_do_not_share_events() {
     assert!(s.competitions(B).await.unwrap().is_empty());
     assert!(s.teams(B, &ev.id).await.unwrap().is_none());
     let err = s
-        .update_competition(B, &ev.id, Default::default())
+        .update_competition(B, &ev.id, Default::default(), 1_000)
         .await
         .unwrap_err();
     assert!(matches!(err, StoreError::NotFound), "{err:?}");
@@ -460,8 +465,12 @@ async fn update_changes_name_and_format_only_in_setup() {
         name: Some(" Renamed ".into()),
         format: Some(format),
         settings: Some(json!({})),
+        schedule: None,
     };
-    let updated = s.update_competition(A, &ev.id, change).await.unwrap();
+    let updated = s
+        .update_competition(A, &ev.id, change, 1_000)
+        .await
+        .unwrap();
     assert_eq!(updated.name, "Renamed");
     assert_eq!(updated.format, format);
     start(&pool, &ev.id, "running").await;
@@ -469,7 +478,10 @@ async fn update_changes_name_and_format_only_in_setup() {
         format: Some(sets()),
         ..Default::default()
     };
-    let err = s.update_competition(A, &ev.id, change).await.unwrap_err();
+    let err = s
+        .update_competition(A, &ev.id, change, 1_000)
+        .await
+        .unwrap_err();
     assert!(
         matches!(err, StoreError::Conflict("event_started")),
         "{err:?}"
@@ -713,6 +725,7 @@ async fn non_stop_event(s: &Store) -> (Competition, Vec<String>) {
         .create_competition(
             A,
             NewCompetition {
+                schedule: None,
                 name: "Sunday cup".into(),
                 kind: Kind::NonStop,
                 format: timed(),

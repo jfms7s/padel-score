@@ -291,6 +291,7 @@ async fn event_with_teams(s: &Store, owner: &str, teams: &[[&str; 2]]) -> String
         .create_competition(
             owner,
             NewCompetition {
+                schedule: None,
                 name: "Cup".into(),
                 kind: Kind::Tournament,
                 format: format(),

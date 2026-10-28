@@ -58,6 +58,7 @@ async fn event(
         .create_competition(
             A,
             NewCompetition {
+                schedule: None,
                 name: "Cup".into(),
                 kind: Kind::Tournament,
                 format: one_set(),
@@ -272,6 +273,7 @@ async fn settings_are_checked() {
             .create_competition(
                 A,
                 NewCompetition {
+                    schedule: None,
                     name: "Cup".into(),
                     kind: Kind::Tournament,
                     format: one_set(),
