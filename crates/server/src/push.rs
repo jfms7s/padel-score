@@ -260,6 +260,10 @@ impl Store {
 pub enum NoticeKind {
     #[default]
     Test,
+    GameFormed,
+    MovedIn,
+    PlayerLeft,
+    BoardDeleted,
 }
 
 /// What a notification says, as data. `url` is always a same-origin path (`/b/{token}`,

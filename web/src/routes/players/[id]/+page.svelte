@@ -5,6 +5,7 @@
 	import LinkedResultRow from '#lib/components/LinkedResultRow.svelte';
 	import ResultRow from '#lib/components/ResultRow.svelte';
 	import { ApiError } from '#lib/api.ts';
+	import { dateText } from '#lib/dates.ts';
 	import {
 		codeDeadline,
 		createLinkCode,
@@ -254,7 +255,7 @@
 					<li class="row">
 						<span>{t.placingIn(p.event_name, t.placing(p.place, p.place_to, p.field_size, p.event_kind))}</span>
 						<time class="hint" datetime={new Date(p.finished_at * 1000).toISOString()}
-							>{new Date(p.finished_at * 1000).toLocaleDateString()}</time
+							>{dateText(p.finished_at)}</time
 						>
 					</li>
 				{/each}

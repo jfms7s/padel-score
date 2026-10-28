@@ -2,6 +2,7 @@
 // crates/server/src/push.rs `Payload`), and the service worker turns it into words here, in the
 // device's own time zone. The service worker imports this file, so it may use no DOM API.
 
+import { dayLabel, timeRange } from './dates';
 import { strings } from './strings';
 import type { NoticePayload } from './types';
 
@@ -28,10 +29,41 @@ export function safeNoticeUrl(url: unknown): string {
 	return url;
 }
 
-/** `opts` is for the kinds that print instants; the ones known so far print none. */
-export function noticeText(p: NoticePayload, _opts: { timeZone?: string; locale?: string } = {}): NoticeText {
+export interface NoticeOptions {
+	/** The device's zone; the phone's own when left out. */
+	timeZone?: string;
+	locale?: string;
+}
+
+/** "Wed 4 · 20:00–21:30 · Thursday padel", leaving out what the payload lacks. */
+function gameBody(p: NoticePayload, opts: NoticeOptions): string {
+	const parts: string[] = [];
+	if (p.start !== undefined) {
+		parts.push(dayLabel(p.start, opts.timeZone, opts.locale));
+		if (p.end !== undefined) parts.push(timeRange(p.start, p.end, opts.timeZone, opts.locale));
+	}
+	if (p.title) parts.push(p.title);
+	return parts.join(' · ');
+}
+
+/** Words for a push payload; `opts` sets the zone and locale instants are printed in. */
+export function noticeText(p: NoticePayload, opts: NoticeOptions = {}): NoticeText {
 	const url = safeNoticeUrl(p.url);
-	const tag = `${String(p.kind)}:${url}`;
-	if (p.kind === 'test') return { title: t.test.title, body: t.test.body, url, tag };
-	return { title: t.appName, body: t.fallback, url, tag };
+	// The start keeps two notices from one board from replacing each other on the phone.
+	const tag = `${String(p.kind)}:${url}:${p.start ?? ''}`;
+	const made = (title: string, body: string): NoticeText => ({ title, body, url, tag });
+	switch (p.kind) {
+		case 'test':
+			return made(t.test.title, t.test.body);
+		case 'game_formed':
+			return made(t.gameFormed, gameBody(p, opts));
+		case 'moved_in':
+			return made(t.movedIn, gameBody(p, opts));
+		case 'player_left':
+			return made(t.playerLeft(p.name), gameBody(p, opts));
+		case 'board_deleted':
+			return made(t.boardDeleted, gameBody(p, opts));
+		default:
+			return made(t.appName, t.fallback);
+	}
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { authMessage, listMyMatches } from '#lib/auth.ts';
 	import DeleteMatchSheet from '#lib/components/DeleteMatchSheet.svelte';
+	import { dateText } from '#lib/dates.ts';
 	import { homeEvents, listEvents } from '#lib/events.ts';
 	import { claimBadgeCount } from '#lib/linking.ts';
 	import { listPlayers } from '#lib/players.ts';
@@ -111,6 +112,7 @@
 			>
 			<a href="/history">{strings.history.link}</a>
 			<a href="/events">{strings.events.link}</a>
+			<a href="/boards/new">{strings.boards.newBoard}</a>
 			<a class="wide" href="/profile">{strings.linking.profile.link}</a>
 		</nav>
 		<h2>{strings.myMatches}</h2>
@@ -127,7 +129,7 @@
 						<a href={scorerPath(match.scorer_token, match.spectator_token)}>
 							<span class="label">{match.label}</span>
 							<time datetime={new Date(match.last_activity_at * 1000).toISOString()}>
-								{new Date(match.last_activity_at * 1000).toLocaleDateString()}
+								{dateText(match.last_activity_at)}
 							</time>
 						</a>
 						{#if !match.context}
@@ -170,7 +172,7 @@
 					<a href={scorerPath(match.scorer_token, match.spectator_token)}>
 						<span class="label">{match.label}</span>
 						<time datetime={new Date(match.created_at).toISOString()}>
-							{new Date(match.created_at).toLocaleDateString()}
+							{dateText(match.created_at / 1000)}
 						</time>
 					</a>
 					{@render deleteButton(match.label, match.scorer_token)}

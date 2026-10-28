@@ -186,7 +186,8 @@ export type ApiErrorBody =
 	| { error: 'finished' | 'event_match' }
 	| { error: 'too_many_requests'; retry_after_secs: number }
 	| { error: AccountErrorCode }
-	| { error: EventErrorCode };
+	| { error: EventErrorCode }
+	| { error: BoardErrorCode };
 
 // ---- accounts (crates/server/src/accounts.rs, owned.rs, device.rs) ------------------------
 
@@ -774,3 +775,97 @@ export interface Privacy {
 export type EngineError = { kind: ErrorKind; index: number } | { kind: 'bad_json'; message: string };
 
 export type ReplayResult = { ok: Score } | { err: EngineError };
+
+// ---- game boards (crates/server/src/boards/mod.rs, boards_api.rs) -------------------------
+
+/** The board routes' 409 codes (the 422 fields are `range`, `title`, `place`, `time_zone`, `week`). */
+export type BoardErrorCode = 'board_over' | 'board_full' | 'too_many_boards' | 'creator_only' | 'too_many_ranges';
+
+export interface NewBoard {
+	title: string;
+	place: string | null;
+	time_zone: string;
+	starts_at: number;
+	ends_at: number;
+}
+
+/** `place: null` clears it; leave a field out to keep it. */
+export interface BoardChange {
+	title?: string;
+	place?: string | null;
+}
+
+export type GameState = 'full' | 'short' | 'played' | 'past';
+
+export interface BoardOut {
+	id: string;
+	token: string;
+	title: string;
+	place: string | null;
+	time_zone: string;
+	starts_at: number;
+	ends_at: number;
+	creator_user_id: string;
+	creator_name: string;
+	over: boolean;
+}
+
+export interface MemberOut {
+	user_id: string;
+	name: string;
+	joined_at: number;
+}
+
+/** A piece of a member's free time; touching pieces of one member are drawn as one range. */
+export interface PieceOut {
+	user_id: string;
+	start: number;
+	end: number;
+	created_at: number;
+}
+
+export interface MemberRef {
+	user_id: string;
+	name: string;
+}
+
+export interface GameOut {
+	id: string;
+	start: number;
+	end: number;
+	version: number;
+	moved: boolean;
+	state: GameState;
+	/** In seat order. */
+	players: MemberRef[];
+	/** User ids next in line for a place. */
+	line: string[];
+	match_spectator_token: string | null;
+}
+
+export interface RequestOut {
+	id: string;
+	kind: 'swap' | 'time';
+	from: MemberRef;
+	game_id: string;
+	other_game_id: string | null;
+	new_start: number | null;
+	new_end: number | null;
+	needs_my_answer: boolean;
+}
+
+/** `null` in the view when signed out. */
+export interface MeOut {
+	user_id: string;
+	member: boolean;
+	creator: boolean;
+}
+
+export interface BoardView {
+	board: BoardOut;
+	me: MeOut | null;
+	members: MemberOut[];
+	pieces: PieceOut[];
+	games: GameOut[];
+	requests: RequestOut[];
+}

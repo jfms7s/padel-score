@@ -6,6 +6,7 @@
 // (getMe), sign-in itself and the public code routes (an invite, a reset) stay quiet.
 
 import { accountRequest, ApiError } from './api';
+import { dateText } from './dates';
 import {
 	isAdminUser,
 	isCreatedInvite,
@@ -186,7 +187,7 @@ export function authMessage(e: unknown): string {
 
 /** A server time (Unix seconds) as a short local date. */
 export function shortDate(secs: number): string {
-	return new Date(secs * 1000).toLocaleDateString();
+	return dateText(secs);
 }
 
 // ---- codes in the page -------------------------------------------------------------------

@@ -2,6 +2,8 @@ pub mod accounts;
 pub mod accounts_store;
 pub mod api;
 pub mod auth;
+pub mod boards;
+pub mod boards_api;
 pub mod claims;
 pub mod client_ip;
 pub mod commands;

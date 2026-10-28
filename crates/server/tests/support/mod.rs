@@ -15,7 +15,7 @@ use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use http_body_util::BodyExt;
 use padel_score_server::accounts::init_setup_code;
-use padel_score_server::accounts_store::PollOutcome;
+use padel_score_server::accounts_store::{NewUser, PollOutcome};
 use padel_score_server::api::now;
 use padel_score_server::auth::cookie_name;
 use padel_score_server::{AppState, Config, Store, db, router};
@@ -216,6 +216,25 @@ pub async fn invited_user(
         res.body["id"].as_str().unwrap().to_owned(),
         res.session(state).unwrap(),
     )
+}
+
+/// A user made straight in the store (no argon2 hash), with a session: (user id, session raw).
+pub async fn fast_user(state: &AppState, email: &str, name: &str) -> (String, String) {
+    let id = state
+        .store
+        .create_user(
+            NewUser {
+                email: email.to_owned(),
+                display_name: name.to_owned(),
+                password_hash: "x".to_owned(),
+            },
+            now(),
+        )
+        .await
+        .unwrap()
+        .id;
+    let raw = state.store.create_session(&id, now()).await.unwrap();
+    (id, raw)
 }
 
 /// A device token for `user_id`, through the device-code flow in the store.
