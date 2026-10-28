@@ -157,15 +157,17 @@ pub struct Solo {
     pub id: String,
     /// When the person signed up.
     pub at: i64,
+    /// Row order: who signed up first among those in the same second.
+    pub rowid: i64,
     pub held: bool,
 }
 
-/// The automatic pairs among `solos`: not held, taken in sign-up order (`at`, then `id`): the
+/// The automatic pairs among `solos`: not held, taken in sign-up order (`at`, then row order): the
 /// earliest two, then the next two, and so on. An odd one out waits. Each pair is (earlier,
 /// later).
 pub fn pairs(solos: &[Solo]) -> Vec<(String, String)> {
     let mut free: Vec<&Solo> = solos.iter().filter(|s| !s.held).collect();
-    free.sort_by(|a, b| (a.at, &a.id).cmp(&(b.at, &b.id)));
+    free.sort_by_key(|s| (s.at, s.rowid));
     free.chunks_exact(2)
         .filter_map(|two| match two {
             [first, second] => Some((first.id.clone(), second.id.clone())),
@@ -178,6 +180,8 @@ pub fn pairs(solos: &[Solo]) -> Vec<(String, String)> {
 #[derive(Debug, Clone)]
 struct Entry {
     id: String,
+    /// Creation order, the last tie-break between entries of the same second.
+    rowid: i64,
     user1_id: String,
     user1_name: String,
     user1_at: i64,
@@ -197,6 +201,7 @@ impl Entry {
         let taken: Option<String> = row.try_get("taken_team_id")?;
         Ok(Entry {
             id: row.try_get("id")?,
+            rowid: row.try_get("rowid")?,
             user1_id: row.try_get("user1_id")?,
             user1_name: row.try_get("name1")?,
             user1_at: row.try_get("user1_at")?,
@@ -256,7 +261,7 @@ impl Entry {
 macro_rules! select_entries {
     ($rest:literal) => {
         concat!(
-            "SELECT s.id, s.event_id, s.user1_id, u1.display_name AS name1, s.user1_at, s.user2_id, \
+            "SELECT s.id, s.rowid AS rowid, s.event_id, s.user1_id, u1.display_name AS name1, s.user1_at, s.user2_id, \
              u2.display_name AS name2, s.user2_at, s.partner_name, s.partner_token, \
              s.auto_paired, s.held, s.complete_at, s.taken_team_id \
              FROM event_signups s JOIN users u1 ON u1.id = s.user1_id \
@@ -320,7 +325,7 @@ pub(crate) struct Layout {
 }
 
 impl Layout {
-    /// Complete entries go in order of `(taken first, complete_at, id)`: the first
+    /// Complete entries go in order of `(taken first, complete_at, user1_at, rowid)`: the first
     /// `max - hand_added` have a place, the rest are the line.
     fn build(entries: Vec<Entry>, hand_added: usize, max: usize) -> Layout {
         let mut complete = Vec::new();
@@ -335,11 +340,9 @@ impl Layout {
                 solos.push(entry);
             }
         }
-        complete.sort_by(|a, b| {
-            (!a.taken, a.complete_at, &a.id).cmp(&(!b.taken, b.complete_at, &b.id))
-        });
-        solos.sort_by(|a, b| (a.user1_at, &a.id).cmp(&(b.user1_at, &b.id)));
-        pending.sort_by(|a, b| (a.user1_at, &a.id).cmp(&(b.user1_at, &b.id)));
+        complete.sort_by_key(|e| (!e.taken, e.complete_at, e.user1_at, e.rowid));
+        solos.sort_by_key(|e| (e.user1_at, e.rowid));
+        pending.sort_by_key(|e| (e.user1_at, e.rowid));
         // Taken entries are teams of the event whatever the maximum says.
         let taken = complete.iter().filter(|e| e.taken).count();
         let room = max
@@ -548,6 +551,7 @@ async fn auto_pair_in(
         .map(|e| Solo {
             id: e.id.clone(),
             at: e.user1_at,
+            rowid: e.rowid,
             held: e.held,
         })
         .collect();
@@ -673,7 +677,7 @@ impl Store {
             .into_iter()
             .filter(|e| e.complete_at.is_some() && !e.taken)
             .collect();
-        waiting.sort_by(|a, b| (a.complete_at, &a.id).cmp(&(b.complete_at, &b.id)));
+        waiting.sort_by_key(|e| (e.complete_at, e.user1_at, e.rowid));
         let hand_added: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM competition_teams WHERE event_id = ?")
                 .bind(event_id)
@@ -1123,7 +1127,7 @@ impl Store {
         if !first.is_solo() || !second.is_solo() {
             return Err(StoreError::Conflict("not_solo"));
         }
-        let (keep, later) = if (first.user1_at, &first.id) <= (second.user1_at, &second.id) {
+        let (keep, later) = if (first.user1_at, first.rowid) <= (second.user1_at, second.rowid) {
             (first, second)
         } else {
             (second, first)
@@ -1210,6 +1214,7 @@ mod tests {
         Solo {
             id: id.to_owned(),
             at,
+            rowid: 0,
             held,
         }
     }
@@ -1226,9 +1231,14 @@ mod tests {
             pairs(&solos),
             [("a".into(), "b".into()), ("c".into(), "d".into())]
         );
-        // The same time falls back to the id.
-        let tie = [solo("y", 5, false), solo("x", 5, false)];
-        assert_eq!(pairs(&tie), [("x".into(), "y".into())]);
+        // The same second falls back to row order, not to the id.
+        let mut y = solo("y", 5, false);
+        y.rowid = 1;
+        let mut x = solo("x", 5, false);
+        x.rowid = 2;
+        assert_eq!(pairs(&[x.clone(), y.clone()]), [("y".into(), "x".into())]);
+        y.rowid = 3;
+        assert_eq!(pairs(&[y, x]), [("x".into(), "y".into())]);
     }
 
     #[test]
@@ -1258,6 +1268,7 @@ mod tests {
     fn entry(id: &str, user: &str, complete_at: Option<i64>, taken: bool) -> Entry {
         Entry {
             id: id.to_owned(),
+            rowid: 0,
             user1_id: user.to_owned(),
             user1_name: user.to_owned(),
             user1_at: 1,
@@ -1279,10 +1290,17 @@ mod tests {
             entry("late", "u3", Some(30), false),
             entry("taken", "u4", Some(99), true),
             entry("early", "u1", Some(10), false),
-            entry("tie-b", "u5", Some(20), false),
             entry("tie-a", "u2", Some(20), false),
+            entry("tie-b", "u5", Some(20), false),
             entry("solo", "u6", None, false),
-        ];
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, mut e)| {
+            e.rowid = i as i64;
+            e
+        })
+        .collect();
         // One place goes to a hand-added team: 4 - 1 = 3 left.
         let layout = Layout::build(entries, 1, 4);
         let ids = |es: &[Entry]| es.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
@@ -1295,6 +1313,22 @@ mod tests {
         assert_eq!(layout.my_entry("u3"), Some(MyEntry::Line { place: 2 }));
         assert_eq!(layout.my_entry("u6"), Some(MyEntry::Solo));
         assert_eq!(layout.my_entry("nobody"), None);
+    }
+
+    #[test]
+    fn a_tie_in_one_second_goes_by_row_order_not_by_id() {
+        // Same `complete_at` and `user1_at`; the ids sort the other way round to the rows.
+        let mut early = entry("z-first", "u1", Some(5), false);
+        early.rowid = 1;
+        let mut late = entry("a-second", "u2", Some(5), false);
+        late.rowid = 2;
+        let layout = Layout::build(vec![late.clone(), early.clone()], 0, 1);
+        assert_eq!(layout.teams[0].id, "z-first");
+        assert_eq!(layout.line[0].id, "a-second");
+        // An earlier sign-up time still wins over a lower row.
+        late.user1_at = 0;
+        let layout = Layout::build(vec![early, late], 0, 1);
+        assert_eq!(layout.teams[0].id, "a-second");
     }
 
     #[test]
