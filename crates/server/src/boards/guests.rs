@@ -2,9 +2,9 @@
 
 use serde::Serialize;
 
-use super::{BoardView, join_in, open_board_in, view_in};
+use super::{BoardView, join_in, leave_board_in, open_board_in, view_in};
 use crate::players::{name_key, normalize_name};
-use crate::store::{Store, StoreError};
+use crate::store::{Store, StoreError, Tx};
 use crate::tokens::{hash_token, new_token};
 
 /// Guest ids start with this; user ids are bare UUIDs, so the two never clash.
@@ -95,20 +95,37 @@ impl Store {
         if !board.allow_guests {
             return Err(StoreError::Conflict("guests_off"));
         }
-        let live: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM board_guests WHERE id = ? AND board_id = ? AND gone_at IS NULL",
-        )
-        .bind(guest_id)
-        .bind(&board.id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if live == 0 {
+        if !is_live_guest_in(&mut tx, &board.id, guest_id).await? {
             return Err(StoreError::NotFound);
         }
         let guest_key = insert_key_in(&mut tx, guest_id, now).await?;
         let view = view_in(&mut tx, &board, Some(guest_id), now).await?;
         tx.commit().await?;
         Ok(GuestJoined { guest_key, view })
+    }
+
+    /// Remove a live guest from the board. Creator only, and still allowed with guests off. The guest
+    /// leaves like a member would: played and ended games keep their seat as history.
+    pub async fn remove_guest(
+        &self,
+        token: &str,
+        creator: &str,
+        guest_id: &str,
+        now: i64,
+    ) -> Result<BoardView, StoreError> {
+        let mut tx = self.begin().await?;
+        let board = open_board_in(&mut tx, token, now).await?;
+        if board.creator_user_id != creator {
+            return Err(StoreError::Conflict("creator_only"));
+        }
+        if !is_live_guest_in(&mut tx, &board.id, guest_id).await? {
+            return Err(StoreError::NotFound);
+        }
+        leave_board_in(&mut tx, &board, guest_id, now).await?;
+        end_guest_in(&mut tx, guest_id, now).await?;
+        let view = view_in(&mut tx, &board, Some(creator), now).await?;
+        tx.commit().await?;
+        Ok(view)
     }
 
     /// The guest id a raw key stands for, if that guest is live and on the board with `token`.
@@ -144,4 +161,38 @@ async fn insert_key_in(
         .execute(&mut *conn)
         .await?;
     Ok(raw)
+}
+
+async fn is_live_guest_in(
+    conn: &mut sqlx::SqliteConnection,
+    board_id: &str,
+    guest_id: &str,
+) -> Result<bool, StoreError> {
+    let live: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM board_guests WHERE id = ? AND board_id = ? AND gone_at IS NULL",
+    )
+    .bind(guest_id)
+    .bind(board_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(live > 0)
+}
+
+/// The guest is gone: their name is free again and their keys stop working. The row stays, for
+/// the seats they held in played and ended games.
+pub(super) async fn end_guest_in(
+    tx: &mut Tx<'_>,
+    guest_id: &str,
+    now: i64,
+) -> Result<(), StoreError> {
+    sqlx::query("UPDATE board_guests SET gone_at = ? WHERE id = ? AND gone_at IS NULL")
+        .bind(now)
+        .bind(guest_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("DELETE FROM board_guest_keys WHERE guest_id = ?")
+        .bind(guest_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
