@@ -32,7 +32,7 @@ pub(crate) async fn calendar_games_in(
     let mut out = Vec::new();
     for (id, start, end, played, board_token, board_title) in games {
         let players: Vec<String> = sqlx::query_scalar(
-            "SELECT u.display_name FROM board_game_players p JOIN users u ON u.id = p.user_id \
+            "SELECT u.name FROM board_game_players p JOIN board_people u ON u.id = p.user_id \
              WHERE p.game_id = ? ORDER BY p.seat",
         )
         .bind(&id)

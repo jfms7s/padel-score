@@ -552,6 +552,7 @@ pub(super) async fn requests_in(
             from: MemberRef {
                 user_id: row.from_user.clone(),
                 name: names.get(&row.from_user).cloned().unwrap_or_default(),
+                guest: super::guests::is_guest_id(&row.from_user),
             },
             game_id: row.game_id.clone(),
             other_game_id: row.other_game_id.clone(),

@@ -7,6 +7,7 @@
 
 mod actions;
 pub mod formation;
+pub mod guests;
 pub mod ranges;
 
 use actions::{GameRow, leave_in, requests_in};
@@ -77,6 +78,7 @@ pub struct MemberOut {
     pub user_id: String,
     pub name: String,
     pub joined_at: i64,
+    pub guest: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -91,6 +93,7 @@ pub struct PieceOut {
 pub struct MemberRef {
     pub user_id: String,
     pub name: String,
+    pub guest: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -133,6 +136,7 @@ pub struct MeOut {
     pub user_id: String,
     pub member: bool,
     pub creator: bool,
+    pub guest: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -475,7 +479,7 @@ fn order_forms(mut steps: Vec<Step>) -> Vec<Step> {
 }
 
 async fn display_name_in(conn: &mut SqliteConnection, user: &str) -> Result<String, StoreError> {
-    let name: Option<String> = sqlx::query_scalar("SELECT display_name FROM users WHERE id = ?")
+    let name: Option<String> = sqlx::query_scalar("SELECT name FROM board_people WHERE id = ?")
         .bind(user)
         .fetch_optional(&mut *conn)
         .await?;
@@ -600,7 +604,7 @@ async fn view_in(
 ) -> Result<BoardView, StoreError> {
     let state = load_state_in(conn, &board.id).await?;
     let names: HashMap<String, String> = sqlx::query_as(
-        "SELECT id, display_name FROM users WHERE id IN ( \
+        "SELECT id, name FROM board_people WHERE id IN ( \
            SELECT user_id FROM board_members WHERE board_id = ?1 \
            UNION SELECT p.user_id FROM board_game_players p \
              JOIN board_games g ON g.id = p.game_id WHERE g.board_id = ?1)",
@@ -668,6 +672,7 @@ async fn view_in(
                     .map(|u| MemberRef {
                         user_id: u.clone(),
                         name: name_of(u),
+                        guest: guests::is_guest_id(u),
                     })
                     .collect(),
                 line: if played || past {
@@ -686,6 +691,7 @@ async fn view_in(
             user_id: user.to_owned(),
             member: state.members.iter().any(|m| m.user_id == user),
             creator: board.creator_user_id == user,
+            guest: guests::is_guest_id(user),
         }),
         members: members
             .into_iter()
@@ -693,6 +699,7 @@ async fn view_in(
                 user_id: m.user_id.clone(),
                 name: name_of(&m.user_id),
                 joined_at: m.joined_at,
+                guest: guests::is_guest_id(&m.user_id),
             })
             .collect(),
         pieces: pieces

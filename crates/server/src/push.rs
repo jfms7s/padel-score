@@ -322,6 +322,9 @@ pub struct Notice {
 pub async fn queue_in(tx: &mut Tx<'_>, notices: &[Notice], now: i64) -> Result<usize, StoreError> {
     let mut queued = 0;
     for notice in notices {
+        if crate::boards::guests::is_guest_id(&notice.user_id) {
+            continue;
+        }
         let payload = serde_json::to_string(&notice.payload)
             .map_err(|e| StoreError::Corrupt(format!("push payload: {e}")))?;
         let done = sqlx::query(
