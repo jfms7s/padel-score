@@ -81,7 +81,7 @@ fn still_open(game: &GameRow, now: i64) -> Result<(), StoreError> {
     Ok(())
 }
 
-async fn bump_version_in(tx: &mut Tx<'_>, game_id: &str) -> Result<(), StoreError> {
+pub(super) async fn bump_version_in(tx: &mut Tx<'_>, game_id: &str) -> Result<(), StoreError> {
     sqlx::query("UPDATE board_games SET version = version + 1 WHERE id = ?")
         .bind(game_id)
         .execute(&mut **tx)
