@@ -818,8 +818,8 @@ impl Store {
         Ok(view)
     }
 
-    /// Leave the board: free time goes, and so does the place in every game that has no match
-    /// yet, started or not (the line fills it). Played games stay as they were.
+    /// Leave the board: free time goes, and so does the place in every game that has no match and has not ended,
+    /// started or not (the line fills it). Played and ended games stay as history.
     pub async fn leave_board(&self, token: &str, user: &str, now: i64) -> Result<(), StoreError> {
         let mut tx = self.begin().await?;
         let board = open_board_in(&mut tx, token, now).await?;
@@ -835,7 +835,7 @@ impl Store {
         for game in state
             .games
             .iter()
-            .filter(|g| !g.played && g.players.iter().any(|p| p == user))
+            .filter(|g| !g.played && g.end > now && g.players.iter().any(|p| p == user))
         {
             leave_in(&mut tx, &board.id, &game.id, user, now).await?;
         }

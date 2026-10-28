@@ -930,3 +930,23 @@ async fn a_view_is_one_snapshot_and_does_not_wait_for_a_writer() {
         let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
     }
 }
+
+#[tokio::test]
+async fn leaving_keeps_an_ended_game_as_history_and_tells_nobody() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    sqlx::query("DELETE FROM push_outbox")
+        .execute(&pool)
+        .await
+        .unwrap();
+    s.leave_board(&token, &b, START + HOUR + 60).await.unwrap();
+    let view = s
+        .board_view(&token, Some(&a), START + HOUR + 60)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(player_ids(&view, 0), [a, b.clone(), c, d]);
+    assert_eq!(view.games[0].version, 0);
+    assert_eq!(view.games[0].state, GameState::Past);
+    assert!(view.members.iter().all(|m| m.user_id != b));
+    assert!(outbox(&pool).await.is_empty());
+}
