@@ -3,7 +3,7 @@
 	// hours across; a phone turns it, days across and hours down. The view shows 07:00 and on but
 	// the whole day scrolls. Drag to add a range, or tap one half hour and then another on the same
 	// day. Tap a half hour to see who is free then; tap one of your ranges to trim it.
-	import { dayLabel, timeText, timeRange, weekDays } from '#lib/dates.ts';
+	import { browserTimeZone, dayLabel, timeText, timeRange, weekDays } from '#lib/dates.ts';
 	import {
 		SLOT_SECS,
 		dayCells,
@@ -40,7 +40,8 @@
 	const LONG_PRESS_MS = 350;
 	const MOVE_SLOP_PX = 10;
 
-	const zone = $derived(view.board.time_zone);
+	// Days and times are the viewer's own; cells outside the board's week are switched off.
+	const zone = browserTimeZone();
 	let width = $state(1024);
 	const vertical = $derived(orientation(width) === 'columns');
 
@@ -54,7 +55,7 @@
 	}
 
 	const model = $derived.by(() => {
-		const heat = heatMap(view.pieces, me);
+		const heat = heatMap(view.pieces, me, view.games);
 		const days = weekDays(view.board.starts_at, view.board.ends_at, zone);
 		const cells: GridCell[] = [];
 		const byKey = new Map<string, GridCell>();
@@ -115,7 +116,7 @@
 	}
 
 	const mineSegments = $derived(mine.flatMap((range) => segments(range).map((s, i) => ({ range, ...s, first: i === 0 }))));
-	const gameSegments = $derived(view.games.flatMap((game) => segments(game).map((s) => ({ game, ...s }))));
+	const gameSegments = $derived(view.games.flatMap((game) => segments(game).map((s, i) => ({ game, ...s, first: i === 0 }))));
 
 	/** Where something sits in the CSS grid: a day, and a run of rows on the other axis. */
 	function place(di: number, r0: number, r1 = r0): string {
@@ -125,11 +126,12 @@
 
 	const gridStyle = $derived(
 		vertical
-			? `grid-template-columns: 34px repeat(7, minmax(0, 1fr)); grid-template-rows: 30px repeat(${model.rowCount}, 28px);`
-			: `grid-template-columns: 52px repeat(${model.rowCount}, 34px); grid-template-rows: 22px repeat(7, 44px);`
+			? `grid-template-columns: 34px repeat(${model.days.length}, minmax(0, 1fr)); grid-template-rows: 30px repeat(${model.rowCount}, 28px);`
+			: `grid-template-columns: 52px repeat(${model.rowCount}, 34px); grid-template-rows: 22px repeat(${model.days.length}, 44px);`
 	);
 
-	const when = (secs: number) => `${dayLabel(secs, zone)} ${timeText(secs, zone)}`;
+	const when = (secs: number) =>
+		`${dayLabel(secs, zone)} ${timeText(secs, zone)}${(model.byTime.get(secs)?.row ?? 0) >= 48 ? ` ${t.secondTime}` : ''}`;
 	const rangeText = (r: Range) => `${dayLabel(r.start, zone)} ${timeRange(r.start, r.end, zone)}`;
 
 	// ---- scrolling to 07:00 -------------------------------------------------------------
@@ -186,10 +188,11 @@
 	}
 
 	function tap(cell: GridCell) {
+		if (!cell.enabled) return;
 		focusT = cell.t;
 		if (anchor === cell.t) {
 			anchor = null;
-		} else if (anchor === null || readonly || model.byTime.get(anchor)?.di !== cell.di || !cell.enabled) {
+		} else if (anchor === null || readonly || model.byTime.get(anchor)?.di !== cell.di) {
 			anchor = cell.t;
 		} else {
 			const range = rangeFromCells(anchor, cell.t);
@@ -207,7 +210,7 @@
 	function down(e: PointerEvent) {
 		if (e.button !== 0 || !(e.target instanceof Element)) return;
 		const cell = cellOf(e.target);
-		if (!cell || e.target.closest('.mine, .game')) return;
+		if (!cell || !cell.enabled || e.target.closest('.mine, .game')) return;
 		clearPress();
 		const touch = e.pointerType === 'touch';
 		press = { cell, pointerId: e.pointerId, x: e.clientX, y: e.clientY, touch, dragging: !touch, timer: null };
@@ -232,7 +235,7 @@
 			return;
 		}
 		const over = cellAt(e.clientX, e.clientY);
-		if (over && over.di === press.cell.di && drag) drag = { from: drag.from, to: over.t };
+		if (over?.enabled && over.di === press.cell.di && drag) drag = { from: drag.from, to: over.t };
 	}
 
 	function up(e: PointerEvent) {
@@ -404,13 +407,19 @@
 			{/each}
 
 			{#each gameSegments as seg (`${seg.game.id}:${seg.di}:${seg.r0}`)}
-				<button
-					type="button"
-					class="game"
-					style={place(seg.di, seg.r0, seg.r1)}
-					aria-label={t.gameLabel(rangeText(seg.game), t.gameState[seg.game.state])}
-					onclick={() => ongame(seg.game.id)}
-				></button>
+				<!-- An outline that lets taps through to the range under it; the button opens the game. -->
+				<div class="game" style={place(seg.di, seg.r0, seg.r1)}>
+					{#if seg.first}
+						<button
+							type="button"
+							class="gopen"
+							aria-label={t.gameLabel(rangeText(seg.game), t.gameState[seg.game.state])}
+							onclick={() => ongame(seg.game.id)}
+						>
+							<span aria-hidden="true">●</span>
+						</button>
+					{/if}
+				</div>
 			{/each}
 		</div>
 	</div>
@@ -670,6 +679,7 @@
 	.game {
 		position: relative;
 		z-index: 3;
+		pointer-events: none;
 		min-height: 0;
 		margin: 1px;
 		padding: 0;
@@ -677,6 +687,30 @@
 		border-radius: 5px;
 		background: transparent;
 		box-shadow: 0 0 0 1px var(--ink);
+	}
+
+	.gopen {
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		z-index: 5;
+		display: grid;
+		place-items: center;
+		width: 22px;
+		min-height: 22px;
+		height: 22px;
+		padding: 0;
+		border: 0;
+		border-radius: 50%;
+		background: var(--ball);
+		color: var(--on-ball);
+		font-size: 10px;
+		pointer-events: auto;
+	}
+	.gopen::before {
+		content: '';
+		position: absolute;
+		inset: -10px;
 	}
 
 	.legend {

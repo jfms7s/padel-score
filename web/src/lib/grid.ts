@@ -3,7 +3,7 @@
 
 import type { Day } from './dates';
 import { timeText } from './dates';
-import type { BoardView, MemberRef, PieceOut } from './types';
+import type { BoardView, GameOut, MemberRef, PieceOut } from './types';
 
 export const SLOT_SECS = 1800;
 /** Below this width the grid turns: days become columns and hours run down. */
@@ -55,19 +55,28 @@ export function rangeFromCells(a: number, b: number): Range {
 
 const covers = (p: { start: number; end: number }, t: number) => p.start <= t && t < p.end;
 
-/** How many people other than `me` are free at the half hour starting `t`. */
-export function othersFreeCount(pieces: PieceOut[], me: string | null, t: number): number {
+type Busy = Pick<GameOut, 'start' | 'end' | 'players'>;
+
+/** Is the member in a game that overlaps the half hour starting `t`? */
+function inGame(games: Busy[], userId: string, t: number): boolean {
+	return games.some((g) => g.start < t + SLOT_SECS && t < g.end && g.players.some((p) => p.user_id === userId));
+}
+
+/** How many people other than `me` are free at the half hour starting `t`: covered by a piece
+ *  and not in a game then (the same people `freeAt` lists). */
+export function othersFreeCount(pieces: PieceOut[], me: string | null, t: number, games: Busy[] = []): number {
 	const who = new Set<string>();
-	for (const p of pieces) if (p.user_id !== me && covers(p, t)) who.add(p.user_id);
+	for (const p of pieces) if (p.user_id !== me && covers(p, t) && !inGame(games, p.user_id, t)) who.add(p.user_id);
 	return who.size;
 }
 
 /** `othersFreeCount` for every half hour at once: half hour start -> count (absent means 0). */
-export function heatMap(pieces: PieceOut[], me: string | null): Map<number, number> {
+export function heatMap(pieces: PieceOut[], me: string | null, games: Busy[] = []): Map<number, number> {
 	const people = new Map<number, Set<string>>();
 	for (const p of pieces) {
 		if (p.user_id === me) continue;
 		for (let t = Math.ceil(p.start / SLOT_SECS) * SLOT_SECS; t < p.end; t += SLOT_SECS) {
+			if (inGame(games, p.user_id, t)) continue;
 			const set = people.get(t) ?? new Set<string>();
 			set.add(p.user_id);
 			people.set(t, set);

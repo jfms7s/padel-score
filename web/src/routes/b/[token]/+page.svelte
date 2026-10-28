@@ -47,7 +47,8 @@
 	const member = $derived(me?.member === true);
 	const creator = $derived(me?.creator === true);
 	const over = $derived(view?.board.over === true);
-	const zone = $derived(view?.board.time_zone ?? 'UTC');
+	// Every time on the page is the viewer's own, like the notices.
+	const zone = browserTimeZone();
 	const myGames = $derived(
 		view && me ? view.games.filter((g) => g.players.some((p) => p.user_id === me.user_id)) : []
 	);
@@ -155,8 +156,22 @@
 		});
 	}
 
+	let menuOpen = $state(false);
+
+	function ask(what: 'leave' | 'delete') {
+		menuOpen = false;
+		confirming = what;
+	}
+
+	function closeMenu(e: Event) {
+		if (!menuOpen) return;
+		if (e instanceof KeyboardEvent ? e.key !== 'Escape' : e.target instanceof Element && e.target.closest('.menu')) return;
+		menuOpen = false;
+	}
+
 	function startEdit() {
 		if (!view) return;
+		menuOpen = false;
 		editTitle = view.board.title;
 		editPlace = view.board.place ?? '';
 		editing = true;
@@ -181,6 +196,8 @@
 	const gameWhen = (g: GameOut) => `${dayLabel(g.start, zone)} · ${timeRange(g.start, g.end, zone)}`;
 </script>
 
+<svelte:window onclick={closeMenu} onkeydown={closeMenu} />
+
 <main class="acct page-wide-desk">
 	<a class="back" href="/">{strings.appName}</a>
 
@@ -196,12 +213,11 @@
 				<p class="hint">
 					{weekText} · {t.members(view.members.length)} · {t.by(view.board.creator_name)}
 				</p>
-				{#if zone !== browserTimeZone()}<p class="hint">{t.timesIn(zone)}</p>{/if}
 			</div>
 			<div class="tools">
 				<button type="button" class="secondary" onclick={share}>{t.share}</button>
-				{#if member}
-					<details class="menu">
+				{#if (member || creator) && !over}
+					<details class="menu" bind:open={menuOpen}>
 						<summary class="secondary" aria-label={t.menu}>
 							<span aria-hidden="true">⋯</span>
 						</summary>
@@ -209,9 +225,11 @@
 							{#if creator && !over}
 								<button type="button" onclick={startEdit}>{t.edit}</button>
 							{/if}
-							<button type="button" onclick={() => (confirming = 'leave')}>{t.leave}</button>
-							{#if creator}
-								<button type="button" class="warn" onclick={() => (confirming = 'delete')}>{t.delete}</button>
+							{#if member && !over}
+								<button type="button" onclick={() => ask('leave')}>{t.leave}</button>
+							{/if}
+							{#if creator && !over}
+								<button type="button" class="warn" onclick={() => ask('delete')}>{t.delete}</button>
 							{/if}
 						</div>
 					</details>

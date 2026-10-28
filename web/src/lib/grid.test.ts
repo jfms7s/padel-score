@@ -143,6 +143,34 @@ describe('othersFreeCount and heatMap', () => {
 	});
 });
 
+describe('free counts with games', () => {
+	const pieces = [piece('ana', T0, T0 + 4 * H, 1), piece('rui', T0, T0 + 4 * H, 2), piece('marta', T0, T0 + 4 * H, 3)];
+	const games = [{ start: T0 + H, end: T0 + 2 * H, players: [{ user_id: 'rui', name: 'Rui' }] }];
+
+	it('does not count someone who is in a game then, and agrees with freeAt', () => {
+		expect(othersFreeCount(pieces, 'ana', T0 + H, games)).toBe(1);
+		expect(othersFreeCount(pieces, 'ana', T0 + 2 * H, games)).toBe(2);
+		const heat = heatMap(pieces, 'ana', games);
+		const v = view({
+			pieces,
+			games: games.map((g, i) => ({
+				...g,
+				id: `g${i}`,
+				version: 1,
+				moved: false,
+				state: 'short' as const,
+				line: [],
+				match_spectator_token: null
+			}))
+		});
+		for (let t = T0; t < T0 + 4 * H; t += 1800) {
+			const listed = freeAt(v, t).filter((m) => m.user_id !== 'ana').length;
+			expect(heat.get(t) ?? 0).toBe(listed);
+			expect(othersFreeCount(pieces, 'ana', t, games)).toBe(listed);
+		}
+	});
+});
+
 describe('mergedRanges', () => {
 	it('joins touching and overlapping pieces of one member', () => {
 		const pieces = [

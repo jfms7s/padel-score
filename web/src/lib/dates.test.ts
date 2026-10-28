@@ -82,6 +82,29 @@ describe('dates', () => {
 		for (let i = 1; i < 7; i++) expect(days[i]?.start).toBe(days[i - 1]?.end);
 	});
 
+	it('a viewer in another zone sees the 8 local days a Lisbon week touches', () => {
+		// The board runs Lisbon Mon 2 Nov 00:00 to Mon 9 Nov 00:00 (UTC+0). New York is UTC-5 (its
+		// clocks went back on Sunday 1 Nov), so the week starts on Sunday evening there.
+		const starts = localMidnight('2026-11-02', 'Europe/Lisbon');
+		const ends = localMidnight('2026-11-09', 'Europe/Lisbon');
+		const days = weekDays(starts, ends, 'America/New_York');
+		expect(days.map((d) => d.date)).toEqual([
+			'2026-11-01',
+			'2026-11-02',
+			'2026-11-03',
+			'2026-11-04',
+			'2026-11-05',
+			'2026-11-06',
+			'2026-11-07',
+			'2026-11-08'
+		]);
+		expect(days[0]!.end - days[0]!.start).toBe(90000);
+		expect(days[0]!.start).toBeLessThan(starts);
+		expect(days[0]!.end).toBeGreaterThan(starts);
+		expect(days[7]!.end).toBeGreaterThan(ends);
+		expect(days[7]!.start).toBeLessThan(ends);
+	});
+
 	it('a week across the DST start has a 23-hour Sunday', () => {
 		const tz = 'Europe/Lisbon';
 		const days = weekDays(localMidnight('2026-03-23', tz), localMidnight('2026-03-30', tz), tz);

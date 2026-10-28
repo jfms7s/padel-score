@@ -959,7 +959,6 @@ export const strings = {
 
 	// Game boards: the board page, the week grid and the new-board form.
 	boards: {
-		back: 'Calendar',
 		newBoard: 'New board',
 		newIntro: 'Share the link. Everyone paints the times they can play, and a game forms wherever four overlap.',
 		title: 'Title',
@@ -971,7 +970,6 @@ export const strings = {
 		create: 'Create board',
 		creating: 'Creating…',
 		weekHeader: (first: string, last: string, month: string) => `${first} – ${last} ${month}`,
-		timesIn: (zone: string) => `Times in ${zone}`,
 		loading: 'Loading the board…',
 		notFound: 'This board link does not work. Ask for a new one.',
 		over: "This board's week is over, so it is read-only.",
@@ -984,7 +982,6 @@ export const strings = {
 		menu: 'Board menu',
 		edit: 'Edit board',
 		save: 'Save',
-		saving: 'Saving…',
 		cancel: 'Cancel',
 		leave: 'Leave board',
 		leaveConfirm: 'Leave this board? Your free time on it is removed, and so are you from your games.',

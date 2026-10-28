@@ -116,13 +116,17 @@ export interface Day {
 	end: number;
 }
 
-/** The seven local days from the day `startsAt` falls on, each with its real length (a day can
- *  be 23, 24 or 25 hours long where the clocks change). `endsAt` is the week's end, which the
- *  last day reaches. */
+/** Every local day in the zone that touches `[startsAt, endsAt)`, each with its real length (a
+ *  day can be 23, 24 or 25 hours long where the clocks change). A board made in another zone
+ *  starts and ends part way through a local day, so a viewer can see 8 days; the cells outside
+ *  the range are the grid's to switch off. */
 export function weekDays(startsAt: number, endsAt: number, timeZone: string): Day[] {
-	void endsAt;
 	const first = localDate(startsAt, timeZone);
-	const dates = Array.from({ length: 8 }, (_, i) => addDays(first, i));
-	const starts = dates.map((d) => localMidnight(d, timeZone));
-	return dates.slice(0, 7).map((date, i) => ({ date, start: starts[i] ?? 0, end: starts[i + 1] ?? 0 }));
+	const last = localDate(Math.max(startsAt, endsAt - 1), timeZone);
+	const dates = [first];
+	// A week is at most a few days over; the cap only guards a bad range.
+	while (dates[dates.length - 1] !== last && dates.length < 14)
+		dates.push(addDays(dates[dates.length - 1] ?? first, 1));
+	const starts = [...dates, addDays(dates[dates.length - 1] ?? first, 1)].map((d) => localMidnight(d, timeZone));
+	return dates.map((date, i) => ({ date, start: starts[i] ?? 0, end: starts[i + 1] ?? 0 }));
 }
