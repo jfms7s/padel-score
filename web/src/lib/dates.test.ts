@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
 	dateText,
 	dayLabel,
+	fromLocalInputs,
 	localDate,
 	localMidnight,
 	monthYear,
 	nextMonday,
 	timeRange,
 	timeText,
+	toLocalInputs,
 	weekDays
 } from './dates';
 
@@ -131,5 +133,44 @@ describe('dates', () => {
 		const tz = 'Europe/Lisbon';
 		const days = weekDays(localMidnight('2026-03-23', tz), localMidnight('2026-03-30', tz), tz);
 		expect(days.map((d) => d.end - d.start)).toEqual([86400, 86400, 86400, 86400, 86400, 86400, 82800]);
+	});
+});
+
+describe('local date and time inputs', () => {
+	it('splits an instant into the zone’s date and time', () => {
+		expect(toLocalInputs(WED_2000, 'UTC')).toEqual({ date: '2026-11-04', time: '20:00' });
+		expect(toLocalInputs(WED_2000, 'Asia/Tokyo')).toEqual({ date: '2026-11-05', time: '05:00' });
+	});
+
+	it('joins them back into the instant', () => {
+		expect(fromLocalInputs('2026-11-04', '20:00', 'UTC')).toBe(WED_2000);
+		expect(fromLocalInputs('2026-11-05', '05:00', 'Asia/Tokyo')).toBe(WED_2000);
+	});
+
+	it('reads a time after the clocks changed that day with the new offset (DST)', () => {
+		// Lisbon: the clocks went forward at 01:00 UTC on 2026-03-29, so noon is 11:00 UTC...
+		expect(fromLocalInputs('2026-03-29', '12:00', 'Europe/Lisbon')).toBe(Date.UTC(2026, 2, 29, 11) / 1000);
+		// ...and back at 01:00 UTC on 2026-10-25, so noon is 12:00 UTC.
+		expect(fromLocalInputs('2026-10-25', '12:00', 'Europe/Lisbon')).toBe(Date.UTC(2026, 9, 25, 12) / 1000);
+		// Before the change the old offset still holds.
+		expect(fromLocalInputs('2026-03-29', '00:30', 'Europe/Lisbon')).toBe(Date.UTC(2026, 2, 29, 0, 30) / 1000);
+	});
+
+	it('round-trips, and moves a time that does not exist to the next valid one', () => {
+		for (const [date, time] of [
+			['2026-03-29', '12:00'],
+			['2026-10-25', '12:00'],
+			['2026-11-04', '23:30']
+		] as const) {
+			expect(toLocalInputs(fromLocalInputs(date, time, 'Europe/Lisbon'), 'Europe/Lisbon')).toEqual({ date, time });
+		}
+		// New York skips 02:00-03:00 on 2027-03-14: 02:30 becomes 03:30.
+		expect(toLocalInputs(fromLocalInputs('2027-03-14', '02:30', 'America/New_York'), 'America/New_York')).toEqual({
+			date: '2027-03-14',
+			time: '03:30'
+		});
+		// 01:30 on 2026-03-29 never happened in Lisbon.
+		const gap = fromLocalInputs('2026-03-29', '01:30', 'Europe/Lisbon');
+		expect(toLocalInputs(gap, 'Europe/Lisbon')).toEqual({ date: '2026-03-29', time: '02:30' });
 	});
 });

@@ -8,7 +8,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
 use crate::competitions::courts::{advance_court_in, courts_in, next_queued_in};
-use crate::competitions::{Competition, Kind, Status, competition_in};
+use crate::competitions::{Competition, Kind, Status, competition_in, not_cancelled};
 use crate::store::{Store, StoreError, Tx};
 
 /// Start and Resume both count in for this long before the clock moves.
@@ -255,6 +255,7 @@ impl Store {
         let ev = competition_in(&mut tx, owner, event_id)
             .await?
             .ok_or(StoreError::NotFound)?;
+        not_cancelled(&ev)?;
         if ev.kind != Kind::NonStop {
             return Err(StoreError::Conflict("not_non_stop"));
         }

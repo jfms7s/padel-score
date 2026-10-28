@@ -15,7 +15,9 @@ use serde::Serialize;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
-use super::{Competition, Status, clean_name, competition_by_id_in, competition_in, team_in};
+use super::{
+    Competition, Status, clean_name, competition_by_id_in, competition_in, not_cancelled, team_in,
+};
 use crate::players::insert_match_players_in;
 use crate::store::{
     NewMatch, Store, StoreError, Teams, Tx, create_match_in, rotate_scorer_token_in,
@@ -243,6 +245,7 @@ pub async fn create_event_match_in(
     court_id: Option<&str>,
     now: i64,
 ) -> Result<EventMatchRow, StoreError> {
+    not_cancelled(ev)?;
     if ev.status != Status::Running {
         return Err(StoreError::Conflict("event_not_running"));
     }
@@ -336,6 +339,7 @@ pub async fn assign_in(
     match_id: &str,
     court_id: Option<&str>,
 ) -> Result<Option<String>, StoreError> {
+    not_cancelled(ev)?;
     if ev.status == Status::Finished {
         return Err(StoreError::Conflict("event_finished"));
     }
@@ -406,6 +410,7 @@ pub async fn advance_court_in(
     ev: &Competition,
     court_id: &str,
 ) -> Result<Advanced, StoreError> {
+    not_cancelled(ev)?;
     if ev.status == Status::Finished {
         return Err(StoreError::Conflict("event_finished"));
     }
@@ -489,6 +494,7 @@ impl Store {
         let name = name.as_deref().map(|n| clean_name(n, "name")).transpose()?;
         let mut tx = self.begin().await?;
         let ev = owned_event_in(&mut tx, owner, event_id).await?;
+        not_cancelled(&ev)?;
         if ev.status == Status::Finished {
             return Err(StoreError::Conflict("event_finished"));
         }
@@ -534,7 +540,7 @@ impl Store {
     ) -> Result<Court, StoreError> {
         let name = clean_name(&name, "name")?;
         let mut tx = self.begin().await?;
-        owned_event_in(&mut tx, owner, event_id).await?;
+        not_cancelled(&owned_event_in(&mut tx, owner, event_id).await?)?;
         let mut court = court_in(&mut tx, event_id, court_id)
             .await?
             .ok_or(StoreError::NotFound)?;
@@ -557,7 +563,7 @@ impl Store {
         court_id: &str,
     ) -> Result<(), StoreError> {
         let mut tx = self.begin().await?;
-        owned_event_in(&mut tx, owner, event_id).await?;
+        not_cancelled(&owned_event_in(&mut tx, owner, event_id).await?)?;
         let court = court_in(&mut tx, event_id, court_id)
             .await?
             .ok_or(StoreError::NotFound)?;
@@ -587,7 +593,7 @@ impl Store {
         court_id: &str,
     ) -> Result<Court, StoreError> {
         let mut tx = self.begin().await?;
-        owned_event_in(&mut tx, owner, event_id).await?;
+        not_cancelled(&owned_event_in(&mut tx, owner, event_id).await?)?;
         let mut court = court_in(&mut tx, event_id, court_id)
             .await?
             .ok_or(StoreError::NotFound)?;
@@ -655,6 +661,7 @@ impl Store {
             .transpose()?;
         let mut tx = self.begin().await?;
         let ev = owned_event_in(&mut tx, owner, event_id).await?;
+        not_cancelled(&ev)?;
         event_match_in(&mut tx, event_id, match_id)
             .await?
             .ok_or(StoreError::NotFound)?;

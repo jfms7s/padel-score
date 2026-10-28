@@ -200,6 +200,7 @@ export type ApiErrorBody =
 	| { error: 'too_many_requests'; retry_after_secs: number }
 	| { error: AccountErrorCode }
 	| { error: EventErrorCode }
+	| { error: SignupErrorCode }
 	| { error: BoardErrorCode };
 
 // ---- accounts (crates/server/src/accounts.rs, owned.rs, device.rs) ------------------------
@@ -450,7 +451,8 @@ export type EventErrorCode =
 	| 'player_in_team'
 	| 'court_in_use'
 	| 'match_not_finished'
-	| 'match_finished';
+	| 'match_finished'
+	| 'event_cancelled';
 
 /**
  * A final score typed in after the fact (the engine's `FinalScore`). A 7-6 set carries its
@@ -487,7 +489,34 @@ export interface EventResultRequest {
 }
 
 export type EventKind = 'tournament' | 'non_stop';
-export type EventStatus = 'setup' | 'running' | 'finished';
+/** A cancelled event was called off before it started. */
+export type EventStatus = 'setup' | 'running' | 'finished' | 'cancelled';
+
+export type SignupMode = 'off' | 'private' | 'public';
+
+/** When and where an event is and who can sign up. Times are Unix seconds. */
+export interface Schedule {
+	starts_at: number | null;
+	place: string | null;
+	signups: SignupMode;
+	min_teams: number;
+	max_teams: number | null;
+	deadline_at: number | null;
+}
+
+/**
+ * A change to a schedule, in `schedule` of `POST /api/events` and `PATCH /api/events/{id}`.
+ * Leave a field out to keep it; `null` clears a date, place or maximum, and a `null` deadline
+ * asks for the default one.
+ */
+export interface ScheduleInput {
+	starts_at?: number | null;
+	place?: string | null;
+	signups?: SignupMode;
+	min_teams?: number;
+	max_teams?: number | null;
+	deadline_at?: number | null;
+}
 
 /** An event as `GET /api/events` lists it, and inside every detail. Times are Unix seconds. */
 export interface EventSummary {
@@ -504,6 +533,10 @@ export interface EventSummary {
 	finished_at: number | null;
 	team_count: number;
 	court_count: number;
+	schedule: Schedule;
+	cancelled_at: number | null;
+	/** When sign-ups closed: the deadline ran, or the organiser took the teams. */
+	signups_closed_at: number | null;
 }
 
 export interface TeamPlayer {
@@ -573,6 +606,8 @@ export interface EventDetail {
 	event: EventSummary;
 	/** The whole event's viewing link is `/e/{spectator_token}`. */
 	spectator_token: string;
+	/** The join link is `/j/{join_token}`, once sign-ups were turned on. */
+	join_token: string | null;
 	teams: EventTeam[];
 	courts: CourtOut[];
 	matches: EventMatch[];
@@ -611,7 +646,7 @@ export type EventViewMatch = Omit<EventMatch, 'scorer_token'>;
 export type EventViewCourt = Omit<CourtOut, 'scorer_token' | 'phones'>;
 
 /** `GET /api/event-view/{token}`, and each `event` frame of its stream. */
-export interface EventView extends Omit<EventDetail, 'courts' | 'matches'> {
+export interface EventView extends Omit<EventDetail, 'courts' | 'matches' | 'join_token'> {
 	courts: EventViewCourt[];
 	matches: EventViewMatch[];
 }
@@ -622,6 +657,7 @@ export interface NewEvent {
 	kind: EventKind;
 	format: Format;
 	settings?: Record<string, unknown>;
+	schedule?: ScheduleInput;
 }
 
 /** `PATCH /api/events/{id}`: any of the fields. */
@@ -629,6 +665,7 @@ export interface EventChange {
 	name?: string;
 	format?: Format;
 	settings?: Record<string, unknown>;
+	schedule?: ScheduleInput;
 }
 
 /** `POST /api/events/{id}/teams`: two player ids, and a custom name if wanted. */
@@ -903,4 +940,87 @@ export interface BoardView {
 	pieces: PieceOut[];
 	games: GameOut[];
 	requests: RequestOut[];
+}
+
+// ---- event sign-ups (crates/server/src/competitions/signups.rs, signups_api.rs) -----------
+
+/** The sign-up routes' 409 codes (the 422 fields are the schedule's and `partner_name`). */
+export type SignupErrorCode =
+	| 'event_cancelled'
+	| 'signups_closed'
+	| 'signups_full'
+	| 'signups_off'
+	| 'signups_exist'
+	| 'own_link'
+	| 'already_signed_up'
+	| 'not_solo'
+	| 'signup_taken'
+	| 'not_public'
+	| 'not_auto_paired'
+	| 'nothing_to_take';
+
+/** Where a user stands in an event. Places are 1-based. */
+export type MyEntry =
+	| { state: 'solo' }
+	| { state: 'pending'; partner_token: string }
+	| { state: 'team'; place: number }
+	| { state: 'line'; place: number };
+
+export interface SignupPlayer {
+	/** Left out of the public join page. */
+	user_id?: string | null;
+	name: string;
+}
+
+export interface SignupTeam {
+	id: string;
+	players: SignupPlayer[];
+	complete_at: number | null;
+	auto_paired: boolean;
+	held: boolean;
+	partner_pending: boolean;
+}
+
+export interface SignupList {
+	/** Teams the organiser made by hand: they hold a place of their own. */
+	hand_added: number;
+	teams: SignupTeam[];
+	line: SignupTeam[];
+	/** People waiting for a partner, held ones included. */
+	solos: SignupTeam[];
+	/** People who sent a partner link that is not answered yet. */
+	pending: SignupTeam[];
+}
+
+/** What the join page shows about the event. */
+export interface EventJoinInfo {
+	name: string;
+	kind: EventKind;
+	format: Format;
+	schedule: Schedule;
+	status: EventStatus;
+	organiser_name: string;
+	/** Nobody can sign up any more: cancelled, started, past the deadline or taken. */
+	closed: boolean;
+}
+
+/** `GET /api/join/{token}`. Task 16 adds a scheduled match. */
+export type JoinView = { kind: 'event'; event: EventJoinInfo; list: SignupList; me: MyEntry | null };
+
+/** `POST /api/join/{token}`. */
+export type JoinAs = { as: 'solo' } | { as: 'partner'; partner_name?: string };
+
+/** `GET /api/partner/{ptoken}`. */
+export interface PartnerInvite {
+	event_name: string;
+	inviter_name: string;
+	join_token: string;
+}
+
+/** What "Take teams from sign-ups" did. */
+export interface TakeReport {
+	taken: number;
+	/** Sign-up ids left out because a player is already in a hand-added team. */
+	skipped: string[];
+	left_on_line: number;
 }

@@ -51,6 +51,7 @@ async fn event_with(s: &Store, pairs: &[[&str; 2]]) -> (Competition, Vec<String>
         .create_competition(
             A,
             NewCompetition {
+                schedule: None,
                 name: "Cup".into(),
                 kind: Kind::Tournament,
                 format: one_set(),

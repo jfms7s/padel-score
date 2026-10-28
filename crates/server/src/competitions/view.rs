@@ -18,6 +18,7 @@ use super::courts::{
     next_queued_in,
 };
 use super::places::{Place, places};
+use super::schedule::Schedule;
 use super::{
     Audience, Competition, EventTeam, Kind, Status, competition_by_id_in, competition_in, kinds,
     teams_in,
@@ -42,6 +43,10 @@ pub struct EventSummary {
     pub finished_at: Option<i64>,
     pub team_count: usize,
     pub court_count: usize,
+    pub schedule: Schedule,
+    pub cancelled_at: Option<i64>,
+    /// When sign-ups closed: the deadline ran, or the organiser took the teams.
+    pub signups_closed_at: Option<i64>,
 }
 
 impl EventSummary {
@@ -58,6 +63,9 @@ impl EventSummary {
             finished_at: ev.finished_at,
             team_count,
             court_count,
+            schedule: ev.schedule.clone(),
+            cancelled_at: ev.cancelled_at,
+            signups_closed_at: ev.signups_closed_at,
         }
     }
 }
@@ -109,6 +117,8 @@ pub struct CourtOut {
 pub struct EventDetail {
     pub event: EventSummary,
     pub spectator_token: String,
+    /// The `/j/{token}` link once sign-ups were turned on.
+    pub join_token: Option<String>,
     pub teams: Vec<EventTeam>,
     pub courts: Vec<CourtOut>,
     pub matches: Vec<EventMatch>,
@@ -310,6 +320,7 @@ async fn detail_for_in(
     Ok(EventDetail {
         event: EventSummary::new(&ev, teams.len(), courts.len()),
         spectator_token: ev.spectator_token.clone(),
+        join_token: ev.join_token.clone(),
         teams,
         courts: court_out,
         matches,

@@ -2,7 +2,7 @@
 // crates/server/src/push.rs `Payload`), and the service worker turns it into words here, in the
 // device's own time zone. The service worker imports this file, so it may use no DOM API.
 
-import { dayLabel, timeRange } from './dates';
+import { dayLabel, timeRange, timeText } from './dates';
 import { strings } from './strings';
 import type { NoticePayload } from './types';
 
@@ -49,6 +49,16 @@ function gameBody(p: NoticePayload, opts: NoticeOptions, moved = false): string 
 	return parts.join(' · ');
 }
 
+/** "Wed 4 20:00 · Sunday cup": when an event starts and its name, leaving out what is missing. */
+function eventBody(p: NoticePayload, opts: NoticeOptions): string {
+	const parts: string[] = [];
+	if (p.start !== undefined) {
+		parts.push(`${dayLabel(p.start, opts.timeZone, opts.locale)} ${timeText(p.start, opts.timeZone, opts.locale)}`);
+	}
+	if (p.title) parts.push(p.title);
+	return parts.join(' · ');
+}
+
 /** Words for a push payload; `opts` sets the zone and locale instants are printed in. */
 export function noticeText(p: NoticePayload, opts: NoticeOptions = {}): NoticeText {
 	const url = safeNoticeUrl(p.url);
@@ -78,6 +88,20 @@ export function noticeText(p: NoticePayload, opts: NoticeOptions = {}): NoticeTe
 			return made(p.accepted === false ? t.timeAnswered.declined : t.timeAnswered.accepted, gameBody(p, opts));
 		case 'time_changed':
 			return made(t.timeChanged, gameBody(p, opts, true));
+		case 'event_cancelled':
+			return made(t.eventCancelled, eventBody(p, opts));
+		case 'event_changed':
+			return made(t.eventChanged, eventBody(p, opts));
+		case 'team_complete':
+			return made(t.teamComplete, eventBody(p, opts));
+		case 'moved_up':
+			return made(t.movedUp, eventBody(p, opts));
+		case 'moved_down':
+			return made(t.movedDown, eventBody(p, opts));
+		case 'partner_left':
+			return made(t.partnerLeft(p.name), eventBody(p, opts));
+		case 'no_place':
+			return made(t.noPlace, eventBody(p, opts));
 		default:
 			return made(t.appName, t.fallback);
 	}

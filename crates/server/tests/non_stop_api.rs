@@ -68,6 +68,7 @@ async fn running(settings: Option<Value>) -> Ev {
         .create_competition(
             &owner,
             NewCompetition {
+                schedule: None,
                 name: "Americano".into(),
                 kind: Kind::NonStop,
                 format: timed(),

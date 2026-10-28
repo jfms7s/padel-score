@@ -47,9 +47,9 @@ export async function listEvents(): Promise<EventSummary[]> {
 
 /** The home page's Events list: running first, then setup, newest first within each, at most five. */
 export function homeEvents(list: EventSummary[]): EventSummary[] {
-	const rank = { running: 0, setup: 1, finished: 2 } as const;
+	const rank = { running: 0, setup: 1, finished: 2, cancelled: 3 } as const;
 	return list
-		.filter((e) => e.status !== 'finished')
+		.filter((e) => e.status !== 'finished' && e.status !== 'cancelled')
 		.sort((x, y) => rank[x.status] - rank[y.status] || y.created_at - x.created_at)
 		.slice(0, 5);
 }
@@ -78,6 +78,11 @@ export async function deleteEvent(id: string): Promise<void> {
  */
 export function startEvent(id: string): Promise<EventDetail> {
 	return accountRequest(event(id, '/start'), { ...signedIn, method: 'POST' });
+}
+
+/** Only before it starts (409 `event_started`, `event_cancelled`). The sign-ups are told. */
+export function cancelEvent(id: string): Promise<EventDetail> {
+	return accountRequest(event(id, '/cancel'), { ...signedIn, method: 'POST' });
 }
 
 /** Finish with the final places (see `placesFromOrder`); they must tile the field. */

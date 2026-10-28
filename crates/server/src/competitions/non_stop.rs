@@ -93,7 +93,7 @@ pub fn normalize_settings(
 }
 
 /// Matches in the whole schedule: `legs x n(n-1)/2`.
-fn schedule_size(teams: usize, legs: u32) -> usize {
+pub(crate) fn schedule_size(teams: usize, legs: u32) -> usize {
     teams
         .saturating_mul(teams.saturating_sub(1))
         .saturating_div(2)

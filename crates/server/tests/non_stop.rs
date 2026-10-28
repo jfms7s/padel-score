@@ -60,6 +60,7 @@ async fn create_fmt(
     s.create_competition(
         A,
         NewCompetition {
+            schedule: None,
             name: "Americano".into(),
             kind: Kind::NonStop,
             format,
@@ -1174,6 +1175,7 @@ async fn tournament_clock_is_not_non_stop() {
         .create_competition(
             A,
             NewCompetition {
+                schedule: None,
                 name: "Cup".into(),
                 kind: Kind::Tournament,
                 format: Format::Sets(SetRules {

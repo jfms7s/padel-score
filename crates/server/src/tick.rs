@@ -14,6 +14,8 @@ pub struct TickReport {
     pub pruned: usize,
     /// Board swap and time requests set to `expired` because a game changed or started.
     pub expired_requests: usize,
+    /// Events whose sign-up deadline ran: closed, or cancelled for too few teams.
+    pub closed_signups: usize,
 }
 
 /// One tick as of `now`.
@@ -26,6 +28,20 @@ pub async fn tick_once(state: &AppState, now: i64) -> TickReport {
     match state.store.expire_requests(now).await {
         Ok(expired) => report.expired_requests = expired,
         Err(error) => tracing::error!(%error, "board request expiry failed"),
+    }
+    match state.store.close_due_signups(now).await {
+        Ok(closed) => {
+            report.closed_signups = closed.len();
+            for event in &closed {
+                state.hub.notify_event(&event.event_id);
+                state.hub.notify_user(&event.owner_id);
+            }
+        }
+        Err(error) => tracing::error!(%error, "sign-up deadline job failed"),
+    }
+    if report.closed_signups > 0 {
+        // A cancelled event queued notices.
+        state.push.wake();
     }
     report
 }
@@ -40,10 +56,11 @@ pub async fn run(state: AppState) {
             _ = ticker.tick() => {}
         }
         let report = tick_once(&state, crate::api::now()).await;
-        if report.pruned + report.expired_requests > 0 {
+        if report.pruned + report.expired_requests + report.closed_signups > 0 {
             tracing::info!(
                 pruned = report.pruned,
                 expired_requests = report.expired_requests,
+                closed_signups = report.closed_signups,
                 "tick done"
             );
         }

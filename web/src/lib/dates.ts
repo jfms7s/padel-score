@@ -133,3 +133,26 @@ export function weekDays(startsAt: number, endsAt: number, timeZone: string): Da
 	const starts = [...dates, addDays(dates[dates.length - 1] ?? first, 1)].map((d) => localMidnight(d, timeZone));
 	return dates.map((date, i) => ({ date, start: starts[i] ?? 0, end: starts[i + 1] ?? 0 }));
 }
+
+/** An instant as the values of a date field and a time field, in the zone ("2026-11-04", "20:00"). */
+export function toLocalInputs(secs: number, timeZone?: string): { date: string; time: string } {
+	const p = partsIn(secs, timeZone ?? browserTimeZone());
+	return { date: `${p.year}-${pad(p.month)}-${pad(p.day)}`, time: `${pad(p.hour)}:${pad(p.minute)}` };
+}
+
+/**
+ * The instant for a date field ("2026-11-04") and a time field ("20:00") read in the zone. The
+ * offset is looked up at the wall time, so a day whose clocks change still lands right; a time
+ * the clocks skipped moves forward to the next one that exists.
+ */
+export function fromLocalInputs(date: string, time: string, timeZone?: string): number {
+	const zoneName = timeZone ?? browserTimeZone();
+	const [h, m] = time.split(':').map(Number);
+	const wall = utcDay(date) + (h ?? 0) * 3600 + (m ?? 0) * 60;
+	// The offsets either side of the wall time; an instant is right when its own offset is the one used.
+	const before = offsetAt(wall - DAY_SECS, zoneName);
+	const after = offsetAt(wall + DAY_SECS, zoneName);
+	const fits = [before, after].map((o) => wall - o).filter((at) => wall - offsetAt(at, zoneName) === at);
+	// Twice (the clocks went back): the first. Never (skipped): the old offset, which lands after the jump.
+	return fits.length > 0 ? Math.min(...fits) : wall - before;
+}

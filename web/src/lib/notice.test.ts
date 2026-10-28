@@ -167,3 +167,39 @@ describe('safeNoticeUrl', () => {
 		expect(safeNoticeUrl('/j/abc?x=1')).toBe('/j/abc?x=1');
 	});
 });
+
+describe('noticeText for the event kinds', () => {
+	const event = { url: '/j/tok', title: 'Sunday cup', start: Date.UTC(2026, 10, 4, 20) / 1000 };
+	const utc = { timeZone: 'UTC' };
+	const body = 'Wed 4 20:00 · Sunday cup';
+
+	it.each([
+		['event_cancelled', 'Event cancelled'],
+		['event_changed', 'Event changed'],
+		['team_complete', 'Your team is complete'],
+		['moved_up', "You're in the event"],
+		['moved_down', "You're on the waiting list"],
+		['no_place', 'No place this time']
+	])('says %s', (kind, title) => {
+		const n = noticeText({ kind, ...event }, utc);
+		expect(n.title).toBe(title);
+		expect(n.body).toBe(body);
+		expect(n.url).toBe('/j/tok');
+		expect(n.tag).toBe(`${kind}:/j/tok:${event.start}`);
+	});
+
+	it('names who left the team', () => {
+		const n = noticeText({ kind: 'partner_left', name: 'Rui', ...event }, utc);
+		expect(n.title).toBe('Rui left your team');
+		expect(n.body).toBe(body);
+		expect(noticeText({ kind: 'partner_left', ...event }, utc).title).toBe('Someone left your team');
+	});
+
+	it('prints the start in the device zone and leaves out what is missing', () => {
+		expect(noticeText({ kind: 'event_changed', ...event }, { timeZone: 'Asia/Tokyo' }).body).toBe(
+			'Thu 5 05:00 · Sunday cup'
+		);
+		expect(noticeText({ kind: 'event_cancelled', url: '/j/tok', title: 'Sunday cup' }, utc).body).toBe('Sunday cup');
+		expect(noticeText({ kind: 'moved_up', url: '/j/tok' }, utc).body).toBe('');
+	});
+});

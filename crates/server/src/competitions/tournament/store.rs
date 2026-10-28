@@ -12,7 +12,9 @@ use crate::competitions::courts::{
     advance_court_in, assign_in, courts_in, create_event_match_in, next_queued_in,
 };
 use crate::competitions::places::{Place, validate_places, write_placings_in};
-use crate::competitions::{Audience, Competition, Kind, Status, competition_in, teams_in};
+use crate::competitions::{
+    Audience, Competition, Kind, Status, competition_in, not_cancelled, teams_in,
+};
 use crate::store::{Store, StoreError, Tx};
 
 fn to_u32(n: i64) -> Result<u32, StoreError> {
@@ -220,6 +222,7 @@ pub async fn redraw_in(
     ev: &Competition,
     now: i64,
 ) -> Result<Vec<String>, StoreError> {
+    not_cancelled(ev)?;
     if ev.status != Status::Running {
         return Err(StoreError::Conflict("event_not_running"));
     }
@@ -270,6 +273,7 @@ pub async fn decide_in(
     choice: Choice,
     now: i64,
 ) -> Result<Vec<String>, StoreError> {
+    not_cancelled(ev)?;
     let bracket = load_in(tx, ev).await?.ok_or(StoreError::NotFound)?;
     let node = bracket
         .node_by_match(match_id)
@@ -471,6 +475,7 @@ impl Store {
     pub async fn fill_bracket_courts(&self, owner: &str, id: &str) -> Result<(), StoreError> {
         let mut tx = self.begin().await?;
         let ev = tournament_in(&mut tx, owner, id).await?;
+        not_cancelled(&ev)?;
         if ev.status != Status::Running {
             return Err(StoreError::Conflict("event_not_running"));
         }
