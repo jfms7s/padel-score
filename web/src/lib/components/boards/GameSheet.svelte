@@ -6,7 +6,7 @@
 	import { goto } from '$app/navigation';
 	import { askSwap, askTime, giveGame, leaveGame, startGame, takeGame } from '#lib/boards.ts';
 	import { dayLabel, timeRange, timeText } from '#lib/dates.ts';
-	import { gameActions, requestsOnGame, swapTargets, timeOptions, type GameAction } from '#lib/gamesheet.ts';
+	import { gameActions, keepPick, requestsOnGame, swapTargets, timeOptions, type GameAction } from '#lib/gamesheet.ts';
 	import { fromParam, putStartHandoff } from '#lib/handoff.ts';
 	import { matchViewPath } from '#lib/events.ts';
 	import { strings } from '#lib/strings.ts';
@@ -48,9 +48,17 @@
 	// ---- swap ---------------------------------------------------------------------------
 
 	const targets = $derived(me ? swapTargets(view, gameId, me, now) : []);
-	let pickedKey = $state('');
+	// `null`: the user has not picked, so the first target stands in. Once they have, a target
+	// that goes away (a refresh) is shown as gone, never swapped for another player.
+	let pickedKey = $state<string | null>(null);
 	const key = (x: { gameId: string; userId: string }) => `${x.gameId}:${x.userId}`;
-	const picked = $derived(targets.find((x) => key(x) === pickedKey) ?? targets[0] ?? null);
+	const keptTarget = $derived(
+		keepPick(
+			targets.map(key),
+			pickedKey
+		)
+	);
+	const picked = $derived(targets.find((x) => key(x) === keptTarget.value) ?? null);
 	const targetLabel = (x: { gameId: string; name: string }) => {
 		const g = view.games.find((o) => o.id === x.gameId);
 		return g ? t.swapPlayer(x.name, when(g.start, g.end)) : x.name;
@@ -67,10 +75,11 @@
 	// ---- change time --------------------------------------------------------------------
 
 	let minutes = $state<(typeof LENGTHS)[number]>(60);
-	let startPick = $state(0);
+	let startPick = $state<number | null>(null);
 	let agreed = $state(false);
 	const options = $derived(timeOptions(view, gameId, now, minutes * 60));
-	const chosen = $derived(options.includes(startPick) ? startPick : (options[0] ?? null));
+	const keptTime = $derived(keepPick(options, startPick));
+	const chosen = $derived(keptTime.value);
 	const startLabel = (s: number) => `${dayLabel(s, zone)} ${timeText(s, zone)}`;
 
 	function sendTime(event: SubmitEvent) {
@@ -86,6 +95,8 @@
 
 	function openForm(which: 'swap' | 'time') {
 		mode = mode === which ? null : which;
+		pickedKey = null;
+		startPick = null;
 	}
 
 	// ---- the rest -----------------------------------------------------------------------
@@ -177,16 +188,18 @@
 			</ul>
 		{/if}
 
-		{#if mode === 'swap' && actions.swap.enabled}
+		{#if mode === 'swap' && (actions.swap.enabled || keptTarget.gone)}
 			<form class="form" onsubmit={sendSwap}>
 				<h3>{t.swapTitle}</h3>
 				<label>
 					{t.swapPick}
 					<select value={picked ? key(picked) : ''} onchange={(e) => (pickedKey = e.currentTarget.value)}>
+						{#if keptTarget.gone}<option value="" disabled>{t.swapGone}</option>{/if}
 						{#each targets as x (key(x))}
 							<option value={key(x)}>{targetLabel(x)}</option>
 						{/each}
 					</select>
+					{#if keptTarget.gone}<span class="gone" role="alert">{t.swapGone}</span>{/if}
 				</label>
 				<div class="actions">
 					<button type="submit" class="primary" disabled={working || !picked}>{t.swapSend}</button>
@@ -195,22 +208,27 @@
 			</form>
 		{/if}
 
-		{#if mode === 'time' && actions.time.enabled}
+		{#if mode === 'time' && (actions.time.enabled || keptTime.gone)}
 			<form class="form" onsubmit={sendTime}>
 				<h3>{t.timeTitle}</h3>
 				<label>
 					{t.timeLength}
-					<select value={minutes} onchange={(e) => (minutes = e.currentTarget.value === '90' ? 90 : 60)}>
+					<select value={minutes} onchange={(e) => {
+						minutes = e.currentTarget.value === '90' ? 90 : 60;
+						startPick = null;
+					}}>
 						{#each LENGTHS as len (len)}<option value={len}>{t.timeLengths[len]}</option>{/each}
 					</select>
 				</label>
 				<label>
 					{t.timeStart}
 					<select value={chosen ?? ''} onchange={(e) => (startPick = Number(e.currentTarget.value))} disabled={options.length === 0}>
+						{#if keptTime.gone}<option value="" disabled>{t.timeGone}</option>{/if}
 						{#each options as s (s)}
 							<option value={s}>{startLabel(s)}</option>
 						{/each}
 					</select>
+					{#if keptTime.gone}<span class="gone" role="alert">{t.timeGone}</span>{/if}
 				</label>
 				<label class="check">
 					<input type="checkbox" bind:checked={agreed} />
@@ -282,6 +300,10 @@
 		background: var(--panel);
 		font-size: 16px;
 		color: var(--ink);
+	}
+	.gone {
+		color: var(--warn);
+		font-size: 13px;
 	}
 	.check {
 		flex-direction: row;

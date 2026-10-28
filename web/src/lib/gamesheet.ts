@@ -124,7 +124,7 @@ export function gameActions(
 			!busy(view, me, game.start, game.end),
 			reasons.take
 		),
-		start: state(inGame && game.players.length === PLACES && now >= game.start - START_WINDOW_SECS)
+		start: state(inGame && now >= game.start - START_WINDOW_SECS)
 	};
 }
 
@@ -192,4 +192,14 @@ export function requestsOnGame(
 		}
 	}
 	return out;
+}
+
+/**
+ * The value a select shows, from what it offers and what the user picked (`null`: nothing yet).
+ * Until the user picks, the first option stands in. Once they have, a pick that is no longer
+ * offered is `gone`: the field is empty and the form must not submit another value for them.
+ */
+export function keepPick<T>(options: readonly T[], picked: T | null): { value: T | null; gone: boolean } {
+	if (picked === null) return { value: options[0] ?? null, gone: false };
+	return options.includes(picked) ? { value: picked, gone: false } : { value: null, gone: true };
 }

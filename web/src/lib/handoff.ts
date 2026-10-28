@@ -1,7 +1,10 @@
 // The hand-off from "Start match" on a game to New match: the start route's answer waits in
 // this tab's session storage, keyed by what the match starts from, until New match takes it.
 
+import { ApiError } from './api';
+import { boardMessage } from './boards';
 import type { Setup } from './setup';
+import { strings } from './strings';
 import { safeSessionStorage } from './storage';
 import type { StartPlayers, StartedFrom } from './types';
 
@@ -38,18 +41,23 @@ export function takeStartHandoff(from: string): StartPlayers | null {
 function isStartPlayers(v: unknown): v is StartPlayers {
 	if (typeof v !== 'object' || v === null) return false;
 	const { players, from } = v as Partial<StartPlayers>;
-	if (!Array.isArray(players) || players.length !== 4) return false;
+	if (!Array.isArray(players) || players.length < 1 || players.length > 4) return false;
 	if (!players.every((p) => typeof p?.player_id === 'string' && typeof p?.name === 'string')) return false;
 	return from?.kind === 'game' && typeof from.id === 'string';
 }
 
-/** The setup with the four players in their slots (seats 0-1 are team A, 2-3 team B). */
+/**
+ * The setup with the game's players in their slots (seats 0-1 are team A, 2-3 team B). A short
+ * game has fewer than four: the seats it lacks stay empty for the starter to fill.
+ */
 export function withStartPlayers(setup: Setup, s: StartPlayers): Setup {
-	const [a0, a1, b0, b1] = s.players;
+	const seat = (i: number) => s.players[i];
+	const name = (i: number) => seat(i)?.name ?? '';
+	const id = (i: number) => seat(i)?.player_id ?? null;
 	return {
 		...setup,
-		teams: { a: [a0.name, a1.name], b: [b0.name, b1.name] },
-		players: { a: [a0.player_id, a1.player_id], b: [b0.player_id, b1.player_id] }
+		teams: { a: [name(0), name(1)], b: [name(2), name(3)] },
+		players: { a: [id(0), id(1)], b: [id(2), id(3)] }
 	};
 }
 
@@ -75,4 +83,16 @@ export function startFromParam(raw: string | null, last: Setup): StartedSetup {
 	const source = parseFrom(raw);
 	if (!handoff || !source) return { setup: last, from: null, expired: true };
 	return { setup: withStartPlayers(last, handoff), from: handoff.from, expired: false };
+}
+
+/**
+ * What to tell the starter when New match could not create the match, and whether the game it
+ * came from is out of reach (so a retry must not send it again). `message: null` leaves the
+ * page's own wording; a plain create (no game) is never changed.
+ */
+export function startFailure(e: unknown, fromGame: boolean): { message: string | null; dropFrom: boolean } {
+	if (!fromGame || !(e instanceof ApiError)) return { message: null, dropFrom: false };
+	if (e.status === 404) return { message: strings.setup.gameGone, dropFrom: true };
+	if (e.status !== 409) return { message: null, dropFrom: false };
+	return { message: boardMessage(e), dropFrom: e.code === 'already_started' || e.code === 'game_over' };
 }

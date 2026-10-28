@@ -5,7 +5,7 @@
 	import { ApiError, createMatch } from '#lib/api.ts';
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
 	import ServeOrderFields from '#lib/components/ServeOrderFields.svelte';
-	import { startFromParam } from '#lib/handoff.ts';
+	import { startFailure, startFromParam } from '#lib/handoff.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { bootSession } from '#lib/session.ts';
 	import { safeStorage } from '#lib/storage.ts';
@@ -99,12 +99,21 @@
 		try {
 			created = await createMatch(req);
 		} catch (e) {
+			const refused = startFailure(e, from !== null);
+			if (refused.dropFrom) {
+				// The game can't start this match any more: a retry makes a plain, unlinked one.
+				from = null;
+			}
 			failure =
-				e instanceof ApiError && e.code === 'invalid_match' && e.message === 'players need an account'
-					? strings.signedOutPlayers
-					: e instanceof Error
-						? e.message
-						: '';
+				refused.message !== null
+					? refused.dropFrom
+						? `${refused.message} ${t.unlinked}`
+						: refused.message
+					: e instanceof ApiError && e.code === 'invalid_match' && e.message === 'players need an account'
+						? strings.signedOutPlayers
+						: e instanceof Error
+							? e.message
+							: '';
 			busy = false;
 			return;
 		}

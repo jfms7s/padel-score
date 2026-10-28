@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { gameActions, requestCards, requestsOnGame, swapTargets, timeOptions, type GameAction } from './gamesheet';
+import {
+	gameActions,
+	keepPick,
+	requestCards,
+	requestsOnGame,
+	swapTargets,
+	timeOptions,
+	type GameAction
+} from './gamesheet';
 import type { BoardView, GameOut, PieceOut, RequestOut } from './types';
 
 const H = 3600;
@@ -71,9 +79,12 @@ describe('gameActions', () => {
 		expect(start(G + 1.5 * H)).toBe(false);
 	});
 
-	it('start needs four players', () => {
+	it('short game starts: Start match is offered with the players it has', () => {
 		const v = view([game('g1', G, ['ana', 'rui', 'marta'])]);
-		expect(gameActions(v, 'g1', 'ana', G - 600).start.shown).toBe(false);
+		expect(gameActions(v, 'g1', 'ana', G - 600).start).toMatchObject({ shown: true, enabled: true });
+		expect(gameActions(v, 'g1', 'ana', G - 1801).start.shown).toBe(false);
+		// Someone who is not in the game cannot start it.
+		expect(gameActions(v, 'g1', 'zoe', G - 600).start.shown).toBe(false);
 	});
 
 	it('the other actions end when the game starts', () => {
@@ -278,5 +289,21 @@ describe('requestsOnGame', () => {
 			requests: [req({ from: person('rui'), needs_my_answer: true }), req({ id: 'r3', game_id: 'g9' })]
 		});
 		expect(requestsOnGame(v, 'g1', 'ana')).toEqual([]);
+	});
+});
+
+describe('keepPick', () => {
+	it('defaults to the first option until the user has picked', () => {
+		expect(keepPick([5, 6], null)).toEqual({ value: 5, gone: false });
+		expect(keepPick([], null)).toEqual({ value: null, gone: false });
+	});
+
+	it('keeps a pick that is still offered', () => {
+		expect(keepPick([5, 6], 6)).toEqual({ value: 6, gone: false });
+	});
+
+	it('clears a pick that vanished instead of falling back to another option', () => {
+		expect(keepPick([5, 6], 7)).toEqual({ value: null, gone: true });
+		expect(keepPick([], 7)).toEqual({ value: null, gone: true });
 	});
 });

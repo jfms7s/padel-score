@@ -109,7 +109,7 @@ export function answerRequest(requestId: string, accept: boolean): Promise<Board
 	});
 }
 
-/** The four players for New match: 409 `not_yet`, `game_over`, `game_short`, `already_started`. */
+/** The game's players for New match (a short game has fewer than four): 409 `not_yet`, `game_over`, `already_started`. */
 export function startGame(token: string, gameId: string): Promise<StartPlayers> {
 	return accountRequest(game(token, gameId, 'start'), { ...signedIn, method: 'POST' });
 }

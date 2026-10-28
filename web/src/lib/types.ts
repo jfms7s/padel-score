@@ -808,7 +808,6 @@ export type GameErrorCode =
 	| 'already_answered'
 	| 'not_yet'
 	| 'game_over'
-	| 'game_short'
 	| 'already_started'
 	| 'not_in_game'
 	| 'game_played'

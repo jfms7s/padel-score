@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultSetup } from './setup';
-import { parseFrom, putStartHandoff, startFromParam, takeStartHandoff, withStartPlayers } from './handoff';
+import {
+	parseFrom,
+	putStartHandoff,
+	startFailure,
+	startFromParam,
+	takeStartHandoff,
+	withStartPlayers
+} from './handoff';
+import { ApiError } from './api';
+import { strings } from './strings';
 import type { StartPlayers } from './types';
 
 const started: StartPlayers = {
@@ -71,6 +80,16 @@ describe('start hand-off', () => {
 		expect(s.deuce).toBe(defaultSetup().deuce);
 	});
 
+	it('leaves the seats a short game lacks empty', () => {
+		const short = { ...started, players: started.players.slice(0, 3) };
+		const s = withStartPlayers(defaultSetup(), short);
+		expect(s.teams).toEqual({ a: ['Ana', 'Rui'], b: ['Marta', ''] });
+		expect(s.players).toEqual({ a: ['p1', 'p2'], b: ['p3', null] });
+		fakeSession();
+		putStartHandoff(short);
+		expect(takeStartHandoff('game:g1')).toEqual(short);
+	});
+
 	it('reads the from query value', () => {
 		expect(parseFrom('game:g1')).toEqual({ kind: 'game', id: 'g1' });
 		expect(parseFrom('nope')).toBeNull();
@@ -110,5 +129,32 @@ describe('startFromParam', () => {
 		putStartHandoff(started);
 		expect(startFromParam('game:g1', last).expired).toBe(false);
 		expect(startFromParam('game:g1', last).expired).toBe(true);
+	});
+});
+
+describe('startFailure', () => {
+	const err = (status: number, code: string) => new ApiError(status, code as never, 'The server answered ' + status);
+
+	it('says why a create from a game was refused, in the board copy', () => {
+		const out = startFailure(err(409, 'already_started'), true);
+		expect(out.message).toBe(strings.boards.errors.already_started);
+		expect(out.dropFrom).toBe(true);
+	});
+
+	it('drops the game when it is over or no longer the starter s', () => {
+		expect(startFailure(err(409, 'game_over'), true)).toMatchObject({ dropFrom: true });
+		const gone = startFailure(err(404, 'not_found'), true);
+		expect(gone.dropFrom).toBe(true);
+		expect(gone.message).toBe(strings.setup.gameGone);
+	});
+
+	it('keeps the game for a refusal a retry can fix', () => {
+		const out = startFailure(err(409, 'not_yet'), true);
+		expect(out).toEqual({ message: strings.boards.errors.not_yet, dropFrom: false });
+	});
+
+	it('leaves a plain create to its own message', () => {
+		expect(startFailure(err(409, 'already_started'), false)).toEqual({ message: null, dropFrom: false });
+		expect(startFailure(new Error('boom'), true)).toEqual({ message: null, dropFrom: false });
 	});
 });

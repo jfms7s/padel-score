@@ -64,7 +64,9 @@ export const strings = {
 		created: 'Your match is ready.',
 		handoffExpired: 'Start the match again from the game or match page.',
 		openMatch: 'Open it',
-		tryAgain: 'Try again'
+		tryAgain: 'Try again',
+		gameGone: 'You are no longer in that game.',
+		unlinked: 'This match will not be linked to the game.'
 	},
 
 	// The change of ends cue.
@@ -1044,7 +1046,6 @@ export const strings = {
 			already_answered: 'You already answered that.',
 			not_yet: 'It is too early to start this match.',
 			game_over: 'This game is over.',
-			game_short: 'The game needs four players to start a match.',
 			already_started: 'A match was already started from this game.',
 			not_in_game: 'You are not in this game.',
 			game_played: 'This game was already played.',
@@ -1095,6 +1096,8 @@ export const strings = {
 		timeStart: 'Start',
 		timeLength: 'Length',
 		timeLengths: { 60: '1 h', 90: '1 h 30' },
+		timeGone: 'That time is no longer available',
+		swapGone: 'That game is no longer available',
 		timeAgreed: 'We agreed in the chat',
 		timeAgreedHint: 'The change applies straight away and the others are only told.',
 		timeSend: 'Propose this time',
