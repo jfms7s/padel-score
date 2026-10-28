@@ -66,7 +66,17 @@ export const strings = {
 		openMatch: 'Open it',
 		tryAgain: 'Try again',
 		gameGone: 'You are no longer in that game.',
-		unlinked: 'This match will not be linked to the game.'
+		matchGone: 'That match is no longer there.',
+		unlinked: 'This match will not be linked to the game.',
+		// Play later.
+		playLater: 'Play later',
+		playLaterHint: 'Pick a day and time. Anyone with the link can take an open place.',
+		open: 'Open',
+		openSlots: 'Pick the players you know. The other places stay open for others to join.',
+		saveMatch: 'Schedule match',
+		scheduleFailed: "Couldn't schedule the match.",
+		saving: 'Saving…',
+		serveLater: 'You choose who serves when you start the match.'
 	},
 
 	// The change of ends cue.
@@ -971,7 +981,12 @@ export const strings = {
 		movedUp: "You're in the event",
 		movedDown: "You're on the waiting list",
 		partnerLeft: (name: string | undefined) => `${name ?? 'Someone'} left your team`,
-		noPlace: 'No place this time'
+		noPlace: 'No place this time',
+		placeOpened: 'You got a place',
+		matchChanged: 'Match changed',
+		matchCancelled: 'Match cancelled',
+		removedFromMatch: 'Removed from the match',
+		matchShort: 'One player missing'
 	},
 
 	// Game boards: the board page, the week grid and the new-board form.
@@ -1276,6 +1291,93 @@ export const strings = {
 		share: 'Share',
 		you: 'You',
 		kindLine: (kind: string, rules: string) => `${kind} · ${rules}`
+	},
+
+	// Scheduled matches: Play later on New match and the match's join page.
+	scheduled: {
+		errors: {
+			already_in: 'You are already in this match.',
+			line_full: 'The waiting list is full.',
+			match_closed: 'This match is closed.',
+			match_short: 'The match needs four players before it can start.',
+			same_player_twice: 'The same person is in two places. Remove one of them from the match, then start it.',
+			too_many_scheduled: 'You have 50 upcoming matches already. Cancel one first.',
+			not_yet: 'It is too early to start this match. You can start it 30 minutes before.',
+			game_over: 'The time to start this match has passed.',
+			already_started: 'This match has already started.'
+		},
+		fields: {
+			starts_at: 'Choose a start in the future.',
+			place: 'Enter a place of up to 80 characters.'
+		},
+		// 422 `invalid_match` on create, by the server's message.
+		invalidMatch: {
+			'unknown player': 'One of the players is not in your list any more. Pick them again.',
+			'same player twice': 'The same player is in two places.'
+		},
+		// Play later fields on New match.
+		fieldsTitle: 'When and where',
+		date: 'Date',
+		time: 'Start time',
+		timeZoneNote: (zone: string) => `Times are in your time zone, ${zone}.`,
+		place: 'Place (optional)',
+		placePlaceholder: 'Club or court',
+		needsStart: 'Choose a day and time in the future.',
+		listing: 'Who can find it',
+		listings: { private: 'Link only', public: 'Public' },
+		listingHints: {
+			private: 'Only people with the link can join.',
+			public: 'Also listed for everyone to join.'
+		},
+		// The match page.
+		title: 'Padel match',
+		by: (name: string) => `Organised by ${name}`,
+		cancelledBanner: 'This match is cancelled.',
+		startedBanner: 'This match has started.',
+		pastBanner: 'The time to start this match has passed.',
+		watch: 'Watch the match',
+		placesTitle: 'Places',
+		openPlace: 'Open',
+		you: 'You',
+		short: (missing: number) => (missing === 1 ? 'One player missing' : `${missing} players missing`),
+		lineTitle: 'Waiting list',
+		lineHint: 'The first in line takes a place when one opens, until the last hour before the start.',
+		join: 'Join',
+		joinLine: 'Join the waiting list',
+		joining: 'Joining…',
+		signInToJoin: 'Sign in to join',
+		joinNote: 'Your name will appear in the organiser’s player list.',
+		youAreIn: (n: number) => `You are in · place ${n}`,
+		youAreOnLine: (n: number) => `You are on the waiting list · ${n}`,
+		youAreOnLineAnon: 'You are on the waiting list',
+		leave: 'Leave',
+		leaving: 'Leaving…',
+		leaveConfirm: 'Leave this match?',
+		keep: 'Stay',
+		// Sharing.
+		linkTitle: 'Match link',
+		linkHint: 'Send this link to people who may want to play.',
+		shareLink: 'Share link',
+		shareTitle: (when: string) => `Padel match · ${when}`,
+		// Owner tools.
+		ownerTools: 'Organiser',
+		start: 'Start match',
+		starting: 'Starting…',
+		startOpens: 'Start match opens 30 minutes before the start, once four players are in.',
+		startNeedsFour: 'Start match needs four players.',
+		edit: 'Edit',
+		save: 'Save',
+		saving: 'Saving…',
+		cancelEdit: 'Cancel',
+		editTitle: 'Change the time or place',
+		remove: 'Remove',
+		removeLabel: (name: string) => `Remove ${name}`,
+		removeConfirm: (name: string) => `Remove ${name} from the match?`,
+		removeYes: 'Remove',
+		cancelMatch: 'Cancel match',
+		cancelConfirm: 'Cancel this match? Everyone who joined is told.',
+		cancelYes: 'Cancel match',
+		cancelNo: 'Keep match'
 	},
 
 	desk: {

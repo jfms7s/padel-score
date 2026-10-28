@@ -203,3 +203,26 @@ describe('noticeText for the event kinds', () => {
 		expect(noticeText({ kind: 'moved_up', url: '/j/tok' }, utc).body).toBe('');
 	});
 });
+
+describe('noticeText for the scheduled match kinds', () => {
+	const match = { url: '/j/tok', name: 'Ana', start: Date.UTC(2026, 10, 4, 20) / 1000 };
+	const utc = { timeZone: 'UTC' };
+
+	it.each([
+		['place_opened', 'You got a place'],
+		['match_changed', 'Match changed'],
+		['match_cancelled', 'Match cancelled'],
+		['removed_from_match', 'Removed from the match'],
+		['match_short', 'One player missing']
+	])('says %s', (kind, title) => {
+		const n = noticeText({ kind, ...match }, utc);
+		expect(n.title).toBe(title);
+		expect(n.body).toBe('Wed 4 20:00 · Ana');
+		expect(n.url).toBe('/j/tok');
+		expect(n.tag).toBe(`${kind}:/j/tok:${match.start}`);
+	});
+
+	it('leaves out what the payload lacks', () => {
+		expect(noticeText({ kind: 'match_cancelled', url: '/j/tok' }, utc).body).toBe('');
+	});
+});

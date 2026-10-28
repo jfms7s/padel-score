@@ -4,13 +4,14 @@
 import { ApiError } from './api';
 import { boardMessage } from './boards';
 import type { Setup } from './setup';
+import { scheduledMessage } from './scheduled';
 import { strings } from './strings';
 import { safeSessionStorage } from './storage';
 import type { StartPlayers, StartedFrom } from './types';
 
 const key = (from: string) => `padel-score:start:${from}`;
 
-/** The `from` query value for a source: "game:<id>". */
+/** The `from` query value for a source: "game:<id>" or "scheduled:<id>". */
 export function fromParam(from: StartedFrom): string {
 	return `${from.kind}:${from.id}`;
 }
@@ -43,28 +44,31 @@ function isStartPlayers(v: unknown): v is StartPlayers {
 	const { players, from } = v as Partial<StartPlayers>;
 	if (!Array.isArray(players) || players.length < 1 || players.length > 4) return false;
 	if (!players.every((p) => typeof p?.player_id === 'string' && typeof p?.name === 'string')) return false;
-	return from?.kind === 'game' && typeof from.id === 'string';
+	return (from?.kind === 'game' || from?.kind === 'scheduled') && typeof from.id === 'string';
 }
 
 /**
  * The setup with the game's players in their slots (seats 0-1 are team A, 2-3 team B). A short
- * game has fewer than four: the seats it lacks stay empty for the starter to fill.
+ * game has fewer than four: the seats it lacks stay empty for the starter to fill. A scheduled
+ * match brings its rules too.
  */
 export function withStartPlayers(setup: Setup, s: StartPlayers): Setup {
 	const seat = (i: number) => s.players[i];
 	const name = (i: number) => seat(i)?.name ?? '';
 	const id = (i: number) => seat(i)?.player_id ?? null;
+	const rules = s.format !== null && 'sets' in s.format ? s.format.sets : null;
 	return {
 		...setup,
+		...(rules ? { deuce: rules.deuce, sets: rules.sets, deciding: rules.deciding } : {}),
 		teams: { a: [name(0), name(1)], b: [name(2), name(3)] },
 		players: { a: [id(0), id(1)], b: [id(2), id(3)] }
 	};
 }
 
-/** What a `from` query value starts from, or null when it is not "game:<id>". */
+/** What a `from` query value starts from, or null when it is not "game:<id>" or "scheduled:<id>". */
 export function parseFrom(raw: string | null): StartedFrom | null {
-	const match = /^game:(.+)$/.exec(raw ?? '');
-	return match ? { kind: 'game', id: match[1] } : null;
+	const match = /^(game|scheduled):(.+)$/.exec(raw ?? '');
+	return match ? { kind: match[1] as 'game' | 'scheduled', id: match[2] ?? '' } : null;
 }
 
 /** What New match starts with for its `from` query value (null for a plain New match). */
@@ -86,13 +90,25 @@ export function startFromParam(raw: string | null, last: Setup): StartedSetup {
 }
 
 /**
- * What to tell the starter when New match could not create the match, and whether the game it
- * came from is out of reach (so a retry must not send it again). `message: null` leaves the
- * page's own wording; a plain create (no game) is never changed.
+ * What to tell the starter when New match could not create the match, and whether the game or
+ * scheduled match it came from is out of reach (so a retry must not send it again).
+ * `message: null` leaves the page's own wording; a plain create (no source) is never changed.
  */
-export function startFailure(e: unknown, fromGame: boolean): { message: string | null; dropFrom: boolean } {
-	if (!fromGame || !(e instanceof ApiError)) return { message: null, dropFrom: false };
+export function startFailure(
+	e: unknown,
+	fromSource: boolean,
+	kind: StartedFrom['kind'] = 'game'
+): { message: string | null; dropFrom: boolean } {
+	if (!fromSource || !(e instanceof ApiError)) return { message: null, dropFrom: false };
+	if (kind === 'scheduled') {
+		if (e.status === 404) return { message: strings.setup.matchGone, dropFrom: true };
+		if (e.status !== 409) return { message: null, dropFrom: false };
+		return { message: scheduledMessage(e), dropFrom: GONE_CODES.includes(e.code) };
+	}
 	if (e.status === 404) return { message: strings.setup.gameGone, dropFrom: true };
 	if (e.status !== 409) return { message: null, dropFrom: false };
 	return { message: boardMessage(e), dropFrom: e.code === 'already_started' || e.code === 'game_over' };
 }
+
+/** The codes after which the scheduled match cannot start a match any more. */
+const GONE_CODES: readonly string[] = ['match_closed', 'already_started', 'game_over'];

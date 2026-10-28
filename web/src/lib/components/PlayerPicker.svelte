@@ -19,6 +19,7 @@
 		taken,
 		placeholder,
 		label,
+		pickOnly = false,
 		onadd
 	}: {
 		value: string;
@@ -28,6 +29,8 @@
 		taken: string[];
 		placeholder: string;
 		label: string;
+		/** Only a player from the list (or a newly added one) counts: other text is cleared on leaving. */
+		pickOnly?: boolean;
 		/** A player was added to the list from here. */
 		onadd: (player: Player) => void;
 	} = $props();
@@ -133,6 +136,7 @@
 				if (to instanceof Node && listEl?.contains(to)) return;
 				open = false;
 				active = -1;
+				if (pickOnly && playerId === null && !busy) value = '';
 			}}
 			{onkeydown}
 			{placeholder}

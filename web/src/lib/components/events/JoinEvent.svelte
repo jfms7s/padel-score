@@ -7,7 +7,7 @@
 	import { rulesText } from '#lib/events.ts';
 	import { myEntryText, partnerLink, scheduleText } from '#lib/signups.ts';
 	import { strings } from '#lib/strings.ts';
-	import type { JoinAs, JoinView, PartnerInvite, SignupTeam } from '#lib/types.ts';
+	import type { EventJoinView, JoinAs, PartnerInvite, SignupTeam } from '#lib/types.ts';
 
 	let {
 		view,
@@ -28,7 +28,7 @@
 		onaccept,
 		ondecline
 	}: {
-		view: JoinView;
+		view: EventJoinView;
 		token: string;
 		origin: string;
 		signedIn: boolean;
