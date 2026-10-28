@@ -85,6 +85,7 @@ async fn tick_expires_requests_of_started_games() {
         .create_board(
             &who[0],
             NewBoard {
+                allow_guests: false,
                 title: "Thursday padel".to_owned(),
                 place: None,
                 time_zone: "Europe/Lisbon".to_owned(),
@@ -311,6 +312,7 @@ mod reminders {
             .create_board(
                 &first[0],
                 NewBoard {
+                    allow_guests: false,
                     title: "Thursday padel".to_owned(),
                     place: None,
                     time_zone: "Europe/Lisbon".to_owned(),

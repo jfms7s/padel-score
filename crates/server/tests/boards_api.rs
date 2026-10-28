@@ -39,6 +39,7 @@ async fn seed_board(state: &padel_score_server::AppState, creator: &str) -> Stri
         .create_board(
             creator,
             NewBoard {
+                allow_guests: false,
                 title: "Seeded".to_owned(),
                 place: None,
                 time_zone: "Europe/Lisbon".to_owned(),
@@ -592,4 +593,20 @@ async fn time_change_requests_through_the_routes() {
     .await;
     assert_eq!(stale.status, StatusCode::CONFLICT);
     assert_eq!(stale.body["error"], "game_changed");
+}
+
+#[tokio::test]
+async fn create_json_without_allow_guests_is_off() {
+    let (state, _) = state().await;
+    let app = support::app_from(&state, 1);
+    let (_, raw) = fast_user(&state, "a@x.test", "Ana").await;
+    let post = |body: Value| as_session(&state, &raw, Method::POST, "/api/boards", Some(body));
+    let off = send(&app, post(new_board_json())).await;
+    assert_eq!(off.status, StatusCode::CREATED, "{}", off.body);
+    assert_eq!(off.body["board"]["allow_guests"], false);
+    let mut body = new_board_json();
+    body["allow_guests"] = json!(true);
+    let on = send(&app, post(body)).await;
+    assert_eq!(on.status, StatusCode::CREATED, "{}", on.body);
+    assert_eq!(on.body["board"]["allow_guests"], true);
 }

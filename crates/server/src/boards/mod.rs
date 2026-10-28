@@ -38,6 +38,8 @@ pub struct NewBoard {
     pub time_zone: String,
     pub starts_at: i64,
     pub ends_at: i64,
+    #[serde(default)]
+    pub allow_guests: bool,
 }
 
 /// A board edit. `place` is `None` when absent, `Some(None)` for an explicit `null`.
@@ -46,6 +48,8 @@ pub struct BoardChange {
     pub title: Option<String>,
     #[serde(default, deserialize_with = "present")]
     pub place: Option<Option<String>>,
+    #[serde(default)]
+    pub allow_guests: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -71,6 +75,7 @@ pub struct BoardOut {
     pub creator_user_id: String,
     pub creator_name: String,
     pub over: bool,
+    pub allow_guests: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -160,6 +165,7 @@ struct BoardRow {
     time_zone: String,
     starts_at: i64,
     ends_at: i64,
+    allow_guests: bool,
 }
 
 type BoardTuple = (
@@ -172,6 +178,7 @@ type BoardTuple = (
     String,
     i64,
     i64,
+    bool,
 );
 
 /// `SELECT <a BoardTuple> FROM boards b JOIN users u <rest>`, as a `&'static str`.
@@ -179,7 +186,7 @@ macro_rules! select_board {
     ($rest:literal) => {
         concat!(
             "SELECT b.id, b.token, b.creator_user_id, u.display_name, b.title, b.place, \
-             b.time_zone, b.starts_at, b.ends_at \
+             b.time_zone, b.starts_at, b.ends_at, b.allow_guests \
              FROM boards b JOIN users u ON u.id = b.creator_user_id ",
             $rest
         )
@@ -200,6 +207,7 @@ impl BoardRow {
             time_zone: t.6,
             starts_at: t.7,
             ends_at: t.8,
+            allow_guests: t.9,
         }
     }
 
@@ -219,6 +227,7 @@ impl BoardRow {
             creator_user_id: self.creator_user_id.clone(),
             creator_name: self.creator_name.clone(),
             over: self.over(now),
+            allow_guests: self.allow_guests,
         }
     }
 
@@ -774,7 +783,7 @@ impl Store {
         let token = new_token();
         sqlx::query(
             "INSERT INTO boards (id, token, creator_user_id, title, place, time_zone, starts_at, \
-             ends_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ends_at, created_at, allow_guests) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&token)
@@ -785,6 +794,7 @@ impl Store {
         .bind(new.starts_at)
         .bind(new.ends_at)
         .bind(now)
+        .bind(new.allow_guests)
         .execute(&mut *tx)
         .await?;
         join_in(&mut tx, &id, creator, now).await?;
@@ -922,7 +932,7 @@ impl Store {
         Ok(view)
     }
 
-    /// Rename the board or change its place. Creator only.
+    /// Rename the board, change its place or whether guests may join. Creator only.
     pub async fn update_board(
         &self,
         token: &str,
@@ -943,9 +953,11 @@ impl Store {
             Some(raw) => normalize_place(raw.as_deref())?,
             None => board.place.clone(),
         };
-        sqlx::query("UPDATE boards SET title = ?, place = ? WHERE id = ?")
+        let allow_guests = change.allow_guests.unwrap_or(board.allow_guests);
+        sqlx::query("UPDATE boards SET title = ?, place = ?, allow_guests = ? WHERE id = ?")
             .bind(&title)
             .bind(&place)
+            .bind(allow_guests)
             .bind(&board.id)
             .execute(&mut *tx)
             .await?;

@@ -62,6 +62,7 @@ async fn board(s: &Store, creator: &str) -> String {
     s.create_board(
         creator,
         NewBoard {
+            allow_guests: false,
             title: "Thursday padel".to_owned(),
             place: None,
             time_zone: "Europe/Lisbon".to_owned(),

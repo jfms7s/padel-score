@@ -42,6 +42,7 @@ async fn user(s: &Store, name: &str) -> String {
 
 fn new_board(starts_at: i64) -> NewBoard {
     NewBoard {
+        allow_guests: false,
         title: "Thursday padel".to_owned(),
         place: Some("Club".to_owned()),
         time_zone: "Europe/Lisbon".to_owned(),
@@ -607,6 +608,7 @@ async fn only_the_creator_edits_or_deletes() {
     let token = board(&s, &a).await;
     s.join_board(&token, &b, T0).await.unwrap();
     let change = || BoardChange {
+        allow_guests: None,
         title: Some("New name".to_owned()),
         place: None,
     };
@@ -629,6 +631,7 @@ async fn only_the_creator_edits_or_deletes() {
             &token,
             &a,
             BoardChange {
+                allow_guests: None,
                 title: None,
                 place: Some(None),
             },
@@ -643,6 +646,7 @@ async fn only_the_creator_edits_or_deletes() {
             &token,
             &a,
             BoardChange {
+                allow_guests: None,
                 title: Some(" ".to_owned()),
                 place: None,
             },
@@ -654,6 +658,43 @@ async fn only_the_creator_edits_or_deletes() {
 
     s.delete_board(&token, &a, T0).await.unwrap();
     assert!(s.board_view(&token, Some(&a), T0).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn allow_guests_defaults_off_and_the_creator_turns_it_on() {
+    let (s, _) = setup().await;
+    let a = user(&s, "Ana").await;
+    let b = user(&s, "Rui").await;
+    let token = board(&s, &a).await;
+    s.join_board(&token, &b, T0).await.unwrap();
+    let view = s.board_view(&token, Some(&a), T0).await.unwrap().unwrap();
+    assert!(!view.board.allow_guests);
+
+    let on = || BoardChange {
+        allow_guests: Some(true),
+        ..Default::default()
+    };
+    let err = s.update_board(&token, &b, on(), T0).await.unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("creator_only")),
+        "{err:?}"
+    );
+    let view = s.update_board(&token, &a, on(), T0).await.unwrap();
+    assert!(view.board.allow_guests);
+    let view = s
+        .update_board(
+            &token,
+            &a,
+            BoardChange {
+                title: Some("Renamed".to_owned()),
+                ..Default::default()
+            },
+            T0,
+        )
+        .await
+        .unwrap();
+    assert!(view.board.allow_guests);
+    assert_eq!(view.board.title, "Renamed");
 }
 
 #[tokio::test]
@@ -886,6 +927,7 @@ async fn the_creator_may_leave_and_still_edit_and_delete() {
             &token,
             &a,
             BoardChange {
+                allow_guests: None,
                 title: Some("Renamed".to_owned()),
                 place: None,
             },
