@@ -111,6 +111,11 @@ describe('setup', () => {
 		expect(toCreateRequest(named())).not.toHaveProperty('players');
 	});
 
+	it('to_create_request_sends_from', () => {
+		expect(toCreateRequest(named(), { kind: 'game', id: 'g1' }).from).toEqual({ kind: 'game', id: 'g1' });
+		expect(toCreateRequest(named())).not.toHaveProperty('from');
+	});
+
 	it('to_create_request_sends_picked_slots', () => {
 		const s = named({ players: { a: ['p-ana', null], b: [null, 'p-marta'] } });
 		expect(toCreateRequest(s).players).toEqual({ a: ['p-ana', null], b: [null, 'p-marta'] });

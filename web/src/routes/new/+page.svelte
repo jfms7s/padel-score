@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ApiError, createMatch } from '#lib/api.ts';
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
 	import ServeOrderFields from '#lib/components/ServeOrderFields.svelte';
+	import { parseFrom, takeStartHandoff, withStartPlayers } from '#lib/handoff.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { bootSession } from '#lib/session.ts';
 	import { safeStorage } from '#lib/storage.ts';
@@ -18,7 +20,7 @@
 		setSets,
 		toCreateRequest
 	} from '#lib/setup.ts';
-	import type { Player } from '#lib/types.ts';
+	import type { Player, StartedFrom } from '#lib/types.ts';
 
 	const t = strings.setup;
 	const TEAMS = ['a', 'b'] as const;
@@ -30,8 +32,24 @@
 	] as const;
 
 	let setup = $state(defaultSetup());
+	/** What the match starts from (a game), once its hand-off was found; sent with the create. */
+	let from = $state<StartedFrom | null>(null);
+	/** `?from=` named a source but its hand-off is gone (a reload, another tab). */
+	let handoffExpired = $state(false);
 	$effect(() => {
-		setup = loadLastSetup(safeStorage());
+		const last = loadLastSetup(safeStorage());
+		setup = last;
+		// The hand-off is taken once, so a reload falls back to a plain New match.
+		const raw = page.url.searchParams.get('from');
+		if (raw === null) return;
+		const handoff = takeStartHandoff(raw);
+		const source = parseFrom(raw);
+		if (!handoff || !source) {
+			handoffExpired = true;
+			return;
+		}
+		setup = withStartPlayers(last, handoff);
+		from = handoff.from;
 	});
 
 	/** The signed-in user's players; null while unknown, signed out or unreadable (plain inputs). */
@@ -78,7 +96,7 @@
 		busy = true;
 		failure = null;
 		let created;
-		const req = toCreateRequest(setup);
+		const req = toCreateRequest(setup, from ?? undefined);
 		try {
 			created = await createMatch(req);
 		} catch (e) {
@@ -110,6 +128,7 @@
 	<a class="back" href="/">{t.back}</a>
 	<form onsubmit={start}>
 		<h1>{t.title}</h1>
+		{#if handoffExpired}<p class="hint" role="status">{t.handoffExpired}</p>{/if}
 
 		<div class="cols">
 		<div class="col">

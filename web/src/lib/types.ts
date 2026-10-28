@@ -147,6 +147,19 @@ export interface CreateMatchRequest {
 	teams: Teams;
 	/** Signed in only: the slots picked from the player list. Left out when none is picked. */
 	players?: PlayerSlots;
+	/** Signed in only: what the match is started from. It marks that source played. */
+	from?: StartedFrom;
+}
+
+/** What a match is started from (crates/server/src/starting.rs `StartedFrom`). */
+export type StartedFrom = { kind: 'game'; id: string };
+
+/** The four players to fill New match with, in seat order (crates/server/src/starting.rs). */
+export interface StartPlayers {
+	players: { player_id: string; name: string }[];
+	/** Null for a board game: New match keeps its last setup. */
+	format: Format | null;
+	from: StartedFrom;
 }
 
 export interface CreatedMatch {

@@ -7,10 +7,14 @@
 
 //! Game actions on a board: Leave, Give my place and Take the open place, through the store.
 
+mod support;
+
+use axum::http::{Method, StatusCode};
 use padel_score_server::accounts_store::NewUser;
 use padel_score_server::boards::{BoardView, GameState, NewBoard, RequestKind, WEEK_SECS};
 use padel_score_server::db;
 use padel_score_server::store::{Store, StoreError};
+use padel_scoring::{DecidingSet, DeuceRule, Format, Player, SetRules, SetsFormat, Start, Team};
 use serde_json::Value;
 use sqlx::SqlitePool;
 
@@ -1073,4 +1077,288 @@ async fn leave_is_never_refused_for_the_piece_cap() {
         .await
         .unwrap();
     assert_eq!(left, 201);
+}
+
+// Start match from a game.
+
+/// The first game's id on the board.
+async fn first_game(s: &Store, token: &str, who: &str, now: i64) -> String {
+    view(s, token, who, now).await.games[0].id.clone()
+}
+
+#[tokio::test]
+async fn start_match_window_opens_thirty_minutes_before() {
+    let (s, _pool, token, [a, ..]) = formed().await;
+    let game = first_game(&s, &token, &a, T0).await;
+    let early = s.start_game(&token, &game, &a, START - HALF - 1).await;
+    assert!(matches!(early, Err(StoreError::Conflict("not_yet"))));
+    let on_time = s.start_game(&token, &game, &a, START - HALF).await.unwrap();
+    assert_eq!(on_time.players.len(), 4);
+    assert!(on_time.format.is_none());
+    let json = serde_json::to_value(&on_time).unwrap();
+    assert_eq!(json["format"], Value::Null);
+    assert_eq!(json["from"]["kind"], "game");
+    // Until the game's end, then no more.
+    s.start_game(&token, &game, &a, START + HOUR - 1)
+        .await
+        .unwrap();
+    let late = s.start_game(&token, &game, &a, START + HOUR).await;
+    assert!(matches!(late, Err(StoreError::Conflict("game_over"))));
+}
+
+#[tokio::test]
+async fn start_creates_auto_linked_entries_for_the_starter() {
+    let (s, pool, token, [a, b, c, d]) = formed().await;
+    let game = first_game(&s, &token, &a, T0).await;
+    let started = s.start_game(&token, &game, &b, START).await.unwrap();
+    let rows: Vec<(String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT name, linked_user_id, link_auto FROM players WHERE owner_user_id = ? ORDER BY name",
+    )
+    .bind(&b)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 4);
+    for (who, auto) in [(&a, true), (&b, false), (&c, true), (&d, true)] {
+        let row = rows.iter().find(|r| r.1.as_deref() == Some(who)).unwrap();
+        assert_eq!(row.2, auto);
+    }
+    // Seat order, with the entries' names and ids.
+    let names: Vec<_> = started.players.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Ana", "Rui", "Marta", "Joana"]);
+    // A second look reuses the entries.
+    s.start_game(&token, &game, &b, START).await.unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM players WHERE owner_user_id = ?")
+        .bind(&b)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 4);
+}
+
+#[tokio::test]
+async fn non_player_cannot_start() {
+    let (s, _pool, token, [a, ..]) = formed().await;
+    let game = first_game(&s, &token, &a, T0).await;
+    let outsider = user(&s, "Zed").await;
+    let res = s.start_game(&token, &game, &outsider, START).await;
+    assert!(matches!(res, Err(StoreError::NotFound)));
+    let res = s.start_game("nope", &game, &a, START).await;
+    assert!(matches!(res, Err(StoreError::NotFound)));
+}
+
+#[tokio::test]
+async fn a_short_game_cannot_be_started() {
+    let (s, _pool, token, [a, ..]) = formed().await;
+    let game = first_game(&s, &token, &a, T0).await;
+    let c = &formed_ids(&s, &token, &game).await[3];
+    s.leave_game(
+        &token,
+        &game,
+        c,
+        view(&s, &token, &a, T0).await.games[0].version,
+        T0 + 5,
+    )
+    .await
+    .unwrap();
+    let res = s.start_game(&token, &game, &a, START).await;
+    assert!(matches!(res, Err(StoreError::Conflict("game_short"))));
+}
+
+async fn formed_ids(s: &Store, token: &str, game: &str) -> Vec<String> {
+    let v = s.board_view(token, None, T0).await.unwrap().unwrap();
+    v.games
+        .iter()
+        .find(|g| g.id == game)
+        .unwrap()
+        .players
+        .iter()
+        .map(|p| p.user_id.clone())
+        .collect()
+}
+
+fn match_json(from: Value) -> Value {
+    let mut body = serde_json::json!({
+        "format": Format::Sets(SetRules {
+            deuce: DeuceRule::Advantage,
+            sets: SetsFormat::One,
+            deciding: DecidingSet::FullSet,
+        }),
+        "start": Start {
+            first_server: Player { team: Team::A, index: 0 },
+            other_first_server: 0,
+        },
+        "teams": { "a": ["Ana", "Rui"], "b": ["Marta", "Joana"] },
+    });
+    body["from"] = from;
+    body
+}
+
+/// A board and a game that started a few minutes ago on the real clock, with four users who
+/// are all in it: (state, token, game id, [(user id, session)]).
+async fn live_game() -> (
+    padel_score_server::AppState,
+    SqlitePool,
+    String,
+    String,
+    Vec<(String, String)>,
+) {
+    let (state, pool) = support::state().await;
+    let real = padel_score_server::api::now();
+    let game_start = real / 1800 * 1800;
+    let mut users = Vec::new();
+    for (i, name) in ["Ana", "Rui", "Marta", "Joana"].into_iter().enumerate() {
+        users.push(
+            support::fast_user(&state, &format!("{}{i}@x.test", name.to_lowercase()), name).await,
+        );
+    }
+    let token = state
+        .store
+        .create_board(
+            &users[0].0,
+            NewBoard {
+                title: "Live".to_owned(),
+                place: None,
+                time_zone: "Europe/Lisbon".to_owned(),
+                starts_at: game_start - HOUR,
+                ends_at: game_start - HOUR + WEEK_SECS,
+            },
+            real - 7200,
+        )
+        .await
+        .unwrap()
+        .board
+        .token;
+    for (i, (who, _)) in users.iter().enumerate() {
+        state
+            .store
+            .add_free(
+                &token,
+                who,
+                game_start,
+                game_start + HOUR,
+                real - 7000 + i64::try_from(i).unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+    let game = first_game(&state.store, &token, &users[0].0, real - 6000).await;
+    (state, pool, token, game, users)
+}
+
+#[tokio::test]
+async fn match_from_game_marks_it_played() {
+    let (state, _pool, token, game, users) = live_game().await;
+    let app = support::app_from(&state, 1);
+    let raw = &users[0].1;
+    let started = support::send(
+        &app,
+        support::as_session(
+            &state,
+            raw,
+            Method::POST,
+            &format!("/api/boards/{token}/games/{game}/start"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(started.status, StatusCode::OK, "{}", started.body);
+    assert_eq!(started.body["from"]["kind"], "game");
+    assert_eq!(started.body["players"].as_array().unwrap().len(), 4);
+    let from = started.body["from"].clone();
+    let created = support::send(
+        &app,
+        support::as_session(
+            &state,
+            raw,
+            Method::POST,
+            "/api/matches",
+            Some(match_json(from)),
+        ),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
+    let view = state
+        .store
+        .board_view(&token, Some(&users[0].0), padel_score_server::api::now())
+        .await
+        .unwrap()
+        .unwrap();
+    let g = &view.games[0];
+    assert_eq!(g.state, GameState::Played);
+    assert_eq!(
+        g.match_spectator_token.as_deref(),
+        created.body["spectator_token"].as_str()
+    );
+}
+
+#[tokio::test]
+async fn second_start_is_refused() {
+    let (state, _pool, token, game, users) = live_game().await;
+    let app = support::app_from(&state, 1);
+    let from = serde_json::json!({"kind": "game", "id": game});
+    let body = || Some(match_json(from.clone()));
+    let first = support::send(
+        &app,
+        support::as_session(&state, &users[0].1, Method::POST, "/api/matches", body()),
+    )
+    .await;
+    assert_eq!(first.status, StatusCode::CREATED, "{}", first.body);
+    let second = support::send(
+        &app,
+        support::as_session(&state, &users[1].1, Method::POST, "/api/matches", body()),
+    )
+    .await;
+    assert_eq!(second.status, StatusCode::CONFLICT);
+    assert_eq!(second.body["error"], "already_started");
+    // The route says the same, and the loser left no match behind.
+    let again = support::send(
+        &app,
+        support::as_session(
+            &state,
+            &users[1].1,
+            Method::POST,
+            &format!("/api/boards/{token}/games/{game}/start"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(again.body["error"], "already_started");
+}
+
+#[tokio::test]
+async fn match_from_game_needs_a_player_and_a_session() {
+    let (state, pool, _token, game, _users) = live_game().await;
+    let app = support::app_from(&state, 1);
+    let from = serde_json::json!({"kind": "game", "id": game});
+    let anon = support::send(
+        &app,
+        support::req(
+            Method::POST,
+            "/api/matches",
+            Some(match_json(from.clone())),
+            &[],
+        ),
+    )
+    .await;
+    assert_eq!(anon.status, StatusCode::UNAUTHORIZED);
+    let (_, outsider) = support::fast_user(&state, "zed@x.test", "Zed").await;
+    let res = support::send(
+        &app,
+        support::as_session(
+            &state,
+            &outsider,
+            Method::POST,
+            "/api/matches",
+            Some(match_json(from)),
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND);
+    // Nothing was created for the refused tries.
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM matches")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
 }

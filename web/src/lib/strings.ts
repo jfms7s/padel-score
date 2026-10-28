@@ -62,6 +62,7 @@ export const strings = {
 		starting: 'Starting…',
 		failed: "Couldn't start the match.",
 		created: 'Your match is ready.',
+		handoffExpired: 'Start the match again from the game or match page.',
 		openMatch: 'Open it',
 		tryAgain: 'Try again'
 	},

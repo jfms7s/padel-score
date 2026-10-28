@@ -45,6 +45,7 @@ use crate::commands::{
 use crate::competitions::view::event_id_of_match;
 use crate::hub::Subscription;
 use crate::players::PlayerSlots;
+use crate::starting::{StartedFrom, create_match_from};
 use crate::store::{NewMatch, Store, StoreError, StoredMatch, Teams};
 
 /// The largest request body accepted, in bytes.
@@ -264,6 +265,9 @@ pub struct CreateMatchRequest {
     pub teams: Teams,
     #[serde(default)]
     pub players: PlayerSlots,
+    /// What the match is started from (a board game): marks it played. Needs a signed-in caller.
+    #[serde(default)]
+    pub from: Option<StartedFrom>,
 }
 
 #[derive(Debug, Serialize)]
@@ -274,12 +278,16 @@ struct Created<'a> {
 }
 
 /// A signed-in caller owns the match; anyone else (no credential, or one that fails) creates an
-/// anonymous quick match exactly as before, never a 401.
+/// anonymous quick match exactly as before, never a 401, unless the request has a `from`: a
+/// match started from a game needs its starter, so that is a 401.
 async fn create_match(
     State(state): State<AppState>,
     OptionalUser(user): OptionalUser,
     ApiJson(req): ApiJson<CreateMatchRequest>,
 ) -> Result<Response, ApiError> {
+    if req.from.is_some() && user.is_none() {
+        return Err(ApiError::Unauthorized);
+    }
     let new = NewMatch {
         format: req.format,
         start: req.start,
@@ -287,7 +295,10 @@ async fn create_match(
         owner_user_id: user.map(|u| u.user.id),
         players: req.players,
     };
-    let m = state.store.create_match(new, now()).await?;
+    let m = match &req.from {
+        Some(from) => create_match_from(&state.store, new, from, now()).await?,
+        None => state.store.create_match(new, now()).await?,
+    };
     if let Some(owner) = &m.owner_user_id {
         state.hub.notify_user(owner);
     }
