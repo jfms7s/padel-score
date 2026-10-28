@@ -12,6 +12,12 @@
 //! `moved_up` or `moved_down` for its members (never for the user whose request caused it); a
 //! pair that completes gets `team_complete`. The HTTP layer wakes the push sender afterwards.
 
+mod calendar;
+
+pub(crate) use calendar::{
+    calendar_events_in, open_events_in, queue_events_soon_in, waiting_partners_in,
+};
+
 use std::collections::HashSet;
 
 use padel_scoring::Format;
@@ -380,6 +386,16 @@ impl Layout {
             .find(|e| e.has(user))
             .and_then(|e| e.partner_token.clone())
             .map(|partner_token| MyEntry::Pending { partner_token })
+    }
+
+    /// The entry `user` is in, wherever it sits.
+    fn entry_of(&self, user: &str) -> Option<&Entry> {
+        self.teams
+            .iter()
+            .chain(&self.line)
+            .chain(&self.solos)
+            .chain(&self.pending)
+            .find(|e| e.has(user))
     }
 
     fn team_ids(&self) -> HashSet<&str> {
