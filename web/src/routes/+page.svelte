@@ -7,11 +7,18 @@
 	import { getCalendar, nextUp, startOfToday } from '#lib/calendar.ts';
 	import NextUp from '#lib/components/NextUp.svelte';
 	import { listPlayers } from '#lib/players.ts';
-	import { session } from '#lib/session.ts';
+	import { requireSignedIn, session } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
 	import { listRecent, removeRecent, scorerPath, type RecentMatch } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
 	import type { CalendarItem, EventSummary, MyMatch } from '#lib/types.ts';
+
+	// Home is for a signed-in user: signed out, the browser goes to sign-in. With the server out
+	// of reach it still shows what this device knows.
+	$effect(() => {
+		void requireSignedIn();
+	});
+	const shown = $derived($session.status === 'signed_in' || $session.status === 'unavailable');
 
 	let recent = $state<RecentMatch[]>([]);
 	$effect(() => {
@@ -117,6 +124,7 @@
 {/snippet}
 
 <main class:signed={signedIn} class:page-wide-desk={signedIn} class:page-narrow={!signedIn}>
+	{#if shown}
 	<div class="cols">
 	<div class="col">
 	<h1>{strings.appName}</h1>
@@ -202,6 +210,7 @@
 	{/if}
 	</div>
 	</div>
+	{/if}
 </main>
 
 {#if deleting}

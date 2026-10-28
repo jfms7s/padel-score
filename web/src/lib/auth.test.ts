@@ -263,20 +263,20 @@ describe('the global 401 handler', () => {
 		}
 	});
 
-	it('the default handler sends the browser to sign-in with the path as next', async () => {
-		const assign = vi.fn();
-		vi.stubGlobal('location', { pathname: '/account', search: '?tab=1', hash: '#secret', assign });
+	it('the default handler sends the browser to sign-in with the path as next, replacing this page', async () => {
+		const replace = vi.fn();
+		vi.stubGlobal('location', { pathname: '/account', search: '?tab=1', hash: '#secret', replace });
 		serve(401, unauthorized);
 		await fail(listInvites());
-		expect(assign).toHaveBeenCalledWith('/login?next=%2Faccount%3Ftab%3D1');
+		expect(replace).toHaveBeenCalledWith('/login?next=%2Faccount%3Ftab%3D1');
 	});
 
 	it('the default handler stays put on the sign-in page', async () => {
-		const assign = vi.fn();
-		vi.stubGlobal('location', { pathname: '/login', search: '', hash: '', assign });
+		const replace = vi.fn();
+		vi.stubGlobal('location', { pathname: '/login', search: '', hash: '', replace });
 		serve(401, unauthorized);
 		await fail(listInvites());
-		expect(assign).not.toHaveBeenCalled();
+		expect(replace).not.toHaveBeenCalled();
 	});
 });
 
