@@ -238,6 +238,7 @@ async fn add_team(
         .add_team(&user.user.id, &id, players, req.name, now())
         .await?;
     state.hub.notify_event(&id);
+    state.push.wake();
     Ok((StatusCode::CREATED, Json(team)).into_response())
 }
 
@@ -274,9 +275,10 @@ async fn delete_team(
 ) -> Result<StatusCode, ApiError> {
     state
         .store
-        .delete_team(&user.user.id, &id, &team_id)
+        .delete_team(&user.user.id, &id, &team_id, now())
         .await?;
     state.hub.notify_event(&id);
+    state.push.wake();
     Ok(StatusCode::NO_CONTENT)
 }
 

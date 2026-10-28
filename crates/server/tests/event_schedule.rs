@@ -426,7 +426,7 @@ async fn cancelled_event_refuses_every_write() {
         s.update_team(o, id, &team.id, Default::default()).await,
         "update team",
     );
-    refused(s.delete_team(o, id, &team.id).await, "delete team");
+    refused(s.delete_team(o, id, &team.id, 30).await, "delete team");
     refused(s.add_court(o, id, None).await, "add court");
     refused(
         s.rename_court(o, id, &court.id, "Centre".into()).await,

@@ -10,6 +10,7 @@ pub mod kinds;
 pub mod non_stop;
 pub mod places;
 pub mod schedule;
+pub mod signups;
 pub mod tournament;
 pub mod view;
 
@@ -268,6 +269,18 @@ pub(crate) async fn competition_by_id_in(
     Ok(row.as_ref().map(competition_from_row).transpose()?)
 }
 
+/// The event whose join link is `token`, whoever owns it.
+pub(crate) async fn competition_by_join_token_in(
+    conn: &mut SqliteConnection,
+    token: &str,
+) -> Result<Option<Competition>, StoreError> {
+    let row = sqlx::query(select_competitions!("WHERE join_token = ?"))
+        .bind(token)
+        .fetch_optional(conn)
+        .await?;
+    Ok(row.as_ref().map(competition_from_row).transpose()?)
+}
+
 /// The event hook of a command that changed a match's log, run in its transaction after
 /// `results::sync_in`: for an event match it calls [`kinds::on_result`], which reads
 /// `match_results` to see whether the match is now finished (or no longer is, after an undo).
@@ -447,6 +460,36 @@ async fn notify_signed_up_in(
     Ok(())
 }
 
+/// The sign-up layout before a write that can move teams across the maximum line, or `None`
+/// for an event that never took sign-ups.
+async fn layout_before(
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+) -> Result<Option<signups::Layout>, StoreError> {
+    if ev.join_token.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(
+        signups::layout_in(tx, &ev.id, ev.schedule.max_teams).await?,
+    ))
+}
+
+/// Tell the sign-ups that crossed the maximum line since `before` (taken by [`layout_before`]
+/// on the event as it was) that they moved, apart from `actor`.
+async fn tell_moves(
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+    before: Option<signups::Layout>,
+    actor: &str,
+    now: i64,
+) -> Result<(), StoreError> {
+    let Some(before) = before else {
+        return Ok(());
+    };
+    let after = signups::layout_in(tx, &ev.id, ev.schedule.max_teams).await?;
+    signups::queue_moves_in(tx, ev, &before, &after, actor, now).await
+}
+
 impl Store {
     pub async fn create_competition(
         &self,
@@ -587,6 +630,7 @@ impl Store {
             ev.settings = kinds::normalize_settings(ev.kind, change.settings.as_ref())?;
         }
         let before = ev.schedule.clone();
+        let lines_before = layout_before(&mut tx, &ev).await?;
         if change.schedule.is_some() || change.settings.is_some() {
             // Settings are checked too: fewer legs may no longer fit the maximum.
             let input = change.schedule.unwrap_or_default();
@@ -622,6 +666,8 @@ impl Store {
         if ev.schedule.starts_at != before.starts_at || ev.schedule.place != before.place {
             notify_signed_up_in(&mut tx, &ev, NoticeKind::EventChanged, now).await?;
         }
+        // A new maximum moves teams across the line.
+        tell_moves(&mut tx, &ev, lines_before, owner, now).await?;
         tx.commit().await?;
         Ok(ev)
     }
@@ -697,7 +743,7 @@ impl Store {
         event_id: &str,
         players: [String; 2],
         name: Option<String>,
-        _now: i64,
+        now: i64,
     ) -> Result<EventTeam, StoreError> {
         let name = name.as_deref().map(|n| clean_name(n, "name")).transpose()?;
         let mut tx = self.begin().await?;
@@ -709,6 +755,7 @@ impl Store {
             return Err(StoreError::Conflict("event_started"));
         }
         check_pair(&mut tx, owner, event_id, &players, None).await?;
+        let before = layout_before(&mut tx, &ev).await?;
         let (count, next): (i64, i64) = sqlx::query_as(
             "SELECT COUNT(*), COALESCE(MAX(position) + 1, 0) FROM competition_teams \
              WHERE event_id = ?",
@@ -735,6 +782,7 @@ impl Store {
         let team = team_in(&mut tx, event_id, &id)
             .await?
             .ok_or(StoreError::NotFound)?;
+        tell_moves(&mut tx, &ev, before, owner, now).await?;
         tx.commit().await?;
         Ok(team)
     }
@@ -796,6 +844,7 @@ impl Store {
         owner: &str,
         event_id: &str,
         team_id: &str,
+        now: i64,
     ) -> Result<(), StoreError> {
         let mut tx = self.begin().await?;
         let ev = competition_in(&mut tx, owner, event_id)
@@ -805,6 +854,7 @@ impl Store {
         if ev.status != Status::Setup {
             return Err(StoreError::Conflict("event_started"));
         }
+        let before = layout_before(&mut tx, &ev).await?;
         let done = sqlx::query("DELETE FROM competition_teams WHERE event_id = ? AND id = ?")
             .bind(event_id)
             .bind(team_id)
@@ -813,6 +863,7 @@ impl Store {
         if done.rows_affected() != 1 {
             return Err(StoreError::NotFound);
         }
+        tell_moves(&mut tx, &ev, before, owner, now).await?;
         tx.commit().await?;
         Ok(())
     }

@@ -360,7 +360,7 @@ async fn teams_frozen_after_start() {
         matches!(err, StoreError::Conflict("event_started")),
         "{err:?}"
     );
-    let err = s.delete_team(A, &ev.id, &team.id).await.unwrap_err();
+    let err = s.delete_team(A, &ev.id, &team.id, 1).await.unwrap_err();
     assert!(
         matches!(err, StoreError::Conflict("event_started")),
         "{err:?}"
@@ -439,8 +439,8 @@ async fn delete_only_in_setup() {
     let ana = player(&s, A, "Ana").await;
     let marta = player(&s, A, "Marta").await;
     let team = s.add_team(A, &ev.id, [ana, marta], None, 1).await.unwrap();
-    s.delete_team(A, &ev.id, &team.id).await.unwrap();
-    let err = s.delete_team(A, &ev.id, &team.id).await.unwrap_err();
+    s.delete_team(A, &ev.id, &team.id, 1).await.unwrap();
+    let err = s.delete_team(A, &ev.id, &team.id, 1).await.unwrap_err();
     assert!(matches!(err, StoreError::NotFound), "{err:?}");
     let other = s.create_competition(A, new_event("Two"), 20).await.unwrap();
     start(&pool, &other.id, "running").await;
