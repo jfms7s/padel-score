@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultSetup } from './setup';
-import { parseFrom, putStartHandoff, takeStartHandoff, withStartPlayers } from './handoff';
+import { parseFrom, putStartHandoff, startFromParam, takeStartHandoff, withStartPlayers } from './handoff';
 import type { StartPlayers } from './types';
 
 const started: StartPlayers = {
@@ -75,5 +75,40 @@ describe('start hand-off', () => {
 		expect(parseFrom('game:g1')).toEqual({ kind: 'game', id: 'g1' });
 		expect(parseFrom('nope')).toBeNull();
 		expect(parseFrom(null)).toBeNull();
+	});
+});
+
+describe('startFromParam', () => {
+	const last = defaultSetup();
+
+	it('is a plain setup with no from', () => {
+		fakeSession();
+		expect(startFromParam(null, last)).toEqual({ setup: last, from: null, expired: false });
+	});
+
+	it('fills the four players from the hand-off and names the source', () => {
+		fakeSession();
+		putStartHandoff(started);
+		const out = startFromParam('game:g1', last);
+		expect(out.setup).toEqual(withStartPlayers(last, started));
+		expect(out.from).toEqual({ kind: 'game', id: 'g1' });
+		expect(out.expired).toBe(false);
+	});
+
+	it('says expired, and keeps the last setup, when the hand-off is gone', () => {
+		fakeSession();
+		expect(startFromParam('game:g1', last)).toEqual({ setup: last, from: null, expired: true });
+	});
+
+	it('says expired for a from this build does not know', () => {
+		fakeSession();
+		expect(startFromParam('scheduled:s1', last)).toEqual({ setup: last, from: null, expired: true });
+	});
+
+	it('is taken once: reading it again, as a re-run would, finds it expired', () => {
+		fakeSession();
+		putStartHandoff(started);
+		expect(startFromParam('game:g1', last).expired).toBe(false);
+		expect(startFromParam('game:g1', last).expired).toBe(true);
 	});
 });

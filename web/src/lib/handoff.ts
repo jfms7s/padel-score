@@ -58,3 +58,21 @@ export function parseFrom(raw: string | null): StartedFrom | null {
 	const match = /^game:(.+)$/.exec(raw ?? '');
 	return match ? { kind: 'game', id: match[1] } : null;
 }
+
+/** What New match starts with for its `from` query value (null for a plain New match). */
+export interface StartedSetup {
+	setup: Setup;
+	/** The source to send with the create, once its hand-off was found. */
+	from: StartedFrom | null;
+	/** `from` named a source but its hand-off is gone (a reload, another tab). */
+	expired: boolean;
+}
+
+/** Take the hand-off for `raw` (once) and fill `last` with it. Call it once per `from` value. */
+export function startFromParam(raw: string | null, last: Setup): StartedSetup {
+	if (raw === null) return { setup: last, from: null, expired: false };
+	const handoff = takeStartHandoff(raw);
+	const source = parseFrom(raw);
+	if (!handoff || !source) return { setup: last, from: null, expired: true };
+	return { setup: withStartPlayers(last, handoff), from: handoff.from, expired: false };
+}

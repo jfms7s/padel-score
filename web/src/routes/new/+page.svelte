@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ApiError, createMatch } from '#lib/api.ts';
 	import PlayerPicker from '#lib/components/PlayerPicker.svelte';
 	import ServeOrderFields from '#lib/components/ServeOrderFields.svelte';
-	import { parseFrom, takeStartHandoff, withStartPlayers } from '#lib/handoff.ts';
+	import { startFromParam } from '#lib/handoff.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { bootSession } from '#lib/session.ts';
 	import { safeStorage } from '#lib/storage.ts';
@@ -36,20 +37,18 @@
 	let from = $state<StartedFrom | null>(null);
 	/** `?from=` named a source but its hand-off is gone (a reload, another tab). */
 	let handoffExpired = $state(false);
+	// The `from` value alone: the effect below runs again only when it changes, not when
+	// something else on the page URL does or after the hand-off was taken.
+	const fromRaw = $derived(page.url.searchParams.get('from'));
 	$effect(() => {
-		const last = loadLastSetup(safeStorage());
-		setup = last;
-		// The hand-off is taken once, so a reload falls back to a plain New match.
-		const raw = page.url.searchParams.get('from');
-		if (raw === null) return;
-		const handoff = takeStartHandoff(raw);
-		const source = parseFrom(raw);
-		if (!handoff || !source) {
-			handoffExpired = true;
-			return;
-		}
-		setup = withStartPlayers(last, handoff);
-		from = handoff.from;
+		const raw = fromRaw;
+		// The hand-off is taken once per `from`, so a reload falls back to a plain New match.
+		untrack(() => {
+			const started = startFromParam(raw, loadLastSetup(safeStorage()));
+			setup = started.setup;
+			from = started.from;
+			handoffExpired = started.expired;
+		});
 	});
 
 	/** The signed-in user's players; null while unknown, signed out or unreadable (plain inputs). */
