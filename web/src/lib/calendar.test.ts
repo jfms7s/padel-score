@@ -5,6 +5,7 @@ import {
 	dismissPushPrompt,
 	getCalendar,
 	itemHref,
+	itemDetail,
 	itemNote,
 	itemStart,
 	itemTime,
@@ -251,5 +252,21 @@ describe('item words', () => {
 		expect(itemNote(match(1))).toBe('You play');
 		expect(itemNote(match(1, { role: 'line' }))).toBe('In line');
 		expect(itemNote(match(1, { state: 'cancelled' }))).toBe('Cancelled');
+	});
+
+	it('says what the viewer is in a full match, not just that it is full', () => {
+		expect(itemNote(match(1, { state: 'full', role: 'organiser' }))).toBe('You organise');
+		expect(itemNote(match(1, { state: 'full', role: 'player' }))).toBe('You play');
+		expect(itemNote(match(1, { state: 'full', role: 'line' }))).toBe('In line');
+		expect(itemNote(match(1, { state: 'started', role: 'player' }))).toBe('Started');
+	});
+
+	it('details_for_each_kind', () => {
+		expect(itemDetail(game(1))).toBe('Ana, Rui, Marta, Joana');
+		expect(itemDetail(event(1, { place: 'Club', team: ['Ana', 'Rui'] }))).toBe('Club · Ana & Rui');
+		expect(itemDetail(event(1, { place: 'Club', team: null }))).toBe('Club');
+		expect(itemDetail(event(1, { place: null, team: ['Ana'] }))).toBe('Ana');
+		expect(itemDetail(event(1, { place: null, team: null }))).toBe('');
+		expect(itemDetail(match(1, { place: 'Club' }))).toBe('');
 	});
 });

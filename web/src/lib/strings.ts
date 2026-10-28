@@ -1010,8 +1010,6 @@ export const strings = {
 		weekOf: (first: string, last: string) => `${first} – ${last}`,
 		prevWeek: 'Previous week',
 		nextWeek: 'Next week',
-		thisWeek: 'This week',
-		nothingThisWeek: 'Nothing',
 		boards: 'Your boards',
 		boardGames: (n: number) => (n === 0 ? 'No games yet' : n === 1 ? '1 game' : `${n} games`),
 		openToJoin: 'Open to join',
@@ -1027,8 +1025,7 @@ export const strings = {
 		pushTitle: 'Turn on notifications on this device',
 		pushHint: 'Hear when a game forms, a player is missing or someone asks to swap.',
 		pushOn: 'Turn on',
-		pushNotNow: 'Not now',
-		failed: "Couldn't load your calendar."
+		pushNotNow: 'Not now'
 	},
 
 	// Game boards: the board page, the week grid and the new-board form.

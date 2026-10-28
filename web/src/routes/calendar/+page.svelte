@@ -5,6 +5,7 @@
 		byDay,
 		dismissPushPrompt,
 		getCalendar,
+		itemDetail,
 		itemHref,
 		itemNote,
 		itemTime,
@@ -34,9 +35,10 @@
 	let working = $state(false);
 	let note = $state<string | null>(null);
 
-	const today = localDate(Date.now() / 1000, zone);
-	const thisWeek = weekStart(today);
-	let weekFirst = $state(thisWeek);
+	// Recomputed whenever the page comes back, so a page left open past midnight moves on.
+	let today = $state(localDate(Date.now() / 1000, zone));
+	const thisWeek = $derived(weekStart(today));
+	let weekFirst = $state(weekStart(localDate(Date.now() / 1000, zone)));
 	const weekEnd = $derived(addDays(weekFirst, 6));
 
 	const days = $derived(cal ? byDay(cal.items, zone) : []);
@@ -48,6 +50,17 @@
 
 	onMount(() => {
 		void load();
+		// Coming back to the page: what waits for an answer may be gone, and the day may have changed.
+		const wake = () => {
+			if (document.visibilityState === 'hidden' || cal === null) return;
+			void refresh();
+		};
+		document.addEventListener('visibilitychange', wake);
+		window.addEventListener('focus', wake);
+		return () => {
+			document.removeEventListener('visibilitychange', wake);
+			window.removeEventListener('focus', wake);
+		};
 	});
 
 	async function load() {
@@ -60,17 +73,28 @@
 
 	async function refresh() {
 		try {
-			cal = await getCalendar(startOfToday(zone));
+			const now = Date.now() / 1000;
+			const fresh = localDate(now, zone);
+			if (fresh !== today) {
+				// The day rolled over: today moves, and the week view follows if it showed the old week.
+				if (weekFirst === thisWeek) weekFirst = weekStart(fresh);
+				today = fresh;
+			}
+			cal = await getCalendar(startOfToday(zone, now));
 			failure = null;
 		} catch (e) {
-			failure = boardMessage(e) || t.failed;
+			failure = boardMessage(e);
 		}
 	}
 
 	async function checkPush() {
 		if (pushSupport(currentPushEnv()) !== 'available') return;
 		if (pushPromptDismissed(safeStorage())) return;
-		pushCard = !(await devicePushOn());
+		try {
+			pushCard = !(await devicePushOn());
+		} catch {
+			pushCard = false;
+		}
 	}
 
 	async function turnOn() {
@@ -122,18 +146,6 @@
 		<p class="hint">{t.loading}</p>
 	{/if}
 
-	{#if pushCard}
-		<section class="card" aria-label={t.pushTitle}>
-			<h2>{t.pushTitle}</h2>
-			<p class="hint">{t.pushHint}</p>
-			{#if pushFailure}<p class="error" role="alert">{pushFailure}</p>{/if}
-			<div class="actions">
-				<button type="button" class="primary" onclick={turnOn}>{t.pushOn}</button>
-				<button type="button" class="secondary" onclick={notNow}>{t.pushNotNow}</button>
-			</div>
-		</section>
-	{/if}
-
 	{#if cal}
 		{#if cal.waiting.length > 0}
 			<section aria-labelledby="waiting">
@@ -178,6 +190,18 @@
 			</section>
 		{/if}
 
+		{#if pushCard}
+			<section class="card" aria-label={t.pushTitle}>
+				<h2>{t.pushTitle}</h2>
+				<p class="hint">{t.pushHint}</p>
+				{#if pushFailure}<p class="error" role="alert">{pushFailure}</p>{/if}
+				<div class="actions">
+					<button type="button" class="primary" onclick={turnOn}>{t.pushOn}</button>
+					<button type="button" class="secondary" onclick={notNow}>{t.pushNotNow}</button>
+				</div>
+			</section>
+		{/if}
+
 		<div class="split">
 			<section class="weekcol" aria-label={t.week}>
 				<div class="weeknav">
@@ -214,6 +238,7 @@
 										<span class="what">
 											<span class="title">{itemTitle(item)}</span>
 											<span class="sub">{itemNote(item)}</span>
+											{#if itemDetail(item)}<span class="sub">{itemDetail(item)}</span>{/if}
 										</span>
 									</a>
 								</li>

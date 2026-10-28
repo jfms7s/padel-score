@@ -71,9 +71,22 @@ export function itemNote(item: CalendarItem): string {
 			return t.role[item.role];
 		}
 		case 'match': {
-			if (item.state !== 'open') return t.matchState[item.state];
-			return item.role === 'line' ? t.role.line : t.role[item.role];
+			// A full match says what the viewer is in it; the other states say what became of it.
+			if (item.state !== 'open' && item.state !== 'full') return t.matchState[item.state];
+			return t.role[item.role];
 		}
+	}
+}
+
+/** The line under the note: who plays a game, or the place and team of an event. Empty if none. */
+export function itemDetail(item: CalendarItem): string {
+	switch (item.kind) {
+		case 'game':
+			return item.players.join(', ');
+		case 'event':
+			return [item.place, item.team?.join(' & ')].filter(Boolean).join(' · ');
+		case 'match':
+			return '';
 	}
 }
 

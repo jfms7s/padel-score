@@ -1,6 +1,6 @@
 <script lang="ts">
 	// The next thing on the calendar, as one tappable card on Home.
-	import { itemHref, itemNote, itemTime, itemTitle } from '#lib/calendar.ts';
+	import { itemDetail, itemHref, itemNote, itemTime, itemTitle } from '#lib/calendar.ts';
 	import { browserTimeZone, dayLabel } from '#lib/dates.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { CalendarItem } from '#lib/types.ts';
@@ -15,6 +15,7 @@
 	<span class="eyebrow">{strings.calendar.nextUp}</span>
 	<span class="title">{itemTitle(item)}</span>
 	<span class="when">{dayLabel(start, zone)} · {itemTime(item, zone)} · {itemNote(item)}</span>
+	{#if itemDetail(item)}<span class="when">{itemDetail(item)}</span>{/if}
 </a>
 
 <style>

@@ -76,7 +76,7 @@
 	.item {
 		display: grid;
 		gap: 1px;
-		min-height: 44px;
+		min-height: var(--tap);
 		padding: 6px;
 		border-radius: 8px;
 		background: var(--a-soft);
