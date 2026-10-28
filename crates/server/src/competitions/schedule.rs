@@ -89,6 +89,7 @@ pub struct ScheduleInput {
 /// The largest even number of teams whose round robin, over `legs` legs, fits in
 /// [`MAX_SCHEDULE_MATCHES`].
 pub fn max_non_stop_teams(legs: u32) -> u32 {
+    let legs = legs.max(1);
     let mut teams = 2;
     while schedule_size(teams as usize + 2, legs) <= MAX_SCHEDULE_MATCHES {
         teams += 2;
@@ -135,9 +136,15 @@ pub fn normalize_schedule(
     let min_teams = input.min_teams.unwrap_or(current.min_teams);
     let max_teams = input.max_teams.unwrap_or(current.max_teams);
 
+    let turning_on = signups != Signups::Off && current.signups == Signups::Off;
     if signups != Signups::Off {
-        if starts_at.is_none() {
-            return Err(StoreError::InvalidField("starts_at"));
+        match starts_at {
+            None => return Err(StoreError::InvalidField("starts_at")),
+            // Opening sign-ups for a start that has already passed.
+            Some(start) if turning_on && start <= now => {
+                return Err(StoreError::InvalidField("starts_at"));
+            }
+            Some(_) => {}
         }
         if max_teams.is_none() {
             return Err(StoreError::InvalidField("max_teams"));
@@ -178,7 +185,10 @@ pub fn normalize_schedule(
         }
         (Some(start), Some(None)) => Some(default_deadline(start, now)),
         (Some(start), None) => match current.deadline_at {
-            Some(kept) if current.starts_at == Some(start) => Some(kept),
+            // A kept deadline that has already passed is stale when sign-ups open.
+            Some(kept) if current.starts_at == Some(start) && !(turning_on && kept <= now) => {
+                Some(kept)
+            }
             _ => Some(default_deadline(start, now)),
         },
     };
@@ -422,6 +432,33 @@ mod tests {
         };
         let back = normalize_schedule(Kind::Tournament, &json!({}), &s, &reset, NOW).unwrap();
         assert_eq!(back.deadline_at, Some(NOW + 2 * DAY));
+    }
+
+    #[test]
+    fn opening_signups_refreshes_a_stale_deadline_and_refuses_a_past_start() {
+        // Created with sign-ups off; the stored deadline has since passed.
+        let created = normalize(Kind::Tournament, &json!({}), &input(NOW + 3 * DAY)).unwrap();
+        let later = NOW + 2 * DAY + 3600;
+        let on = ScheduleInput {
+            signups: Some(Signups::Public),
+            max_teams: Some(Some(8)),
+            ..ScheduleInput::default()
+        };
+        let s = normalize_schedule(Kind::Tournament, &json!({}), &created, &on, later).unwrap();
+        // Less than 24h to the start: the default is the start itself.
+        assert_eq!(s.deadline_at, Some(NOW + 3 * DAY));
+        // A still-valid deadline is kept.
+        let s =
+            normalize_schedule(Kind::Tournament, &json!({}), &created, &on, NOW + 3600).unwrap();
+        assert_eq!(s.deadline_at, Some(NOW + 2 * DAY));
+        // A start in the past is refused.
+        let err = normalize_schedule(Kind::Tournament, &json!({}), &created, &on, NOW + 4 * DAY);
+        assert_eq!(invalid(err), "starts_at");
+    }
+
+    #[test]
+    fn zero_legs_does_not_hang() {
+        assert_eq!(max_non_stop_teams(0), 22);
     }
 
     #[test]

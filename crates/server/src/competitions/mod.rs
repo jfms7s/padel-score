@@ -561,16 +561,16 @@ impl Store {
         change: CompetitionChange,
         now: i64,
     ) -> Result<Competition, StoreError> {
-        let name = change
-            .name
-            .as_deref()
-            .map(|n| clean_name(n, "name"))
-            .transpose()?;
         let mut tx = self.begin().await?;
         let mut ev = competition_in(&mut tx, owner, id)
             .await?
             .ok_or(StoreError::NotFound)?;
         not_cancelled(&ev)?;
+        let name = change
+            .name
+            .as_deref()
+            .map(|n| clean_name(n, "name"))
+            .transpose()?;
         let edits_setup =
             change.format.is_some() || change.settings.is_some() || change.schedule.is_some();
         if edits_setup && ev.status != Status::Setup {

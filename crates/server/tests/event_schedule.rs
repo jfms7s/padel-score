@@ -13,6 +13,8 @@ use axum::Router;
 use axum::http::{Method, StatusCode};
 use padel_score_server::AppState;
 use padel_score_server::api::now;
+use padel_score_server::competitions::non_stop::clock::ClockAction;
+use padel_score_server::competitions::tournament::store::Choice;
 use padel_score_server::competitions::{Competition, CompetitionChange, NewCompetition, Status};
 use padel_score_server::store::StoreError;
 use padel_scoring::{DecidingSet, DeuceRule, Format, SetRules, SetsFormat};
@@ -444,7 +446,73 @@ async fn cancelled_event_refuses_every_write() {
             .await,
         "update match",
     );
+    refused(s.redraw_bracket(o, id, 30).await, "redraw");
+    refused(s.fill_bracket_courts(o, id).await, "fill courts");
+    refused(
+        s.decide_bracket(o, id, "m", Choice::Keep, 30).await,
+        "decide",
+    );
+    refused(
+        s.clock_action(o, id, ClockAction::Start, 0, 30_000).await,
+        "clock",
+    );
+    refused(
+        s.update_competition(
+            o,
+            id,
+            CompetitionChange {
+                name: Some("  ".into()),
+                ..Default::default()
+            },
+            30,
+        )
+        .await,
+        "blank rename",
+    );
     // Reads and delete stay allowed.
     assert!(s.competition(o, id).await.unwrap().is_some());
     s.delete_competition(o, id).await.unwrap();
+}
+
+#[tokio::test]
+async fn changing_legs_rechecks_the_maximum() {
+    let w = world().await;
+    let body = json!({
+        "name": "Non-stop", "kind": "non_stop",
+        "format": Format::Timed { deuce: DeuceRule::Advantage, draws_allowed: false },
+        "settings": { "legs": 1 },
+        "schedule": { "starts_at": now() + 3 * DAY, "max_teams": 22, "min_teams": 2, "signups": "private" },
+    });
+    let res = w.create(body).await;
+    assert_eq!(res.status, StatusCode::CREATED, "{}", res.body);
+    let id = res.body["event"]["id"].as_str().unwrap().to_owned();
+    let patch = json!({ "settings": { "legs": 2 } });
+    let res = w
+        .call(Method::PATCH, &format!("/api/events/{id}"), Some(patch))
+        .await;
+    assert_eq!(res.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", res.body);
+    assert_eq!(res.body["field"], json!("max_teams"));
+}
+
+#[tokio::test]
+async fn null_deadline_over_http_asks_for_the_default() {
+    let w = world().await;
+    let start = now() + 3 * DAY;
+    let mut body = new_scheduled("Cup", start);
+    body["schedule"]["deadline_at"] = json!(start - 3600);
+    let res = w.create(body).await;
+    assert_eq!(
+        res.body["event"]["schedule"]["deadline_at"],
+        json!(start - 3600)
+    );
+    let id = res.body["event"]["id"].as_str().unwrap().to_owned();
+    let patch = json!({ "schedule": { "deadline_at": null } });
+    let res = w
+        .call(Method::PATCH, &format!("/api/events/{id}"), Some(patch))
+        .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert_eq!(
+        res.body["event"]["schedule"]["deadline_at"],
+        json!(start - DAY)
+    );
 }
