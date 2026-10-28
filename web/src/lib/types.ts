@@ -1071,6 +1071,7 @@ export type ScheduledErrorCode =
 	| 'line_full'
 	| 'match_closed'
 	| 'match_short'
+	| 'same_player_twice'
 	| 'too_many_scheduled'
 	| 'not_yet'
 	| 'game_over'

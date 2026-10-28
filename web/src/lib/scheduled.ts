@@ -6,7 +6,7 @@
 // signed-in call, so a 401 sends the browser to sign-in.
 
 import { accountRequest, ApiError } from './api';
-import { dayLabel, fromLocalInputs, monthYear, timeText } from './dates';
+import { dayLabel, fromLocalInputs, monthYear, timeText, toLocalInputs } from './dates';
 import { toFormat, type Setup } from './setup';
 import { signupMessage } from './signups';
 import { strings } from './strings';
@@ -42,7 +42,7 @@ export function removeFromScheduled(id: string, slot: number): Promise<Scheduled
 	return accountRequest(scheduled(id, '/remove'), { ...signedIn, method: 'POST', body: { slot } });
 }
 
-/** The four players for New match; 409 `not_yet`, `game_over`, `match_short`, `match_closed`. */
+/** The four players for New match; 409 `not_yet`, `game_over`, `match_short`, `same_player_twice`, `match_closed`. */
 export function startScheduled(id: string): Promise<StartPlayers> {
 	return accountRequest(scheduled(id, '/start'), { ...signedIn, method: 'POST' });
 }
@@ -159,8 +159,13 @@ export function scheduledChange(
 ): ScheduledChange | null {
 	const change: ScheduledChange = {};
 	if (form.date !== '' && form.time !== '') {
-		const at = fromLocalInputs(form.date, form.time, timeZone);
-		if (at !== view.starts_at) change.starts_at = at;
+		// A start the inputs still show as saved is kept: re-reading them would pick the wrong
+		// hour of a clock change.
+		const saved = toLocalInputs(view.starts_at, timeZone);
+		if (form.date !== saved.date || form.time !== saved.time) {
+			const at = fromLocalInputs(form.date, form.time, timeZone);
+			if (at !== view.starts_at) change.starts_at = at;
+		}
 	}
 	const place = form.place.trim();
 	if (place !== (view.place ?? '')) change.place = place === '' ? null : place;

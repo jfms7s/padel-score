@@ -175,6 +175,16 @@ describe('scheduledChange', () => {
 		});
 	});
 
+	it('keeps the saved start on the clocks-go-back night when only the place changes', () => {
+		// Lisbon 2026-10-25 01:30 happens twice; this is the second (WET, 01:30Z).
+		const second = Date.UTC(2026, 9, 25, 1, 30) / 1000;
+		const night = view({ starts_at: second, place: null });
+		const lisbon = 'Europe/Lisbon';
+		const inputs = { date: '2026-10-25', time: '01:30' };
+		expect(scheduledChange(night, { ...inputs, place: 'Club' }, lisbon)).toEqual({ place: 'Club' });
+		expect(scheduledChange(night, { ...inputs, place: '' }, lisbon)).toBeNull();
+	});
+
 	it('clears the place with null', () => {
 		expect(scheduledChange(v, { date: '2026-11-04', time: '20:00', place: '  ' }, zone)).toEqual({ place: null });
 		expect(scheduledChange(view({ place: null }), { date: '2026-11-04', time: '20:00', place: '' }, 'UTC')).not.toEqual(

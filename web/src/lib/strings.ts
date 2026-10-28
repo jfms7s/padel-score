@@ -1300,6 +1300,7 @@ export const strings = {
 			line_full: 'The waiting list is full.',
 			match_closed: 'This match is closed.',
 			match_short: 'The match needs four players before it can start.',
+			same_player_twice: 'The same person is in two places. Remove one of them from the match, then start it.',
 			too_many_scheduled: 'You have 50 upcoming matches already. Cancel one first.',
 			not_yet: 'It is too early to start this match. You can start it 30 minutes before.',
 			game_over: 'The time to start this match has passed.',
