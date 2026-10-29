@@ -327,8 +327,9 @@ pub(crate) struct Layout {
 }
 
 impl Layout {
-    /// Complete entries go in order of `(taken first, complete_at, user1_at, rowid)`: the first
-    /// `max - hand_added` have a place, the rest are the line.
+    /// Complete entries go in order of `(taken first, complete_at, user1_at, rowid)`. Before any
+    /// take the first `max - hand_added` have a place and the rest are the line; once any entry
+    /// is taken, only the taken ones have a place and the rest are the line.
     fn build(entries: Vec<Entry>, hand_added: usize, max: usize) -> Layout {
         let mut complete = Vec::new();
         let mut solos = Vec::new();
@@ -479,13 +480,41 @@ fn no_place_notices<'a>(ev: &Competition, users: impl Iterator<Item = &'a str>) 
         .collect()
 }
 
-/// Whether `user` was told `no_place` for the event (as far as the outbox remembers).
-async fn told_no_place_in(tx: &mut Tx<'_>, event_id: &str, user: &str) -> Result<bool, StoreError> {
-    let told: Option<i64> = sqlx::query_scalar("SELECT 1 FROM push_outbox WHERE dedupe = ?")
-        .bind(format!("no-place:{event_id}:{user}"))
-        .fetch_optional(&mut **tx)
+/// Tell the members of `entries` (except the organiser, who is the one acting or needs no
+/// telling) that there is no place, once per entry: the first time stamps `no_place_at`, and an
+/// entry already stamped is left alone, whatever the outbox has pruned since.
+async fn tell_no_place_in<'a>(
+    tx: &mut Tx<'_>,
+    ev: &Competition,
+    entries: impl Iterator<Item = &'a Entry>,
+    now: i64,
+) -> Result<(), StoreError> {
+    let mut notices = Vec::new();
+    for entry in entries {
+        let done = sqlx::query(
+            "UPDATE event_signups SET no_place_at = ? WHERE id = ? AND no_place_at IS NULL",
+        )
+        .bind(now)
+        .bind(&entry.id)
+        .execute(&mut **tx)
         .await?;
-    Ok(told.is_some())
+        if done.rows_affected() == 0 {
+            continue;
+        }
+        let users = entry.users().filter(|user| *user != ev.owner_user_id);
+        notices.extend(no_place_notices(ev, users));
+    }
+    queue_in(tx, &notices, now).await?;
+    Ok(())
+}
+
+/// Whether the entry was told `no_place`.
+async fn told_no_place_in(tx: &mut Tx<'_>, entry_id: &str) -> Result<bool, StoreError> {
+    let at: Option<i64> = sqlx::query_scalar("SELECT no_place_at FROM event_signups WHERE id = ?")
+        .bind(entry_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    Ok(at.is_some())
 }
 
 /// `team_complete` for both members, each told the other's name.
@@ -683,8 +712,7 @@ impl Store {
                 .execute(&mut *tx)
                 .await?;
             // An invitation nobody accepted by now will not become a team: tell the inviters.
-            let users = layout.pending.iter().flat_map(Entry::users);
-            queue_in(&mut tx, &no_place_notices(&ev, users), now).await?;
+            tell_no_place_in(&mut tx, &ev, layout.pending.iter(), now).await?;
         }
         tx.commit().await?;
         Ok(Some(ClosedSignups {
@@ -715,8 +743,14 @@ impl Store {
         if ev.schedule.signups == Signups::Off {
             return Err(StoreError::Conflict("signups_off"));
         }
-        let mut waiting: Vec<Entry> = entries_in(&mut tx, event_id)
-            .await?
+        let all = entries_in(&mut tx, event_id).await?;
+        // Invitations nobody accepted: closing the sign-ups here keeps the deadline job away.
+        let pending: Vec<Entry> = all
+            .iter()
+            .filter(|e| e.complete_at.is_none() && e.partner_token.is_some())
+            .cloned()
+            .collect();
+        let mut waiting: Vec<Entry> = all
             .into_iter()
             .filter(|e| e.complete_at.is_some() && !e.taken)
             .collect();
@@ -738,6 +772,7 @@ impl Store {
         }
 
         let mut taken_ids: HashSet<&str> = HashSet::new();
+        let mut was_told: HashSet<&str> = HashSet::new();
         let mut skipped = Vec::new();
         for entry in &waiting {
             if taken_ids.len() == wanted {
@@ -746,11 +781,17 @@ impl Store {
             let players = entry_players_in(&mut tx, owner, entry, now).await?;
             match add_team_in(&mut tx, owner, &ev, players, None).await {
                 Ok(team) => {
-                    sqlx::query("UPDATE event_signups SET taken_team_id = ? WHERE id = ?")
-                        .bind(&team.id)
-                        .bind(&entry.id)
-                        .execute(&mut *tx)
-                        .await?;
+                    if told_no_place_in(&mut tx, &entry.id).await? {
+                        was_told.insert(&entry.id);
+                    }
+                    sqlx::query(
+                        "UPDATE event_signups SET taken_team_id = ?, no_place_at = NULL \
+                         WHERE id = ?",
+                    )
+                    .bind(&team.id)
+                    .bind(&entry.id)
+                    .execute(&mut *tx)
+                    .await?;
                     taken_ids.insert(&entry.id);
                 }
                 Err(StoreError::Conflict("player_in_team")) => skipped.push(entry.id.clone()),
@@ -766,25 +807,20 @@ impl Store {
         .execute(&mut *tx)
         .await?;
 
-        // Whoever is still waiting for a place, and was not set aside for a clash, is told once.
+        // Whoever is still waiting for a place, and was not set aside for a clash, is told once,
+        // and so are the inviters whose partner never accepted.
         let left_out = waiting
             .iter()
-            .filter(|e| !taken_ids.contains(e.id.as_str()) && !skipped.contains(&e.id))
-            .flat_map(Entry::users)
-            .filter(|user| *user != owner);
-        queue_in(&mut tx, &no_place_notices(&ev, left_out), now).await?;
+            .filter(|e| !taken_ids.contains(e.id.as_str()) && !skipped.contains(&e.id));
+        tell_no_place_in(&mut tx, &ev, left_out.chain(pending.iter()), now).await?;
         // Whoever was told there was no place, and is taken by this run after all, is told so.
-        let mut now_in = Vec::new();
-        for user in waiting
+        let now_in: Vec<Notice> = waiting
             .iter()
-            .filter(|e| taken_ids.contains(e.id.as_str()))
+            .filter(|e| was_told.contains(e.id.as_str()))
             .flat_map(Entry::users)
             .filter(|user| *user != owner)
-        {
-            if told_no_place_in(&mut tx, event_id, user).await? {
-                now_in.extend(notice(&ev, user, NoticeKind::MovedUp, None));
-            }
-        }
+            .filter_map(|user| notice(&ev, user, NoticeKind::MovedUp, None))
+            .collect();
         queue_in(&mut tx, &now_in, now).await?;
         tx.commit().await?;
         Ok(TakeReport {

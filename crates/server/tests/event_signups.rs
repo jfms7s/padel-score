@@ -1485,11 +1485,14 @@ async fn a_later_take_tells_the_entry_that_was_left_out_it_is_in() {
     let users = w.teams("T", 7).await;
     w.take(T0 + 500).await.unwrap();
     assert_eq!(w.kinds(&users[6]).await, ["no_place"]);
+    // Days pass: the tick prunes the outbox, so only the sign-up row remembers the notice.
+    w.state.store.prune_push_outbox(i64::MAX).await.unwrap();
+    assert!(w.kinds(&users[6]).await.is_empty());
     // A hand-added team makes room for the one left over.
     w.hand_team("Hand A", "Hand B").await;
     let report = w.take(T0 + 600).await.unwrap();
     assert_eq!(report.taken, 1);
-    assert_eq!(w.kinds(&users[6]).await, ["no_place", "moved_up"]);
+    assert_eq!(w.kinds(&users[6]).await, ["moved_up"]);
     // Entries taken the first time are not told anything.
     assert!(w.kinds(&users[0]).await.is_empty());
 }
@@ -1545,4 +1548,50 @@ async fn declining_a_partner_link_tells_the_events_stream() {
     let res = w.call(&d_raw, Method::POST, &decline, None).await;
     assert_eq!(res.status, StatusCode::NO_CONTENT);
     assert!(rx.try_recv().is_ok(), "the event stream was not told");
+}
+
+#[tokio::test]
+async fn a_take_before_the_deadline_tells_pending_inviters_once() {
+    let w = non_stop_world(10).await;
+    w.teams("T", 4).await;
+    let inviter = w.user("Inviter").await;
+    w.invite(&inviter, T0 + 20).await;
+    w.take(T0 + 500).await.unwrap();
+    assert_eq!(w.kinds(&inviter).await, ["no_place"]);
+    // The deadline job leaves a closed event alone, so nothing repeats.
+    w.state.store.close_due_signups(DEADLINE).await.unwrap();
+    assert_eq!(w.kinds(&inviter).await, ["no_place"]);
+}
+
+#[tokio::test]
+async fn the_organiser_as_pending_inviter_is_not_told_at_the_deadline() {
+    let w = world(16).await;
+    w.teams("T", 4).await;
+    let owner = w.owner.clone();
+    w.invite(&owner, T0 + 20).await;
+    w.state.store.close_due_signups(DEADLINE).await.unwrap();
+    assert!(w.kinds(&owner).await.is_empty());
+}
+
+#[tokio::test]
+async fn removing_a_taken_team_moves_it_down_and_nobody_moves_up_until_another_take() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 7).await;
+    w.take(T0 + 500).await.unwrap();
+    let team: String =
+        sqlx::query_scalar("SELECT taken_team_id FROM event_signups WHERE user1_id = ?")
+            .bind(&users[0])
+            .fetch_one(&w.pool)
+            .await
+            .unwrap();
+    w.state
+        .store
+        .delete_team(&w.owner, &w.event, &team, T0 + 600)
+        .await
+        .unwrap();
+    assert_eq!(w.kinds(&users[0]).await, ["moved_down"]);
+    assert_eq!(w.me(&users[0]).await, Some(MyEntry::Line { place: 1 }));
+    // The one that was already on the line stays there, untold, until the organiser takes again.
+    assert_eq!(w.kinds(&users[6]).await, ["no_place"]);
+    assert!(matches!(w.me(&users[6]).await, Some(MyEntry::Line { .. })));
 }
