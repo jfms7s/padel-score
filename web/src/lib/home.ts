@@ -83,9 +83,22 @@ export function agendaTitle(item: CalendarItem): string {
 	}
 }
 
-/** The agenda's second line, parts joined with " · ". */
+/** Whether the server sent this item as cancelled (it does so on purpose, so it can be marked). */
+export function isCancelled(item: CalendarItem): boolean {
+	switch (item.kind) {
+		case 'game':
+			return false;
+		case 'event':
+			return item.status === 'cancelled';
+		case 'match':
+			return item.state === 'cancelled';
+	}
+}
+
+/** The agenda's second line, parts joined with " · ". A cancelled or started item leads with that. */
 export function agendaNote(item: CalendarItem): string {
 	const t = strings.home;
+	const states = strings.calendar.matchState;
 	let parts: (string | null)[];
 	switch (item.kind) {
 		case 'game':
@@ -93,6 +106,7 @@ export function agendaNote(item: CalendarItem): string {
 			break;
 		case 'event':
 			parts = [
+				item.status === 'cancelled' ? states.cancelled : null,
 				item.place,
 				item.max_teams === null ? t.teams(item.teams) : strings.calendar.teamsOpen(item.teams, item.max_teams),
 				item.role === 'line' ? t.inLine : null
@@ -100,7 +114,8 @@ export function agendaNote(item: CalendarItem): string {
 			break;
 		case 'match': {
 			const open = item.players.filter((p) => p === null).length;
-			parts = [item.place, open > 0 ? t.open(open) : null];
+			const lead = item.state === 'cancelled' ? states.cancelled : item.state === 'started' ? states.started : null;
+			parts = [lead, item.place, open > 0 ? t.open(open) : null];
 			break;
 		}
 	}

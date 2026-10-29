@@ -74,4 +74,33 @@
 		margin: 0;
 		font-weight: 600;
 	}
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.actions button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: var(--tap);
+		padding: 0 18px;
+		border-radius: 14px;
+		font-size: 16px;
+		font-weight: 650;
+	}
+	.primary {
+		border: 0;
+		background: var(--ink);
+		color: var(--glass);
+	}
+	.secondary {
+		border: 1px solid var(--line);
+		background: var(--panel);
+		color: var(--ink);
+	}
+	.actions button:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
 </style>

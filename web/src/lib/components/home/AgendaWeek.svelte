@@ -3,7 +3,7 @@
 	// start and length; blocks that overlap share the day's width. Open-to-join blocks are dashed links.
 	import { itemHref, shiftWeek, weekStart } from '#lib/calendar.ts';
 	import { addDays, dayLabel, localDate, localMidnight, timeText } from '#lib/dates.ts';
-	import { agendaTitle, itemEnd, itemKey, laneLayout, openEnd, shownHours } from '#lib/home.ts';
+	import { agendaTitle, isCancelled, itemEnd, itemKey, laneLayout, openEnd, shownHours } from '#lib/home.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { CalendarItem, OpenItem } from '#lib/types.ts';
 
@@ -38,6 +38,7 @@
 		key: string;
 		kind: CalendarItem['kind'];
 		isOpen: boolean;
+		cancelled: boolean;
 		href: string;
 		title: string;
 		start: number;
@@ -61,6 +62,7 @@
 				key: itemKey(item),
 				kind: item.kind,
 				isOpen: false,
+				cancelled: isCancelled(item),
 				href: itemHref(item),
 				title: agendaTitle(item),
 				start: item.kind === 'game' ? item.start : item.starts_at,
@@ -71,8 +73,9 @@
 				key: `open:${o.join_token}`,
 				kind: o.kind,
 				isOpen: true,
+				cancelled: false,
 				href: itemHref(o),
-				title: o.kind === 'event' ? o.name : t.matchBy(o.owner_name),
+				title: o.kind === 'event' ? o.name : strings.home.matchBy(o.owner_name),
 				start: o.starts_at,
 				end: openEnd(o),
 				time: ''
@@ -160,6 +163,7 @@
 								type="button"
 								class="block {c.block.kind}"
 								class:selected={c.block.key === selected}
+				class:cancelled={c.block.cancelled}
 								aria-pressed={c.block.key === selected}
 								style:top="{c.top}px"
 								style:height="{c.height}px"
@@ -276,14 +280,21 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	/* The court tokens are --a, --b and --ev darkened to carry the white text. */
 	.block.game {
-		background: var(--a);
+		background: var(--a-court);
 	}
 	.block.event {
-		background: var(--ev);
+		background: var(--ev-court);
 	}
 	.block.match {
-		background: var(--b);
+		background: var(--b-court);
+	}
+	.block.cancelled {
+		opacity: 0.55;
+	}
+	.block.cancelled span {
+		text-decoration: line-through;
 	}
 	.block.selected {
 		outline: 2px solid var(--ball);

@@ -79,9 +79,10 @@
 		flex: 1;
 		min-width: 0;
 		display: flex;
+		flex-wrap: wrap;
 		justify-content: space-between;
 		align-items: center;
-		gap: 12px;
+		gap: 4px 12px;
 		min-height: var(--tap);
 		padding: 8px 14px;
 		border: 2px solid var(--ball);
@@ -92,6 +93,7 @@
 	}
 	.what {
 		display: grid;
+		flex: 1 1 9rem;
 		min-width: 0;
 	}
 	.label {

@@ -8,6 +8,7 @@
 	import {
 		dismissPushPrompt,
 		getCalendar,
+		itemStart,
 		pushPromptDismissed,
 		startOfToday,
 		weekStart
@@ -21,8 +22,8 @@
 	import Waiting from '#lib/components/home/Waiting.svelte';
 	import WeekStrip from '#lib/components/home/WeekStrip.svelte';
 	import DeleteMatchSheet from '#lib/components/DeleteMatchSheet.svelte';
-	import { browserTimeZone, localDate } from '#lib/dates.ts';
-	import { itemEnd, itemKey, liveNow, offlineRows, type LiveRow } from '#lib/home.ts';
+	import { addDays, browserTimeZone, localDate } from '#lib/dates.ts';
+	import { isCancelled, itemEnd, itemKey, liveNow, offlineRows, type LiveRow } from '#lib/home.ts';
 	import { claimBadgeCount } from '#lib/linking.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { currentPushEnv, devicePushOn, enablePush, pushSupport } from '#lib/push.ts';
@@ -184,13 +185,16 @@
 	}
 
 	// The week grid's selection lives in ?item=. With none (or a stale one) the first item that
-	// ends after now is selected.
+	// ends after now and isn't cancelled is selected, in the week the grid shows if there is one.
 	const chosen = $derived.by(() => {
 		const items = cal?.items ?? [];
 		const wanted = page.url.searchParams.get('item');
-		return (
-			items.find((it) => itemKey(it) === wanted) ?? items.find((it) => itemEnd(it) > now) ?? null
-		);
+		const coming = items.filter((it) => !isCancelled(it) && itemEnd(it) > now);
+		const inWeek = coming.find((it) => {
+			const date = localDate(itemStart(it), zone);
+			return date >= weekFirst && date <= addDays(weekFirst, 6);
+		});
+		return items.find((it) => itemKey(it) === wanted) ?? inWeek ?? coming[0] ?? null;
 	});
 	const chosenKey = $derived(chosen ? itemKey(chosen) : null);
 
@@ -218,7 +222,7 @@
 	}
 </script>
 
-<main class="page-wide-desk">
+<main class="page-wide">
 	{#if shown}
 		<h1>{strings.home.title}</h1>
 		<a class="primary" href="/new">{strings.newMatch}</a>
@@ -312,6 +316,11 @@
 		padding-top: 16px;
 		padding-bottom: 48px;
 	}
+	/* A phone column below 700; the two-column layout is wide at every width from there. */
+	.cols,
+	h1 {
+		max-width: 28rem;
+	}
 	h1 {
 		margin: 0 0 12px;
 		font-size: 32px;
@@ -326,6 +335,7 @@
 		color: var(--warn);
 	}
 	.primary {
+		max-width: 28rem;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -358,6 +368,10 @@
 	}
 	/* From 700 the week and agenda stand on the left, the rest stack on the right. */
 	@media (min-width: 700px) {
+		.cols,
+		h1 {
+			max-width: none;
+		}
 		.cols {
 			display: grid;
 			grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);

@@ -6,6 +6,7 @@ import {
 	agendaTitle,
 	itemEnd,
 	itemKey,
+	isCancelled,
 	laneLayout,
 	liveNow,
 	openEnd,
@@ -227,11 +228,35 @@ describe('agendaNote', () => {
 		expect(line).toBe('Club · 4 of 6 teams · in line');
 	});
 
+	it('leads a cancelled event with the cancelled word', () => {
+		expect(agendaNote(event(1, { place: 'Club', teams: 4, max_teams: null, status: 'cancelled' }))).toBe(
+			'Cancelled · Club · 4 teams'
+		);
+	});
+
+	it('leads a cancelled match with the cancelled word and a started one with the started word', () => {
+		const players = ['A', 'B', null, null];
+		expect(agendaNote(match(1, { place: 'Court 2', players, state: 'cancelled' }))).toBe(
+			'Cancelled · Court 2 · 2 open'
+		);
+		expect(agendaNote(match(1, { place: 'Court 2', players, state: 'started' }))).toBe('Started · Court 2 · 2 open');
+	});
+
 	it('says a match with its place and open places', () => {
 		expect(agendaNote(match(1, { place: 'Court 2', players: ['Pedro', 'Inês', null, null] }))).toBe('Court 2 · 2 open');
 		const full = match(1, { place: 'Court 2', players: ['A', 'B', 'C', 'D'] });
 		expect(agendaNote(full)).toBe('Court 2');
 		expect(agendaNote(match(1, { players: ['A', 'B', 'C', 'D'] }))).toBe('');
+	});
+});
+
+describe('isCancelled', () => {
+	it('is true for a cancelled event or match only', () => {
+		expect(isCancelled(event(1, { status: 'cancelled' }))).toBe(true);
+		expect(isCancelled(event(1))).toBe(false);
+		expect(isCancelled(match(1, { state: 'cancelled' }))).toBe(true);
+		expect(isCancelled(match(1, { state: 'started' }))).toBe(false);
+		expect(isCancelled(game(1))).toBe(false);
 	});
 });
 

@@ -27,7 +27,7 @@
 			{#each open as o (`${o.kind}:${o.join_token}`)}
 				<li>
 					<a class="row {o.kind}" href={itemHref(o)}>
-						<span class="title">{o.kind === 'event' ? o.name : t.matchBy(o.owner_name)}</span>
+						<span class="title">{o.kind === 'event' ? o.name : strings.home.matchBy(o.owner_name)}</span>
 						<span class="sub">{openText(o)}{o.place ? ` · ${o.place}` : ''}</span>
 					</a>
 				</li>

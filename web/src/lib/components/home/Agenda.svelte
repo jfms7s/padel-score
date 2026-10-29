@@ -2,7 +2,7 @@
 	// What is coming up, grouped by day. Each day group has an id so the week strip can scroll to it.
 	import { byDay, itemHref, itemTime } from '#lib/calendar.ts';
 	import { dayLabel, localMidnight } from '#lib/dates.ts';
-	import { agendaNote, agendaTitle } from '#lib/home.ts';
+	import { agendaNote, agendaTitle, isCancelled } from '#lib/home.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { CalendarItem } from '#lib/types.ts';
 
@@ -23,7 +23,7 @@
 				<ul>
 					{#each day.items as item, i (`${day.date}:${i}`)}
 						<li>
-							<a class="row {item.kind}" href={itemHref(item)}>
+							<a class="row {item.kind}" class:cancelled={isCancelled(item)} href={itemHref(item)}>
 								<span class="time">{itemTime(item, timeZone)}</span>
 								<span class="what">
 									<span class="title">
@@ -87,6 +87,12 @@
 	}
 	.row.match {
 		border-left-color: var(--b);
+	}
+	.row.cancelled {
+		opacity: 0.6;
+	}
+	.row.cancelled .title {
+		text-decoration: line-through;
 	}
 	.time {
 		flex: none;
