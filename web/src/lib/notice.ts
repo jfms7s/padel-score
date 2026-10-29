@@ -7,7 +7,7 @@ import { strings } from './strings';
 import type { NoticePayload } from './types';
 
 const t = strings.notices;
-const HOME = '/calendar';
+const HOME = '/';
 
 export interface NoticeText {
 	title: string;

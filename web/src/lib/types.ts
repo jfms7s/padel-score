@@ -1128,6 +1128,10 @@ export type CalendarItem =
 			end: number;
 			players: string[];
 			state: GameState;
+			/** Where the board plays, if it says. */
+			board_place: string | null;
+			/** The caller's index in `players`. */
+			me: number;
 	  }
 	| {
 			kind: 'event';
@@ -1142,6 +1146,9 @@ export type CalendarItem =
 			team: string[] | null;
 			place_in_line: number | null;
 			status: EventStatus;
+			/** Teams signed up, and the cap if there is one. */
+			teams: number;
+			max_teams: number | null;
 	  }
 	| {
 			kind: 'match';
@@ -1152,6 +1159,7 @@ export type CalendarItem =
 			/** The four places in order; null is an open place. */
 			players: (string | null)[];
 			state: ScheduledState;
+			owner_name: string;
 	  };
 
 export type WaitingItem =

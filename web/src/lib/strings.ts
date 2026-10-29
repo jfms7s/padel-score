@@ -1020,6 +1020,30 @@ export const strings = {
 		pushNotNow: 'Not now'
 	},
 
+	// Home: live matches, what waits for you, and this week.
+	home: {
+		title: 'Home',
+		live: 'Live now',
+		resume: 'Resume',
+		older: (n: number) => (n === 1 ? '1 older unfinished match · tidy up' : `${n} older unfinished matches · tidy up`),
+		offlineHint: 'Offline: matches started on this device',
+		waiting: 'Waiting for you',
+		claims: (n: number) => (n === 1 ? '1 claim to approve' : `${n} claims to approve`),
+		review: 'Review',
+		week: 'This week',
+		withYou: (others: string) => `${others} & you`,
+		matchBy: (name: string) => `${name}’s match`,
+		game: 'Game',
+		short: 'needs a player',
+		inLine: 'in line',
+		teams: (n: number) => `${n} teams`,
+		open: (n: number) => `${n} open`,
+		selected: 'Selected',
+		openBoard: 'Open on the board',
+		openPage: 'Open',
+		nothing: 'Nothing planned this week.'
+	},
+
 	// Game boards: the board page, the week grid and the new-board form.
 	boards: {
 		newBoard: 'New board',

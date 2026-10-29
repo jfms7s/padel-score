@@ -99,7 +99,7 @@ export function itemHref(item: CalendarItem | OpenItem): string {
 			return `/b/${enc(item.board_token)}?game=${enc(item.game_id)}`;
 		case 'event':
 			if ('event_id' in item && item.event_id) return `/events/${enc(item.event_id)}`;
-			return item.join_token ? `/j/${enc(item.join_token)}` : '/calendar';
+			return item.join_token ? `/j/${enc(item.join_token)}` : '/';
 		case 'match':
 			return `/j/${enc(item.join_token)}`;
 	}

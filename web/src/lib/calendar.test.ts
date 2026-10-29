@@ -27,6 +27,8 @@ const game = (start: number, over: Partial<Extract<CalendarItem, { kind: 'game' 
 	end: start + 5400,
 	players: ['Ana', 'Rui', 'Marta', 'Joana'],
 	state: 'full',
+	board_place: null,
+	me: 0,
 	...over
 });
 const event = (starts_at: number, over: Partial<Extract<CalendarItem, { kind: 'event' }>> = {}): CalendarItem => ({
@@ -41,6 +43,8 @@ const event = (starts_at: number, over: Partial<Extract<CalendarItem, { kind: 'e
 	team: ['Ana', 'Rui'],
 	place_in_line: null,
 	status: 'setup',
+	teams: 0,
+	max_teams: 8,
 	...over
 });
 const match = (starts_at: number, over: Partial<Extract<CalendarItem, { kind: 'match' }>> = {}): CalendarItem => ({
@@ -51,6 +55,7 @@ const match = (starts_at: number, over: Partial<Extract<CalendarItem, { kind: 'm
 	role: 'player',
 	players: ['Ana', null, null, null],
 	state: 'open',
+	owner_name: 'Marta',
 	...over
 });
 const cal = (items: CalendarItem[]): Calendar => ({ waiting: [], items, boards: [], open: [] });
@@ -143,9 +148,9 @@ describe('itemHref', () => {
 		).toBe('/j/o2');
 	});
 
-	it('encodes what is not url safe and falls back to the calendar without a link', () => {
+	it('encodes what is not url safe and falls back to Home without a link', () => {
 		expect(itemHref(game(1, { board_token: 'a/b', game_id: 'c d' }))).toBe('/b/a%2Fb?game=c%20d');
-		expect(itemHref(event(1, { join_token: null }))).toBe('/calendar');
+		expect(itemHref(event(1, { join_token: null }))).toBe('/');
 	});
 });
 
