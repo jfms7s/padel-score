@@ -31,7 +31,7 @@ pub(crate) async fn calendar_matches_in(
 ) -> Result<Vec<(String, CalendarItem)>, StoreError> {
     let rows: Vec<MatchRow> = sqlx::query_as(
         "SELECT s.id, s.owner_user_id, u.display_name, s.join_token, s.starts_at, \
-         s.place, s.cancelled_at IS NOT NULL, s.started_at IS NOT NULL \
+         s.place, s.cancelled_at IS NOT NULL, s.match_id IS NOT NULL \
          FROM scheduled_matches s JOIN users u ON u.id = s.owner_user_id \
          WHERE s.starts_at >= ?1 AND (s.owner_user_id = ?2 \
            OR EXISTS (SELECT 1 FROM scheduled_places p LEFT JOIN players pl ON pl.id = p.player_id \
@@ -90,7 +90,7 @@ pub(crate) async fn open_matches_in(
         "SELECT s.join_token, u.display_name, s.starts_at, s.place, \
            (SELECT COUNT(*) FROM scheduled_places p WHERE p.scheduled_id = s.id) AS filled \
          FROM scheduled_matches s JOIN users u ON u.id = s.owner_user_id \
-         WHERE s.listing = 'public' AND s.cancelled_at IS NULL AND s.started_at IS NULL \
+         WHERE s.listing = 'public' AND s.cancelled_at IS NULL AND s.match_id IS NULL \
          AND s.starts_at > ?1 AND s.owner_user_id != ?2 AND filled < ?4 \
          AND NOT EXISTS (SELECT 1 FROM scheduled_places p \
            LEFT JOIN players pl ON pl.id = p.player_id \
@@ -127,7 +127,7 @@ pub(crate) async fn queue_short_matches_in(tx: &mut Tx<'_>, now: i64) -> Result<
     let due: Vec<(String, String, String, i64)> = sqlx::query_as(
         "SELECT s.id, s.join_token, u.display_name, s.starts_at FROM scheduled_matches s \
          JOIN users u ON u.id = s.owner_user_id \
-         WHERE s.cancelled_at IS NULL AND s.started_at IS NULL \
+         WHERE s.cancelled_at IS NULL AND s.match_id IS NULL \
          AND s.starts_at > ?1 AND s.starts_at <= ?1 + ?2 \
          AND (SELECT COUNT(*) FROM scheduled_places p WHERE p.scheduled_id = s.id) = 3 \
          ORDER BY s.starts_at, s.id",

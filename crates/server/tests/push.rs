@@ -429,6 +429,97 @@ async fn gone_subscription_is_deleted() {
 }
 
 #[tokio::test]
+async fn a_404_deletes_the_subscription_like_a_410() {
+    let (mut state, pool, _app, admin, _raw) = with_admin().await;
+    let fake = FakeTransport::answering(&[404]);
+    with_fake(&mut state, &fake);
+    state
+        .store
+        .save_push_subscription(&admin, &typed("https://push.example.test/old"), 1_000)
+        .await
+        .unwrap();
+    state
+        .store
+        .queue(&[test_notice(&admin, None)], 1_000)
+        .await
+        .unwrap();
+    let report = send_pending(&state, 1_010).await;
+    assert_eq!(
+        report,
+        SendReport {
+            sent: 0,
+            gone: 1,
+            failed: 0
+        }
+    );
+    assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 0);
+    assert_eq!(outbox(&pool).await[0].2, Some(1_010));
+}
+
+/// Answers by endpoint, so a test can say which device takes it, is gone or fails.
+struct ByEndpoint;
+
+impl PushTransport for ByEndpoint {
+    fn send(&self, req: http::Request<Vec<u8>>) -> BoxFuture<'_, Result<u16, String>> {
+        let status = match req.uri().path() {
+            "/gone" => 404,
+            "/broken" => 500,
+            _ => 201,
+        };
+        Box::pin(async move { Ok(status) })
+    }
+}
+
+#[tokio::test]
+async fn mixed_device_outcomes_are_counted_and_acted_on_per_device() {
+    let (mut state, pool, _app, admin, _raw) = with_admin().await;
+    let transport: Arc<dyn PushTransport> = Arc::new(ByEndpoint);
+    state.push = Arc::new(Pusher::new(transport));
+    for endpoint in ["ok", "gone", "broken"] {
+        state
+            .store
+            .save_push_subscription(
+                &admin,
+                &typed(&format!("https://push.example.test/{endpoint}")),
+                1_000,
+            )
+            .await
+            .unwrap();
+    }
+    state
+        .store
+        .queue(&[test_notice(&admin, None)], 1_000)
+        .await
+        .unwrap();
+    let report = send_pending(&state, 1_010).await;
+    assert_eq!(
+        report,
+        SendReport {
+            sent: 1,
+            gone: 1,
+            failed: 1
+        }
+    );
+    // Only the gone device is deleted; the failing one stays for later notices.
+    let left: Vec<String> =
+        sqlx::query_scalar("SELECT endpoint FROM push_subscriptions ORDER BY endpoint")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        left,
+        [
+            "https://push.example.test/broken",
+            "https://push.example.test/ok"
+        ]
+    );
+    // One device took it, so the row is done at once with no retry counted.
+    let row = &outbox(&pool).await[0];
+    assert_eq!((row.1, row.2), (0, Some(1_010)));
+    assert_eq!(send_pending(&state, 1_020).await, SendReport::default());
+}
+
+#[tokio::test]
 async fn failed_send_is_retried_then_dropped() {
     let (mut state, pool, _app, admin, _raw) = with_admin().await;
     let fake = FakeTransport::answering(&[500, 500, 500]);

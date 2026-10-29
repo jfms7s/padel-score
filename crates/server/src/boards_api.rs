@@ -24,7 +24,7 @@
 //!   .../guests/{guest_id}/claim` (a signed-in user takes the guest's place) are 200
 //!   [`BoardView`].
 //! - `POST /api/boards/{token}/games/{game_id}/start`, with no body, is 200 [`StartPlayers`]: the
-//!   game's four players as the caller's own player entries, for New match. It is allowed from
+//!   game's two to four players as the caller's own player entries, for New match. It is allowed from
 //!   30 minutes before the game until its end; `not_yet`, `game_over`,
 //!   `already_started` or `board_over` otherwise, and 404 for a non-player.
 //! - `POST /api/board-requests/{id}/accept` and `.../decline`, with no body, answer a request

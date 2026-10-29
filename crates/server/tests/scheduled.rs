@@ -939,3 +939,151 @@ async fn starting_a_short_match_over_http_is_refused() {
         .unwrap();
     assert_eq!(live, 0);
 }
+
+// ---- deferred minors: B2 and B3 ----
+
+/// Slot 0 is an entry "Ula" of the owner's linked to a new account; slots 1-2 are joined users,
+/// so three places are filled. Returns (store, pool, owner, view, ula entry, ula account).
+async fn with_linked_entry() -> (Store, SqlitePool, String, ScheduledView, String, String) {
+    let (s, pool) = setup().await;
+    let owner = user(&s, "Owner").await;
+    let ula = user(&s, "Ula").await;
+    let (entry, _) = s.create_or_get_player(&owner, "Ula", 1).await.unwrap();
+    link(&pool, &entry.id, &ula).await;
+    let mut new = new_at(START);
+    new.places = [Some(entry.id.clone()), None, None, None];
+    let v = s.create_scheduled(&owner, new, T0).await.unwrap();
+    for n in ["Ana", "Rui"] {
+        let id = user(&s, n).await;
+        s.join_scheduled(&v.join_token, &id, T0 + 1).await.unwrap();
+    }
+    (s, pool, owner, v, entry.id, ula)
+}
+
+async fn calendar_match_players(s: &Store, user: &str) -> Option<Vec<Option<String>>> {
+    let cal = s.calendar(user, 0, T0).await.unwrap();
+    cal.items.into_iter().find_map(|i| match i {
+        padel_score_server::calendar::CalendarItem::Match { players, .. } => Some(players),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn deleting_the_started_match_makes_the_scheduled_one_startable_again() {
+    let (s, pool, owner, v, _who) = full().await;
+    let players = s.start_scheduled(&owner, &v.id, START).await.unwrap();
+    let from = players.from.clone();
+    let m = create_match_from(&s, new_match(&owner, &players), &from, START)
+        .await
+        .unwrap();
+    assert_eq!(
+        view(&s, &v.join_token, None, START + 1).await.state,
+        ScheduledState::Started
+    );
+    sqlx::query("DELETE FROM matches WHERE id = ?")
+        .bind(&m.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Not started any more: back in the window, joinable state, startable again.
+    let seen = view(&s, &v.join_token, None, START + 2).await;
+    assert_eq!(seen.state, ScheduledState::Full);
+    assert_eq!(seen.match_spectator_token, None);
+    let again = s.start_scheduled(&owner, &v.id, START + 3).await.unwrap();
+    let m2 = create_match_from(&s, new_match(&owner, &again), &from, START + 3)
+        .await
+        .unwrap();
+    assert_ne!(m2.id, m.id);
+    assert_eq!(
+        view(&s, &v.join_token, None, START + 4).await.state,
+        ScheduledState::Started
+    );
+}
+
+#[tokio::test]
+async fn deleting_the_started_match_brings_back_the_short_match_reminder() {
+    let (s, pool, owner, v, _who) = full().await;
+    let players = s.start_scheduled(&owner, &v.id, START).await.unwrap();
+    let from = players.from.clone();
+    let m = create_match_from(&s, new_match(&owner, &players), &from, START)
+        .await
+        .unwrap();
+    // Three filled places starting within a day are reminded of, unless the match is started.
+    sqlx::query("DELETE FROM scheduled_places WHERE scheduled_id = ? AND slot = 0")
+        .bind(&v.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let before = START - HOUR;
+    clear_outbox(&pool).await;
+    assert_eq!(s.queue_reminders(before).await.unwrap(), 0);
+    sqlx::query("DELETE FROM matches WHERE id = ?")
+        .bind(&m.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(s.queue_reminders(before).await.unwrap() > 0);
+    assert!(!users_of(&outbox(&pool).await, "match_short").is_empty());
+}
+
+#[tokio::test]
+async fn unlinking_an_entry_takes_the_account_out_of_the_place() {
+    let (s, pool, owner, v, entry, ula) = with_linked_entry().await;
+    // Linked: the account sees the match on its calendar and is told about changes.
+    assert!(calendar_match_players(&s, &ula).await.is_some());
+    sqlx::query("UPDATE players SET linked_user_id = NULL WHERE id = ?")
+        .bind(&entry)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let seen = view(&s, &v.join_token, Some(&owner), T0).await;
+    assert_eq!(seen.places[0].user_id, None);
+    assert_eq!(seen.places[0].name.as_deref(), Some("Ula"));
+    assert_eq!(
+        view(&s, &v.join_token, Some(&ula), T0)
+            .await
+            .me
+            .unwrap()
+            .slot,
+        None
+    );
+    assert!(calendar_match_players(&s, &ula).await.is_none());
+    clear_outbox(&pool).await;
+    s.update_scheduled(
+        &owner,
+        &v.id,
+        ScheduledChange {
+            starts_at: Some(START + HOUR),
+            place: None,
+        },
+        T0 + 10,
+    )
+    .await
+    .unwrap();
+    assert!(!users_of(&outbox(&pool).await, "match_changed").contains(&ula));
+    // The account is free to take a place itself again.
+    s.join_scheduled(&v.join_token, &ula, T0 + 11)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn relinking_an_entry_shows_the_new_account_as_a_player() {
+    let (s, pool, owner, v, entry, ula) = with_linked_entry().await;
+    sqlx::query("UPDATE players SET linked_user_id = NULL WHERE id = ?")
+        .bind(&entry)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let other = user(&s, "Other").await;
+    link(&pool, &entry, &other).await;
+    let seen = view(&s, &v.join_token, Some(&owner), T0).await;
+    assert_eq!(seen.places[0].user_id.as_deref(), Some(other.as_str()));
+    assert!(calendar_match_players(&s, &other).await.is_some());
+    assert!(calendar_match_players(&s, &ula).await.is_none());
+    clear_outbox(&pool).await;
+    s.cancel_scheduled(&owner, &v.id, T0 + 10).await.unwrap();
+    let told = users_of(&outbox(&pool).await, "match_cancelled");
+    assert!(told.contains(&other));
+    assert!(!told.contains(&ula));
+}

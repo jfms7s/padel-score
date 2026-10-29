@@ -2,10 +2,12 @@
 //! places that people take through its join link, a line for when it is full, and becomes a
 //! live match when the owner starts it (see [`crate::starting`]).
 //!
-//! A filled place holds an account (`user_id`: someone who joined, or a pre-filled entry linked
-//! to one), an entry of the owner's (`player_id`), or both; an open place has no row. Every write
-//! is one `BEGIN IMMEDIATE` transaction and only queues notices ([`queue_in`]); the HTTP layer
-//! wakes the push sender. No notice goes to the user whose request caused it.
+//! A filled place holds either an account (`user_id`: someone who joined) or an entry of the
+//! owner's (`player_id`: pre-filled at creation), never both; an open place has no row. A place
+//! holding an entry follows that entry's current link (`players.linked_user_id`), so linking or
+//! unlinking the entry changes who the place counts as. Every write is one `BEGIN IMMEDIATE`
+//! transaction and only queues notices ([`queue_in`]); the HTTP layer wakes the push sender. No
+//! notice goes to the user whose request caused it.
 
 mod calendar;
 mod organised;
@@ -140,7 +142,7 @@ macro_rules! select_scheduled {
     ($rest:literal) => {
         concat!(
             "SELECT s.id, s.owner_user_id, u.display_name, s.join_token, s.starts_at, s.place, \
-             s.listing, s.format, s.cancelled_at IS NOT NULL, s.started_at IS NOT NULL, \
+             s.listing, s.format, s.cancelled_at IS NOT NULL, s.match_id IS NOT NULL, \
              m.spectator_token \
              FROM scheduled_matches s JOIN users u ON u.id = s.owner_user_id \
              LEFT JOIN matches m ON m.id = s.match_id ",
@@ -476,9 +478,9 @@ async fn take_place_in(
 impl Store {
     /// Make a scheduled match for `owner`. The start is in the future, the place and format are
     /// valid and the pre-filled entries are the owner's active ones, each once (and each
-    /// account once). An entry linked to an account copies it into its place. The owner may
-    /// have [`MAX_OPEN_SCHEDULED_PER_OWNER`] matches that are not cancelled, started or past
-    /// (`Conflict("too_many_scheduled")`).
+    /// account once). Each entry's place holds the entry only and follows its current link. The
+    /// owner may have [`MAX_OPEN_SCHEDULED_PER_OWNER`] matches that are not cancelled, started or
+    /// past (`Conflict("too_many_scheduled")`).
     pub async fn create_scheduled(
         &self,
         owner: &str,
@@ -493,7 +495,7 @@ impl Store {
         let mut tx = self.begin().await?;
         let open: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM scheduled_matches WHERE owner_user_id = ? \
-             AND cancelled_at IS NULL AND started_at IS NULL AND starts_at + ? > ?",
+             AND cancelled_at IS NULL AND match_id IS NULL AND starts_at + ? > ?",
         )
         .bind(owner)
         .bind(MATCH_SECS)
@@ -533,14 +535,14 @@ impl Store {
         .bind(now)
         .execute(&mut *tx)
         .await?;
-        for (slot, player_id, user_id) in &picked {
+        // The place follows the entry's current link: no copy of the account is stored.
+        for (slot, player_id, _) in &picked {
             sqlx::query(
-                "INSERT INTO scheduled_places (scheduled_id, slot, user_id, player_id, joined_at) \
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO scheduled_places (scheduled_id, slot, player_id, joined_at) \
+                 VALUES (?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(i64::from(*slot))
-            .bind(user_id)
             .bind(player_id)
             .bind(now)
             .execute(&mut *tx)
@@ -818,7 +820,9 @@ pub(crate) async fn check_startable_in(
     Ok(())
 }
 
-/// Mark the match started by `match_id`, once.
+/// Mark the match started by `match_id`, once. A scheduled match is started while `match_id`
+/// is set; deleting the match (`ON DELETE SET NULL`) makes it startable again, so `started_at`
+/// is only the time it was last started and nothing reads it.
 pub(crate) async fn mark_started_in(
     tx: &mut Tx<'_>,
     id: &str,
@@ -827,7 +831,7 @@ pub(crate) async fn mark_started_in(
 ) -> Result<(), StoreError> {
     let done = sqlx::query(
         "UPDATE scheduled_matches SET match_id = ?, started_at = ? \
-         WHERE id = ? AND started_at IS NULL",
+         WHERE id = ? AND match_id IS NULL",
     )
     .bind(match_id)
     .bind(now)

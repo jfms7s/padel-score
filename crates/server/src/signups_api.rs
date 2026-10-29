@@ -178,7 +178,12 @@ async fn decline(
     SessionUser(user): SessionUser,
     ApiPath(ptoken): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
+    // The old link dies with the decline, so find the event first.
+    let invite = state.store.partner_invite(&ptoken).await?;
     state.store.decline_partner(&ptoken, &user.user.id).await?;
+    if let Some(invite) = invite {
+        changed_by_link(&state, &invite.join_token).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

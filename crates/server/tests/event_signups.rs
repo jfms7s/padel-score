@@ -1133,7 +1133,7 @@ async fn hand_added_teams_count_toward_the_minimum() {
 
 #[tokio::test]
 async fn deadline_job_leaves_other_events_alone() {
-    // Not due yet, sign-ups off, already closed, and already running are all skipped.
+    // Not due yet and already closed are skipped (sign-ups off and running events: next tests).
     let w = world(16).await;
     let s = &w.state.store;
     assert_eq!(s.close_due_signups(DEADLINE - 1).await.unwrap().len(), 0);
@@ -1142,6 +1142,50 @@ async fn deadline_job_leaves_other_events_alone() {
     assert_eq!(s.close_due_signups(DEADLINE).await.unwrap().len(), 0);
     assert_eq!(w.event_now().await.signups_closed_at, Some(T0 + 5));
     assert_eq!(w.event_now().await.status, Status::Setup);
+}
+
+#[tokio::test]
+async fn deadline_job_skips_events_with_signups_off() {
+    let w = world(16).await;
+    w.teams("T", 4).await;
+    sqlx::query("UPDATE competitions SET signups = 'off' WHERE id = ?")
+        .bind(&w.event)
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        w.state
+            .store
+            .close_due_signups(DEADLINE)
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(w.event_now().await.signups_closed_at, None);
+}
+
+#[tokio::test]
+async fn deadline_job_skips_running_events() {
+    let w = world(16).await;
+    w.teams("T", 4).await;
+    sqlx::query("UPDATE competitions SET status = 'running' WHERE id = ?")
+        .bind(&w.event)
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        w.state
+            .store
+            .close_due_signups(DEADLINE)
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
+    let ev = w.event_now().await;
+    assert_eq!(ev.status, Status::Running);
+    assert_eq!(ev.signups_closed_at, None);
 }
 
 #[tokio::test]
@@ -1463,4 +1507,200 @@ async fn closing_without_cancel_does_not_notify_the_organiser() {
     let closed = w.state.store.close_due_signups(DEADLINE).await.unwrap();
     assert!(!closed[0].cancelled);
     assert!(w.kinds(&w.owner).await.is_empty());
+}
+
+// ---- Deferred minors: take notices, line after a take, pending inviters, decline refresh ----
+
+#[tokio::test]
+async fn take_leaves_the_rest_on_the_line_not_in_team_places() {
+    let w = world(16).await;
+    let users = w.teams("T", 11).await;
+    w.take(T0 + 500).await.unwrap();
+    let list = w.list().await;
+    assert_eq!((list.teams.len(), list.line.len()), (8, 3));
+    assert_eq!(w.me(&users[7]).await, Some(MyEntry::Team { place: 8 }));
+    assert_eq!(w.me(&users[8]).await, Some(MyEntry::Line { place: 1 }));
+    assert_eq!(w.me(&users[10]).await, Some(MyEntry::Line { place: 3 }));
+}
+
+#[tokio::test]
+async fn a_later_take_tells_the_entry_that_was_left_out_it_is_in() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 7).await;
+    w.take(T0 + 500).await.unwrap();
+    assert_eq!(w.kinds(&users[6]).await, ["no_place"]);
+    // Days pass: the tick prunes the outbox, so only the sign-up row remembers the notice.
+    w.state.store.prune_push_outbox(i64::MAX).await.unwrap();
+    assert!(w.kinds(&users[6]).await.is_empty());
+    // A hand-added team makes room for the one left over.
+    w.hand_team("Hand A", "Hand B").await;
+    let report = w.take(T0 + 600).await.unwrap();
+    assert_eq!(report.taken, 1);
+    assert_eq!(w.kinds(&users[6]).await, ["moved_up"]);
+    // Entries taken the first time are not told anything.
+    assert!(w.kinds(&users[0]).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_taken_entry_never_told_no_place_gets_no_notice() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 6).await;
+    w.take(T0 + 500).await.unwrap();
+    for u in &users {
+        assert!(w.kinds(u).await.is_empty(), "{u}");
+    }
+}
+
+#[tokio::test]
+async fn the_deadline_tells_pending_inviters_they_have_no_place() {
+    let w = world(16).await;
+    let users = w.teams("T", 4).await;
+    let inviter = w.user("Inviter").await;
+    w.invite(&inviter, T0 + 20).await;
+    let s = &w.state.store;
+    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap().len(), 1);
+    assert_eq!(w.kinds(&inviter).await, ["no_place"]);
+    let notices = w.notices(&inviter).await;
+    assert_eq!(notices[0]["url"], format!("/j/{}", w.token));
+    assert!(w.kinds(&users[0]).await.is_empty());
+    // Once only, whatever tells them again.
+    s.close_due_signups(DEADLINE + 60).await.unwrap();
+    assert_eq!(w.kinds(&inviter).await, ["no_place"]);
+}
+
+#[tokio::test]
+async fn a_cancelled_deadline_does_not_add_no_place_for_inviters() {
+    let w = world(16).await;
+    let inviter = w.user("Inviter").await;
+    w.invite(&inviter, T0 + 20).await;
+    w.state.store.close_due_signups(DEADLINE).await.unwrap();
+    assert_eq!(w.event_now().await.status, Status::Cancelled);
+    assert_eq!(w.kinds(&inviter).await, ["event_cancelled"]);
+}
+
+#[tokio::test]
+async fn declining_a_partner_link_tells_the_events_stream() {
+    let w = live_world().await;
+    let (_, c_raw) = fast_user(&w.state, "sam@y.test", "Sam").await;
+    let (_, d_raw) = fast_user(&w.state, "tea@y.test", "Tea").await;
+    let join = format!("/api/join/{}", w.token);
+    let body = Some(json!({ "as": "partner" }));
+    let res = w.call(&c_raw, Method::POST, &join, body).await;
+    let ptoken = res.body["partner_token"].as_str().unwrap().to_owned();
+    let mut rx = w.state.hub.subscribe_event(&w.event);
+    let decline = format!("/api/partner/{ptoken}/decline");
+    let res = w.call(&d_raw, Method::POST, &decline, None).await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    assert!(rx.try_recv().is_ok(), "the event stream was not told");
+}
+
+#[tokio::test]
+async fn a_take_before_the_deadline_tells_pending_inviters_once() {
+    let w = non_stop_world(10).await;
+    w.teams("T", 4).await;
+    let inviter = w.user("Inviter").await;
+    w.invite(&inviter, T0 + 20).await;
+    w.take(T0 + 500).await.unwrap();
+    assert_eq!(w.kinds(&inviter).await, ["no_place"]);
+    // The deadline job leaves a closed event alone, so nothing repeats.
+    w.state.store.close_due_signups(DEADLINE).await.unwrap();
+    assert_eq!(w.kinds(&inviter).await, ["no_place"]);
+}
+
+#[tokio::test]
+async fn the_organiser_as_pending_inviter_is_not_told_at_the_deadline() {
+    let w = world(16).await;
+    w.teams("T", 4).await;
+    let owner = w.owner.clone();
+    w.invite(&owner, T0 + 20).await;
+    w.state.store.close_due_signups(DEADLINE).await.unwrap();
+    assert!(w.kinds(&owner).await.is_empty());
+}
+
+#[tokio::test]
+async fn removing_a_taken_team_moves_it_down_and_nobody_moves_up_until_another_take() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 7).await;
+    w.take(T0 + 500).await.unwrap();
+    let team: String =
+        sqlx::query_scalar("SELECT taken_team_id FROM event_signups WHERE user1_id = ?")
+            .bind(&users[0])
+            .fetch_one(&w.pool)
+            .await
+            .unwrap();
+    w.state
+        .store
+        .delete_team(&w.owner, &w.event, &team, T0 + 600)
+        .await
+        .unwrap();
+    assert_eq!(w.kinds(&users[0]).await, ["moved_down"]);
+    assert_eq!(w.me(&users[0]).await, Some(MyEntry::Line { place: 1 }));
+    // The one that was already on the line stays there, untold, until the organiser takes again.
+    assert_eq!(w.kinds(&users[6]).await, ["no_place"]);
+    assert!(matches!(w.me(&users[6]).await, Some(MyEntry::Line { .. })));
+}
+
+impl World {
+    /// The team the organiser took for `user`'s sign-up.
+    async fn taken_team_of(&self, user: &str) -> String {
+        sqlx::query_scalar("SELECT taken_team_id FROM event_signups WHERE user1_id = ?")
+            .bind(user)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap()
+    }
+
+    async fn remove_taken(&self, user: &str, at: i64) {
+        let team = self.taken_team_of(user).await;
+        self.state
+            .store
+            .delete_team(&self.owner, &self.event, &team, at)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn an_entry_left_out_again_after_being_taken_is_told_no_place_again() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 7).await;
+    let x = &users[6];
+    // Take 1: six of seven, X left out.
+    w.take(T0 + 500).await.unwrap();
+    assert_eq!(w.kinds(x).await, ["no_place"]);
+    // Take 2: a hand-added team makes room, X is in. The outbox is not pruned in between.
+    w.hand_team("Hand A", "Hand B").await;
+    assert_eq!(w.take(T0 + 600).await.unwrap().taken, 1);
+    assert_eq!(w.kinds(x).await, ["no_place", "moved_up"]);
+    // The organiser removes X's team and two more, then hand-adds one: Take 3 has room for two
+    // of the three back on the line, and X signed up last.
+    for u in [x, &users[0], &users[1]] {
+        w.remove_taken(u, T0 + 700).await;
+    }
+    w.hand_team("Hand C", "Hand D").await;
+    assert_eq!(w.take(T0 + 800).await.unwrap().taken, 2);
+    assert_eq!(
+        w.kinds(x).await,
+        ["no_place", "moved_up", "moved_down", "no_place"]
+    );
+    assert!(matches!(w.me(x).await, Some(MyEntry::Line { .. })));
+}
+
+#[tokio::test]
+async fn removing_every_taken_team_moves_nobody_up() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 7).await;
+    w.take(T0 + 500).await.unwrap();
+    for u in &users[..6] {
+        w.remove_taken(u, T0 + 600).await;
+    }
+    // Nobody was taken, so nobody is in: the one left out still waits, untold.
+    assert_eq!(w.kinds(&users[6]).await, ["no_place"]);
+    assert!(matches!(w.me(&users[6]).await, Some(MyEntry::Line { .. })));
+    for u in &users[..6] {
+        assert_eq!(w.kinds(u).await, ["moved_down"], "{u}");
+        assert!(matches!(w.me(u).await, Some(MyEntry::Line { .. })), "{u}");
+    }
+    let list = w.list().await;
+    assert_eq!((list.teams.len(), list.line.len()), (0, 7));
 }

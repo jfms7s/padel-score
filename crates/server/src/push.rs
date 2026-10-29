@@ -675,6 +675,15 @@ async fn finish_row(store: &Store, id: i64, sent_at: Option<i64>, attempts: i64)
     }
 }
 
+/// Whether the sender runs another batch straight away: only after a full batch that made
+/// progress (a device took a notice or was dropped), and not once shutdown has begun. A full
+/// batch that all failed waits for the next wake or interval instead of spinning on a dead push
+/// service.
+fn run_another_batch(taken: i64, report: &SendReport, shutting_down: bool) -> bool {
+    let progressed = report.sent + report.gone > 0;
+    taken >= BATCH && progressed && !shutting_down
+}
+
 /// Send queued notices when woken and every 30 s, until the shutdown token fires. A full batch
 /// is followed at once by the next only if it made progress (a device took a notice or was
 /// dropped); a full batch that all failed waits for the next wake or interval.
@@ -697,8 +706,7 @@ pub async fn run_sender(state: AppState) {
                     "push pass done"
                 );
             }
-            let progressed = report.sent + report.gone > 0;
-            if taken < BATCH || !progressed || state.shutdown.is_cancelled() {
+            if !run_another_batch(taken, &report, state.shutdown.is_cancelled()) {
                 break;
             }
         }
@@ -709,6 +717,23 @@ pub async fn run_sender(state: AppState) {
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    fn report(sent: usize, gone: usize, failed: usize) -> SendReport {
+        SendReport { sent, gone, failed }
+    }
+
+    #[test]
+    fn sender_continues_only_after_a_full_batch_that_made_progress() {
+        assert!(run_another_batch(BATCH, &report(1, 0, 99), false));
+        assert!(run_another_batch(BATCH, &report(0, 1, 99), false));
+        // A short batch means the queue is drained.
+        assert!(!run_another_batch(BATCH - 1, &report(5, 0, 0), false));
+        // A full batch that all failed would spin on a dead push service.
+        assert!(!run_another_batch(BATCH, &report(0, 0, 100), false));
+        assert!(!run_another_batch(BATCH, &report(0, 0, 0), false));
+        // Shutdown always stops it.
+        assert!(!run_another_batch(BATCH, &report(1, 0, 0), true));
+    }
 
     fn ip(text: &str) -> IpAddr {
         text.parse().unwrap()

@@ -84,6 +84,29 @@ async fn auto_entry_for_the_owner_themself_is_not_automatic() {
 }
 
 #[tokio::test]
+async fn unlinking_clears_the_automatic_flag() {
+    let (s, pool) = setup().await;
+    let ana = user(&s, "ana@example.com", "Ana").await;
+    let rui = user(&s, "rui@example.com", "Rui").await;
+    let id = auto(&s, &ana, &rui).await.unwrap();
+    assert_eq!(flag(&pool, &id).await.0, 1);
+    s.unlink(&ana, &id).await.unwrap();
+    let (mark, linked, _) = flag(&pool, &id).await;
+    assert_eq!((mark, linked), (0, None));
+}
+
+#[tokio::test]
+async fn unlinking_yourself_clears_the_automatic_flag() {
+    let (s, pool) = setup().await;
+    let ana = user(&s, "ana@example.com", "Ana").await;
+    let rui = user(&s, "rui@example.com", "Rui").await;
+    let id = auto(&s, &ana, &rui).await.unwrap();
+    s.unlink_self(&rui, &id).await.unwrap();
+    let (mark, linked, _) = flag(&pool, &id).await;
+    assert_eq!((mark, linked), (0, None));
+}
+
+#[tokio::test]
 async fn auto_entry_reuses_an_existing_linked_entry() {
     let (s, pool) = setup().await;
     let ana = user(&s, "ana@example.com", "Ana").await;
