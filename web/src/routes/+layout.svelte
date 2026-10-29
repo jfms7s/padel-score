@@ -6,7 +6,8 @@
 	import { updatesHeld } from '#lib/holds.svelte.ts';
 	import { bootSession, session } from '#lib/session.ts';
 	import AppRail from '#lib/components/AppRail.svelte';
-	import { chromeOf } from '#lib/nav.ts';
+	import TabBar from '#lib/components/TabBar.svelte';
+	import { chromeOf, initials } from '#lib/nav.ts';
 	import { safeSessionStorage } from '#lib/storage.ts';
 	import { strings } from '#lib/strings.ts';
 	import { SHOWN_MS, markReload, mayReload, reloadNow, updateScreen } from '#lib/update.ts';
@@ -19,8 +20,8 @@
 	});
 
 	// The fence, court and spectator screens are full-screen and anonymous-friendly: no header there.
-	const bare = $derived(chromeOf(page.url.pathname) === 'bare');
-	const railed = $derived(!bare && $session.status === 'signed_in');
+	const chrome = $derived(chromeOf(page.url.pathname));
+	const navved = $derived(chrome === 'app' && $session.status === 'signed_in');
 	const onLogin = $derived(page.url.pathname === '/login');
 
 	// A new deploy: SvelteKit notices it (on focus, on return and every minute); switch to it
@@ -63,25 +64,45 @@
 	<title>{strings.appName}</title>
 </svelte:head>
 
-{#if railed && $session.status === 'signed_in'}
+{#if navved && $session.status === 'signed_in'}
 	<AppRail pathname={page.url.pathname} name={$session.me.display_name} />
+	<TabBar pathname={page.url.pathname} />
 {/if}
 
-<div class:has-rail={railed}>
-	{#if !bare}
-		<header class:railed class="page-wide">
+<div class:has-nav={navved}>
+	{#if chrome === 'standalone'}
+		<header class="brand page-wide">
+			{#if $session.status === 'signed_in'}
+				<a class="home" href="/">{strings.appName}</a>
+			{:else}
+				<span class="home">{strings.appName}</span>
+			{/if}
+			{#if $session.status === 'signed_out'}
+				<nav aria-label={strings.auth.header}>
+					<a href="/login">{strings.auth.signIn}</a>
+				</nav>
+			{/if}
+		</header>
+	{:else if chrome !== 'bare'}
+		<header class:navved class="page-wide">
 			{#if page.url.pathname === '/'}
 				<span></span>
 			{:else}
 				<a class="home" href="/">{strings.appName}</a>
 			{/if}
-			<nav aria-label={strings.auth.header}>
-				{#if $session.status === 'signed_in'}
-					<a href="/account">{$session.me.display_name}</a>
-				{:else if $session.status === 'signed_out' && !onLogin}
-					<a href="/login">{strings.auth.signIn}</a>
-				{/if}
-			</nav>
+			{#if navved && $session.status === 'signed_in'}
+				<a class="circle" href="/account" aria-label={strings.nav.account}>
+					{initials($session.me.display_name)}
+				</a>
+			{:else}
+				<nav aria-label={strings.auth.header}>
+					{#if $session.status === 'signed_in'}
+						<a href="/account">{$session.me.display_name}</a>
+					{:else if $session.status === 'signed_out' && !onLogin}
+						<a href="/login">{strings.auth.signIn}</a>
+					{/if}
+				</nav>
+			{/if}
 		</header>
 	{/if}
 
@@ -93,13 +114,52 @@
 {/if}
 
 <style>
-	@media (min-width: 1100px) {
-		.has-rail {
-			padding-left: 72px;
+	.has-nav {
+		padding-bottom: calc(76px + env(safe-area-inset-bottom));
+	}
+	@media (min-width: 700px) {
+		.has-nav {
+			padding-bottom: 0;
+			padding-left: 64px;
 		}
-		header.railed {
+		header.navved {
 			display: none;
 		}
+	}
+	@media (min-width: 1100px) {
+		.has-nav {
+			padding-left: 72px;
+		}
+	}
+	.brand .home,
+	.brand a {
+		font-size: 13px;
+		font-weight: 800;
+		font-variation-settings: 'wdth' 75;
+		color: var(--muted);
+	}
+	.brand .home {
+		display: inline-flex;
+		align-items: center;
+		min-height: var(--tap);
+	}
+	.circle {
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		min-height: 32px;
+		border-radius: 50%;
+		background: var(--a);
+		color: var(--on-team);
+		font-size: 12px;
+		font-weight: 800;
+		text-decoration: none;
+		position: relative;
+	}
+	.circle::after {
+		content: '';
+		position: absolute;
+		inset: -8px;
 	}
 	header {
 		padding-top: 4px;

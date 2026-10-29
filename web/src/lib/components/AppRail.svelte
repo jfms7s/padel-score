@@ -29,7 +29,12 @@
 		</svg>
 	</a>
 	{#each items as item (item.key)}
-		<a href={item.href} class:current={item.current} aria-current={item.current ? 'page' : undefined}>
+		<a
+			href={item.href}
+			class:current={item.current}
+			class:plus={item.key === 'new'}
+			aria-current={item.current ? 'page' : undefined}
+		>
 			<svg
 				viewBox="0 0 24 24"
 				width="24"
@@ -55,7 +60,7 @@
 	nav {
 		position: fixed;
 		inset: 0 auto 0 0;
-		width: 72px;
+		width: 64px;
 		display: none;
 		flex-direction: column;
 		align-items: stretch;
@@ -65,9 +70,17 @@
 		border-right: 1px solid var(--line);
 		z-index: 10;
 	}
-	@media (min-width: 1100px) {
+	@media (min-width: 700px) {
 		nav {
 			display: flex;
+		}
+	}
+	@media (min-width: 1100px) {
+		nav {
+			width: 72px;
+		}
+		a span {
+			font-size: 11px;
 		}
 	}
 	a {
@@ -83,13 +96,23 @@
 		text-decoration: none;
 	}
 	a span {
-		font-size: 11px;
+		font-size: 10px;
 		font-weight: 650;
 		line-height: 1.1;
 		text-align: center;
 	}
 	a.current {
 		background: var(--a-soft);
+	}
+	a.plus svg {
+		box-sizing: content-box;
+		padding: 8px;
+		border-radius: 12px;
+		background: var(--ink);
+		color: var(--glass);
+	}
+	a.plus.current {
+		background: none;
 	}
 	.logo {
 		margin-bottom: 8px;
