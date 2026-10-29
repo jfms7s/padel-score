@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bySegment, organiseRows, segmentFromQuery, type OrganiseRow } from './organise';
+import { bySegment, organiseRows, segmentFromQuery, signupsOpen, type OrganiseRow } from './organise';
 import type { Organised, OrganisedBoard, OrganisedEvent, OrganisedMatch } from './types';
 
 const NOW = 1_790_000_000;
@@ -122,6 +122,12 @@ describe('organiseRows: events', () => {
 			'4 in line'
 		);
 	});
+	it('closed early: no "Sign-ups close", status chip, line_count needs', () => {
+		const e = event({ line_count: 4, signups_closed_at: NOW - H }, { signups: 'public', deadline_at: NOW + 24 * H });
+		const r = one({ events: [e] });
+		expect(r.needs).toBe('4 in line');
+		expect(r.chip).toBe('Setting up');
+	});
 	it('needs: people in line', () => {
 		expect(one({ events: [event({ line_count: 2 })] }).needs).toBe('2 in line');
 	});
@@ -239,5 +245,14 @@ describe('segmentFromQuery', () => {
 	it('defaults to coming', () => {
 		expect(segmentFromQuery(new URLSearchParams(''))).toBe('coming');
 		expect(segmentFromQuery(new URLSearchParams('seg=nope'))).toBe('coming');
+	});
+});
+
+describe('signupsOpen', () => {
+	it('is open only with sign-ups on, not closed and the deadline ahead', () => {
+		expect(signupsOpen(event({}, { signups: 'public' }), NOW)).toBe(true);
+		expect(signupsOpen(event({}, { signups: 'off' }), NOW)).toBe(false);
+		expect(signupsOpen(event({ signups_closed_at: NOW - 1 }, { signups: 'public' }), NOW)).toBe(false);
+		expect(signupsOpen(event({}, { signups: 'public', deadline_at: NOW - 1 }), NOW)).toBe(false);
 	});
 });

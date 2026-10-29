@@ -1507,8 +1507,10 @@ export const strings = {
 		listLabel: 'Your events, matches and boards',
 		summaryLabel: 'Summary',
 		needsYou: 'Needs you',
-		signupsText: (teams: number, solo: number, line: number) => `${teams} teams · ${solo} solo · ${line} in line`,
-		boardStats: (people: number, games: number) => `${people} people · ${games} games`
+		signupsText: (teams: number, solo: number, line: number) =>
+			`${teams === 1 ? '1 team' : `${teams} teams`} · ${solo} solo · ${line} in line`,
+		boardStats: (people: number, games: number) =>
+			`${people === 1 ? '1 person' : `${people} people`} · ${games === 1 ? '1 game' : `${games} games`}`
 	}
 } as const;
 

@@ -25,8 +25,17 @@ export interface OrganiseRow {
 
 const s = strings.organise;
 const enc = encodeURIComponent;
-/** An open or full match is past this long after its start, even before the server says so. */
+/**
+ * The server already reports `past` 90 minutes after a match starts, so this 3-hour rule is only a
+ * fallback for an open or full match whose state hasn't caught up.
+ */
 const STALE_MATCH_SECS = 3 * 3600;
+
+/** Sign-ups are on and not closed (by the deadline running out or the organiser taking the teams). */
+export function signupsOpen(e: OrganisedEvent, now: number): boolean {
+	const { signups, deadline_at } = e.schedule;
+	return signups !== 'off' && e.signups_closed_at === null && (deadline_at === null || deadline_at > now);
+}
 
 export function getOrganised(): Promise<Organised> {
 	return accountRequest('/api/me/organised', { signedIn: true });
@@ -35,13 +44,14 @@ export function getOrganised(): Promise<Organised> {
 const whenText = (t: number, timeZone?: string) => `${longDate(t, timeZone)} · ${timeText(t, timeZone)}`;
 
 function eventRow(e: OrganisedEvent, now: number, timeZone?: string): OrganiseRow {
-	const { starts_at, place, signups, deadline_at } = e.schedule;
+	const { starts_at, place, deadline_at } = e.schedule;
 	const segment: Segment = e.status === 'setup' ? 'coming' : e.status === 'running' ? 'running' : 'past';
+	const open = signupsOpen(e, now);
 	let needs: string | null = null;
 	if (segment === 'coming') {
 		if (starts_at !== null && now >= starts_at) needs = s.startOverdue;
 		else if (e.solo_count > 0) needs = s.solo(e.solo_count);
-		else if (signups !== 'off' && deadline_at !== null && deadline_at > now) {
+		else if (open && deadline_at !== null) {
 			needs = s.signupsClose(longDate(deadline_at, timeZone));
 		} else if (e.line_count > 0) needs = s.inLine(e.line_count);
 	}
@@ -51,7 +61,7 @@ function eventRow(e: OrganisedEvent, now: number, timeZone?: string): OrganiseRo
 		title: e.name,
 		when: starts_at === null ? s.noDate : whenText(starts_at, timeZone),
 		place,
-		chip: e.status === 'setup' && signups !== 'off' ? s.signups : strings.events.status[e.status],
+		chip: e.status === 'setup' && open ? s.signups : strings.events.status[e.status],
 		needs,
 		href: `/events/${enc(e.id)}`,
 		segment,

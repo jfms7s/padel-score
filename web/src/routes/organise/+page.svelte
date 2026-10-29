@@ -100,7 +100,7 @@
 						{#each rows as row (row.key)}
 							<li>
 								<a
-									class="row {row.kind}"
+									class="row {row.kind} {row.segment}"
 									href={row.href}
 									aria-current={wide && selected?.key === row.key ? 'true' : undefined}
 									onclick={(e) => pick(e, row)}
@@ -108,7 +108,7 @@
 									<span class="what">
 										<span class="first">
 											<strong>{row.title}</strong>
-											<span class="badge">{row.chip}</span>
+											<span class="badge" class:off={row.segment === 'past'}>{row.chip}</span>
 										</span>
 										<span class="hint">{row.place === null ? row.when : `${row.when} · ${row.place}`}</span>
 										{#if row.needs}<span class="needs">{row.needs}</span>{/if}
@@ -193,6 +193,9 @@
 	}
 	a.row.board {
 		border-left-color: var(--a);
+	}
+	a.row.past {
+		border-left-color: var(--line);
 	}
 	a.row:focus-visible {
 		outline: 2px solid var(--ink);

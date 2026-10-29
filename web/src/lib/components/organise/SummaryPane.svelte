@@ -2,7 +2,8 @@
 	// The Organise page's right-hand pane: the selected row in full, with its share and open actions.
 	import { longDate } from '#lib/dates.ts';
 	import { rulesText } from '#lib/events.ts';
-	import type { OrganiseRow } from '#lib/organise.ts';
+	import { signupsOpen, type OrganiseRow } from '#lib/organise.ts';
+	import { matchWhen } from '#lib/scheduled.ts';
 	import { shareLink } from '#lib/share.ts';
 	import { joinLink } from '#lib/signups.ts';
 	import { strings } from '#lib/strings.ts';
@@ -22,9 +23,11 @@
 	const match = $derived(row.kind === 'match' ? (data as OrganisedMatch) : null);
 	const board = $derived(row.kind === 'board' ? (data as OrganisedBoard) : null);
 
+	const now = Date.now() / 1000;
 	const signupsOn = $derived(ev !== null && ev.schedule.signups !== 'off');
+	const open = $derived(ev !== null && signupsOpen(ev, now));
 	const deskHref = $derived(
-		ev === null ? row.href : `/events/${enc(ev.id)}${ev.status === 'setup' && signupsOn ? '?tab=signups' : ''}`
+		ev === null ? row.href : `/events/${enc(ev.id)}${ev.status === 'setup' && open ? '?tab=signups' : ''}`
 	);
 	const details = $derived(
 		[row.when, row.place, ev ? rulesText(ev.format) : null].filter((p): p is string => p !== null && p !== '').join(' · ')
@@ -33,7 +36,7 @@
 		board !== null && longDate(board.ends_at) !== longDate(board.starts_at) ? longDate(board.ends_at) : null
 	);
 	const shareUrl = $derived.by(() => {
-		if (ev !== null && ev.join_token !== null && signupsOn) return joinLink(location.origin, ev.join_token);
+		if (ev !== null && ev.join_token !== null && open) return joinLink(location.origin, ev.join_token);
 		if (match !== null) return joinLink(location.origin, match.join_token);
 		if (board !== null) return `${location.origin}/b/${enc(board.token)}`;
 		return null;
@@ -47,10 +50,18 @@
 		note = null;
 	});
 
+	const shareTitle = $derived(
+		row.kind === 'board'
+			? strings.boards.shareTitle(row.title)
+			: match !== null
+				? strings.scheduled.shareTitle(matchWhen(match))
+				: strings.signups.shareTitle(row.title)
+	);
+
 	async function share() {
 		if (shareUrl === null) return;
 		note = null;
-		const result = await shareLink(shareUrl, strings.signups.shareTitle(row.title));
+		const result = await shareLink(shareUrl, shareTitle);
 		if (result === 'copied') note = strings.share.linkCopied;
 		else if (result === 'failed') note = strings.share.linkFailed;
 	}
@@ -74,7 +85,7 @@
 				<span style:width="{Math.min(100, (ev.signed_teams / barMax) * 100)}%"></span>
 			</div>
 			<p>{t.signupsText(ev.signed_teams, ev.solo_count, ev.line_count)}</p>
-			{#if ev.schedule.deadline_at !== null && ev.schedule.deadline_at > Date.now() / 1000}
+			{#if open && ev.schedule.deadline_at !== null}
 				<p class="hint">{t.signupsClose(longDate(ev.schedule.deadline_at))}</p>
 			{/if}
 		</div>
