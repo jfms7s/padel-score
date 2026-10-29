@@ -531,7 +531,28 @@ export const strings = {
 	},
 
 	// The results area.
-	results: { recordedLink: 'Matches I recorded ›' },
+	results: {
+		recordedLink: 'Matches I recorded ›',
+		title: 'Results',
+		played: 'Played',
+		recorded: 'Recorded',
+		won: 'Won',
+		lost: 'Lost',
+		draw: 'Draw',
+		recordedChip: 'Recorded',
+		hidden: 'Hidden',
+		findYourself: 'Are you in these matches? Find yourself in People and tap This is me.',
+		findYourselfLink: 'Go to People',
+		privacy: {
+			private: 'Only you',
+			coordinators: 'Coordinators you’ve played for',
+			public: 'Anyone with your profile link'
+		},
+		privacyRow: 'Who can see this',
+		change: 'Change',
+		placings: 'Placings',
+		empty: 'No results yet.'
+	},
 
 	// Events: the coordinator's screens, the court phone and the event's viewing page.
 	events: {
