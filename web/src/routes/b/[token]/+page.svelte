@@ -59,13 +59,13 @@
 	const guest = $derived(me?.guest === true);
 	const nameWithMark = (p: { name: string; guest: boolean }) => (p.guest ? `${p.name} (${t.guestMark})` : p.name);
 	const userSignedIn = $derived(me !== null && !guest);
+	const over = $derived(view?.board.over === true);
 	const guestRows = $derived(view ? guestsToPick(view) : []);
 	const wasGuest = $derived(
-		userSignedIn && view && !dismissedWereYou ? rememberedGuest(view, rememberedGuestId(token)) : null
+		userSignedIn && view && !over && !dismissedWereYou ? rememberedGuest(view, rememberedGuestId(token)) : null
 	);
 	const member = $derived(me?.member === true);
 	const creator = $derived(me?.creator === true);
-	const over = $derived(view?.board.over === true);
 	// Every time on the page is the viewer's own, like the notices.
 	const zone = browserTimeZone();
 	const myGames = $derived(
@@ -99,7 +99,14 @@
 			now = Math.floor(Date.now() / 1000);
 			loadFailure = null;
 			// A kept guest key the board no longer honours: the guest was removed.
-			if (next.me === null && guestKey(forToken) !== null) forgetGuest(forToken);
+			// A guest the open confirm step names may be gone by now.
+			if (confirming && typeof confirming !== 'string') {
+				const askedId = confirming.id;
+				if (!guestsToPick(next).some((g) => g.user_id === askedId)) confirming = null;
+			}
+			const heldId = rememberedGuestId(forToken);
+			if (guestKey(forToken) !== null && (next.me === null || (heldId !== null && !rememberedGuest(next, heldId))))
+				forgetGuest(forToken);
 			if (!askedForGame) {
 				askedForGame = true;
 				const wanted = page.url.searchParams.get('game');
@@ -176,7 +183,10 @@
 	async function leave() {
 		confirming = null;
 		act(async () => {
+			const asGuest = guest;
 			await leaveBoard(token);
+			// A guest has no home to go to: stay on the board, signed out, with the join form.
+			if (asGuest) return getBoard(token);
 			await goto('/');
 			return null;
 		});
