@@ -446,7 +446,7 @@
 			{:else}
 				<ol>
 					{#each freeNow as m (m.user_id)}
-						<li>{m.name}{#if m.user_id === me}<span class="you"> ({t.you})</span>{/if}</li>
+						<li>{m.name}{#if m.guest}<span class="hint"> ({t.guestMark})</span>{/if}{#if m.user_id === me}<span class="you"> ({t.you})</span>{/if}</li>
 					{/each}
 				</ol>
 			{/if}

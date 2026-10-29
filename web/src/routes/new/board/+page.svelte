@@ -16,6 +16,7 @@
 	let title = $state('');
 	let place = $state('');
 	let firstDay = $state(nextMonday(localDate(Date.now() / 1000, zone)));
+	let allowGuests = $state(false);
 	let busy = $state(false);
 	let failure = $state<string | null>(null);
 
@@ -33,6 +34,7 @@
 			const view = await createBoard({
 				title: name,
 				place: place.trim() === '' ? null : place.trim(),
+				allow_guests: allowGuests,
 				time_zone: zone,
 				starts_at: localMidnight(firstDay, zone),
 				ends_at: localMidnight(addDays(firstDay, 7), zone)
@@ -65,6 +67,11 @@
 				<input type="date" bind:value={firstDay} required />
 				<span class="hint">{t.firstDayHint}</span>
 			</label>
+			<label class="check">
+				<input type="checkbox" bind:checked={allowGuests} aria-describedby="allow-guests-note" />
+				<span>{t.allowGuests}</span>
+			</label>
+			<p class="hint" id="allow-guests-note">{t.allowGuestsNote}</p>
 			{#if failure}<p class="error" role="alert">{failure}</p>{/if}
 			<button class="primary" type="submit" disabled={busy}>{busy ? t.creating : t.create}</button>
 		</form>
