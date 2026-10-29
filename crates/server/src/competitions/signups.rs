@@ -345,12 +345,15 @@ impl Layout {
         complete.sort_by_key(|e| (!e.taken, e.complete_at, e.user1_at, e.rowid));
         solos.sort_by_key(|e| (e.user1_at, e.rowid));
         pending.sort_by_key(|e| (e.user1_at, e.rowid));
-        // Taken entries are teams of the event whatever the maximum says.
+        // Taken entries are teams of the event whatever the maximum says. Once the organiser has
+        // taken any, that is the end of the places: the rest wait on the line, even when the
+        // take stopped short of the maximum (a bracket or an even count).
         let taken = complete.iter().filter(|e| e.taken).count();
-        let room = max
-            .saturating_sub(hand_added)
-            .max(taken)
-            .min(complete.len());
+        let room = if taken > 0 {
+            taken
+        } else {
+            max.saturating_sub(hand_added).min(complete.len())
+        };
         let line = complete.split_off(room);
         Layout {
             hand_added,
@@ -463,6 +466,26 @@ fn notice(ev: &Competition, user: &str, kind: NoticeKind, name: Option<&str>) ->
         },
         dedupe: None,
     })
+}
+
+/// `no_place` for each of `users`, once per user and event (the dedupe key).
+fn no_place_notices<'a>(ev: &Competition, users: impl Iterator<Item = &'a str>) -> Vec<Notice> {
+    users
+        .filter_map(|user| {
+            let mut notice = notice(ev, user, NoticeKind::NoPlace, None)?;
+            notice.dedupe = Some(format!("no-place:{}:{user}", ev.id));
+            Some(notice)
+        })
+        .collect()
+}
+
+/// Whether `user` was told `no_place` for the event (as far as the outbox remembers).
+async fn told_no_place_in(tx: &mut Tx<'_>, event_id: &str, user: &str) -> Result<bool, StoreError> {
+    let told: Option<i64> = sqlx::query_scalar("SELECT 1 FROM push_outbox WHERE dedupe = ?")
+        .bind(format!("no-place:{event_id}:{user}"))
+        .fetch_optional(&mut **tx)
+        .await?;
+    Ok(told.is_some())
 }
 
 /// `team_complete` for both members, each told the other's name.
@@ -659,6 +682,9 @@ impl Store {
                 .bind(id)
                 .execute(&mut *tx)
                 .await?;
+            // An invitation nobody accepted by now will not become a team: tell the inviters.
+            let users = layout.pending.iter().flat_map(Entry::users);
+            queue_in(&mut tx, &no_place_notices(&ev, users), now).await?;
         }
         tx.commit().await?;
         Ok(Some(ClosedSignups {
@@ -741,18 +767,25 @@ impl Store {
         .await?;
 
         // Whoever is still waiting for a place, and was not set aside for a clash, is told once.
-        let no_place: Vec<Notice> = waiting
+        let left_out = waiting
             .iter()
             .filter(|e| !taken_ids.contains(e.id.as_str()) && !skipped.contains(&e.id))
             .flat_map(Entry::users)
+            .filter(|user| *user != owner);
+        queue_in(&mut tx, &no_place_notices(&ev, left_out), now).await?;
+        // Whoever was told there was no place, and is taken by this run after all, is told so.
+        let mut now_in = Vec::new();
+        for user in waiting
+            .iter()
+            .filter(|e| taken_ids.contains(e.id.as_str()))
+            .flat_map(Entry::users)
             .filter(|user| *user != owner)
-            .filter_map(|user| {
-                let mut notice = notice(&ev, user, NoticeKind::NoPlace, None)?;
-                notice.dedupe = Some(format!("no-place:{event_id}:{user}"));
-                Some(notice)
-            })
-            .collect();
-        queue_in(&mut tx, &no_place, now).await?;
+        {
+            if told_no_place_in(&mut tx, event_id, user).await? {
+                now_in.extend(notice(&ev, user, NoticeKind::MovedUp, None));
+            }
+        }
+        queue_in(&mut tx, &now_in, now).await?;
         tx.commit().await?;
         Ok(TakeReport {
             taken: taken_ids.len(),
@@ -1318,18 +1351,32 @@ mod tests {
             e
         })
         .collect();
-        // One place goes to a hand-added team: 4 - 1 = 3 left.
+        // One place goes to a hand-added team: 4 - 1 = 3 left, and the take of "taken" already
+        // ended the places, so the rest are the line.
         let layout = Layout::build(entries, 1, 4);
         let ids = |es: &[Entry]| es.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
-        assert_eq!(ids(&layout.teams), ["taken", "early", "tie-a"]);
-        assert_eq!(ids(&layout.line), ["tie-b", "late"]);
+        assert_eq!(ids(&layout.teams), ["taken"]);
+        assert_eq!(ids(&layout.line), ["early", "tie-a", "tie-b", "late"]);
         assert_eq!(ids(&layout.solos), ["solo"]);
         // Places count the hand-added team first; a line place counts from 1.
         assert_eq!(layout.my_entry("u4"), Some(MyEntry::Team { place: 2 }));
-        assert_eq!(layout.my_entry("u2"), Some(MyEntry::Team { place: 4 }));
-        assert_eq!(layout.my_entry("u3"), Some(MyEntry::Line { place: 2 }));
+        assert_eq!(layout.my_entry("u2"), Some(MyEntry::Line { place: 2 }));
+        assert_eq!(layout.my_entry("u3"), Some(MyEntry::Line { place: 4 }));
         assert_eq!(layout.my_entry("u6"), Some(MyEntry::Solo));
         assert_eq!(layout.my_entry("nobody"), None);
+    }
+
+    #[test]
+    fn layout_cuts_the_line_at_the_maximum_before_any_take() {
+        let entries = vec![
+            entry("early", "u1", Some(10), false),
+            entry("tie-a", "u2", Some(20), false),
+            entry("late", "u3", Some(30), false),
+        ];
+        let layout = Layout::build(entries, 1, 3);
+        let ids = |es: &[Entry]| es.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&layout.teams), ["early", "tie-a"]);
+        assert_eq!(ids(&layout.line), ["late"]);
     }
 
     #[test]

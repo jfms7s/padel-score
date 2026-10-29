@@ -1464,3 +1464,85 @@ async fn closing_without_cancel_does_not_notify_the_organiser() {
     assert!(!closed[0].cancelled);
     assert!(w.kinds(&w.owner).await.is_empty());
 }
+
+// ---- Deferred minors: take notices, line after a take, pending inviters, decline refresh ----
+
+#[tokio::test]
+async fn take_leaves_the_rest_on_the_line_not_in_team_places() {
+    let w = world(16).await;
+    let users = w.teams("T", 11).await;
+    w.take(T0 + 500).await.unwrap();
+    let list = w.list().await;
+    assert_eq!((list.teams.len(), list.line.len()), (8, 3));
+    assert_eq!(w.me(&users[7]).await, Some(MyEntry::Team { place: 8 }));
+    assert_eq!(w.me(&users[8]).await, Some(MyEntry::Line { place: 1 }));
+    assert_eq!(w.me(&users[10]).await, Some(MyEntry::Line { place: 3 }));
+}
+
+#[tokio::test]
+async fn a_later_take_tells_the_entry_that_was_left_out_it_is_in() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 7).await;
+    w.take(T0 + 500).await.unwrap();
+    assert_eq!(w.kinds(&users[6]).await, ["no_place"]);
+    // A hand-added team makes room for the one left over.
+    w.hand_team("Hand A", "Hand B").await;
+    let report = w.take(T0 + 600).await.unwrap();
+    assert_eq!(report.taken, 1);
+    assert_eq!(w.kinds(&users[6]).await, ["no_place", "moved_up"]);
+    // Entries taken the first time are not told anything.
+    assert!(w.kinds(&users[0]).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_taken_entry_never_told_no_place_gets_no_notice() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 6).await;
+    w.take(T0 + 500).await.unwrap();
+    for u in &users {
+        assert!(w.kinds(u).await.is_empty(), "{u}");
+    }
+}
+
+#[tokio::test]
+async fn the_deadline_tells_pending_inviters_they_have_no_place() {
+    let w = world(16).await;
+    let users = w.teams("T", 4).await;
+    let inviter = w.user("Inviter").await;
+    w.invite(&inviter, T0 + 20).await;
+    let s = &w.state.store;
+    assert_eq!(s.close_due_signups(DEADLINE).await.unwrap().len(), 1);
+    assert_eq!(w.kinds(&inviter).await, ["no_place"]);
+    let notices = w.notices(&inviter).await;
+    assert_eq!(notices[0]["url"], format!("/j/{}", w.token));
+    assert!(w.kinds(&users[0]).await.is_empty());
+    // Once only, whatever tells them again.
+    s.close_due_signups(DEADLINE + 60).await.unwrap();
+    assert_eq!(w.kinds(&inviter).await, ["no_place"]);
+}
+
+#[tokio::test]
+async fn a_cancelled_deadline_does_not_add_no_place_for_inviters() {
+    let w = world(16).await;
+    let inviter = w.user("Inviter").await;
+    w.invite(&inviter, T0 + 20).await;
+    w.state.store.close_due_signups(DEADLINE).await.unwrap();
+    assert_eq!(w.event_now().await.status, Status::Cancelled);
+    assert_eq!(w.kinds(&inviter).await, ["event_cancelled"]);
+}
+
+#[tokio::test]
+async fn declining_a_partner_link_tells_the_events_stream() {
+    let w = live_world().await;
+    let (_, c_raw) = fast_user(&w.state, "sam@y.test", "Sam").await;
+    let (_, d_raw) = fast_user(&w.state, "tea@y.test", "Tea").await;
+    let join = format!("/api/join/{}", w.token);
+    let body = Some(json!({ "as": "partner" }));
+    let res = w.call(&c_raw, Method::POST, &join, body).await;
+    let ptoken = res.body["partner_token"].as_str().unwrap().to_owned();
+    let mut rx = w.state.hub.subscribe_event(&w.event);
+    let decline = format!("/api/partner/{ptoken}/decline");
+    let res = w.call(&d_raw, Method::POST, &decline, None).await;
+    assert_eq!(res.status, StatusCode::NO_CONTENT);
+    assert!(rx.try_recv().is_ok(), "the event stream was not told");
+}
