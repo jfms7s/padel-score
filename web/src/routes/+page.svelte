@@ -153,13 +153,12 @@
 
 	async function turnOn() {
 		const result = await enablePush();
+		pushFailure = null;
+		note = null;
 		if (result === 'on') pushCard = false;
-		else pushFailure =
-				result === 'denied'
-					? strings.push.denied
-					: result === 'dismissed'
-						? strings.push.dismissed
-						: strings.push.failed;
+		// A closed prompt is not an error: a neutral status note, not the alert.
+		else if (result === 'dismissed') note = strings.push.dismissed;
+		else pushFailure = result === 'denied' ? strings.push.denied : strings.push.failed;
 	}
 
 	function notNow() {

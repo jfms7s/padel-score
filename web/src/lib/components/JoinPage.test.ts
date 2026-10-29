@@ -89,6 +89,19 @@ describe('join page while the session loads', () => {
 		expect(loading).not.toContain(strings.scheduled.join);
 	});
 
+	it('match: a signed-in viewer who could join sees no action while loading', () => {
+		const props = {
+			...matchProps,
+			view: { ...match, me: { owner: false, slot: null, in_line: false } },
+			signedIn: true
+		};
+		const ready = text(render(JoinMatch, { props }).body);
+		expect(ready).toContain(strings.scheduled.join);
+		const loading = text(render(JoinMatch, { props: { ...props, sessionLoading: true } }).body);
+		expect(loading).not.toContain(strings.scheduled.join);
+		expect(loading).not.toContain(strings.scheduled.signInToJoin);
+	});
+
 	it('event: shows the sign-in button once signed out, nothing while loading', () => {
 		expect(text(render(JoinEvent, { props: eventProps }).body)).toContain(strings.signups.signInToJoin);
 		const loading = text(render(JoinEvent, { props: { ...eventProps, sessionLoading: true } }).body);

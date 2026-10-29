@@ -89,7 +89,11 @@
 	let hadEntry = false;
 	$effect(() => {
 		const has = me !== null;
-		if (hadEntry && !has) heading?.focus();
+		if (hadEntry && !has) {
+			// The entry is gone (left): a later rejoin must open its card without the confirm.
+			confirmLeave = false;
+			heading?.focus();
+		}
 		hadEntry = has;
 	});
 
