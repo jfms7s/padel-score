@@ -7,6 +7,8 @@
 	let { rows }: { rows: ResultRowData[] } = $props();
 
 	const t = strings.results;
+	const coverLabel = (row: ResultRowData) =>
+		`${row.a} v ${row.b}, ${row.score}${row.winner ? `, ${t.winner} ${row.winner === 'a' ? row.a : row.b}` : ''}`;
 	const CHIPS = { won: t.won, lost: t.lost, draw: t.draw, recorded: t.recordedChip };
 </script>
 
@@ -14,26 +16,37 @@
 	<span class="chip {row.chip}">{CHIPS[row.chip]}</span>
 {/snippet}
 
-{#snippet open(row: ResultRowData, label: string)}
-	{#if row.href}
-		<a class="open" href={row.href}>{label}</a>
+{#snippet people(row: ResultRowData, side: 'a' | 'b')}
+	{#each row.teams[side] as name, i (i)}
+		{@const id = row.players?.[side][i]}
+		{#if i > 0}{strings.teamNameSeparator}{/if}
+		{#if id}<a class="player" href="/players/{encodeURIComponent(id)}">{name}</a>{:else}{name}{/if}
+	{/each}
+	{#if row.winner === side}<span class="visually-hidden">, {t.winner}</span>{/if}
+{/snippet}
+
+{#snippet open(row: ResultRowData, side: 'a' | 'b')}
+	{#if row.players}
+		{@render people(row, side)}
+	{:else if row.href}
+		<a class="open" href={row.href}>{@render people(row, side)}</a>
 	{:else}
-		{label}
+		{@render people(row, side)}
 	{/if}
 {/snippet}
 
-<ul class="cards" aria-label={t.title}>
+<ul class="cards">
 	{#each rows as row (row.id)}
 		<li class="card">
 			<div class="teams">
 				{#if row.event}<span class="event">{row.event}</span>{/if}
-				<span class="line a" class:win={row.winner === 'a'}>{row.a}</span>
-				<span class="line b" class:win={row.winner === 'b'}>{row.b}</span>
-				{#if row.href}<a class="cover" href={row.href} aria-label="{row.a} v {row.b}, {row.score}"></a>{/if}
+				<span class="line a" class:win={row.winner === 'a'}>{@render people(row, 'a')}</span>
+				<span class="line b" class:win={row.winner === 'b'}>{@render people(row, 'b')}</span>
+				{#if row.href}<a class="cover" href={row.href} aria-label={coverLabel(row)}></a>{/if}
 			</div>
 			<div class="side">
 				<span class="num score">{row.score}</span>
-				<time>{row.date}</time>
+				<time datetime={row.datetime}>{row.date}</time>
 				{@render chip(row)}
 			</div>
 		</li>
@@ -41,7 +54,7 @@
 </ul>
 
 <div class="scroll">
-	<table class="grid" aria-label={t.title}>
+	<table class="grid">
 		<thead>
 			<tr>
 				<th>{t.columns.date}</th>
@@ -54,9 +67,15 @@
 		<tbody>
 			{#each rows as row (row.id)}
 				<tr>
-					<td class="date">{row.date}</td>
-					<td class="line a" class:win={row.winner === 'a'}>{@render open(row, row.a)}</td>
-					<td class="line b" class:win={row.winner === 'b'}>{@render open(row, row.b)}</td>
+					<td class="date">
+						{#if row.players && row.href}
+							<a class="open" href={row.href}><time datetime={row.datetime}>{row.date}</time></a>
+						{:else}
+							<time datetime={row.datetime}>{row.date}</time>
+						{/if}
+					</td>
+					<td class="line a" class:win={row.winner === 'a'}>{@render open(row, 'a')}</td>
+					<td class="line b" class:win={row.winner === 'b'}>{@render open(row, 'b')}</td>
 					<td class="right"><span class="num score">{row.score}</span></td>
 					<td>{@render chip(row)}</td>
 				</tr>
@@ -106,11 +125,23 @@
 	.line.win.b {
 		color: var(--b);
 	}
+	.player {
+		position: relative;
+		z-index: 1;
+		display: inline-flex;
+		align-items: center;
+		min-height: var(--tap);
+		color: inherit;
+		text-decoration: underline;
+		text-decoration-color: var(--line);
+		text-underline-offset: 3px;
+	}
 	.cover {
 		position: absolute;
 		inset: 0;
 		border-radius: 12px;
 	}
+	.player:focus-visible,
 	.cover:focus-visible,
 	.open:focus-visible {
 		outline: 2px solid var(--ink);

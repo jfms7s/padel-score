@@ -26,6 +26,7 @@
 
 	let ready = $state(false);
 	// The recorded list's first page failed; the Retry button fetches it again.
+	let recordedLoading = $state(false);
 	let recordedError = $state<string | null>(null);
 	let loadFailure = $state<string | null>(null);
 	let busy = $state(false);
@@ -36,13 +37,19 @@
 	const findYourself = $derived(recordedLoaded && showFindYourself(played.length, recorded.length));
 
 	async function loadRecorded() {
-		const first = await getHistory();
-		recorded = first.items;
-		recordedNext = first.next;
-		recordedLoaded = true;
+		recordedLoading = true;
+		try {
+			const first = await getHistory();
+			recorded = first.items;
+			recordedNext = first.next;
+			recordedLoaded = true;
+		} finally {
+			recordedLoading = false;
+		}
 	}
 
 	async function retryRecorded() {
+		if (recordedLoading) return;
 		recordedError = null;
 		try {
 			await loadRecorded();
@@ -88,7 +95,7 @@
 	// Switching to Recorded for the first time loads its first page.
 	$effect(() => {
 		if (!ready || view !== 'recorded' || recordedLoaded) return;
-		if (recordedError) return;
+		if (recordedError || recordedLoading) return;
 		void retryRecorded();
 	});
 
@@ -132,15 +139,19 @@
 	{#if $session.status === 'signed_in' && ready && mine}
 		<div class="cols">
 			<div class="rec"><RecordPlacings record={mine.record} placings={mine.placings} /></div>
-			<div class="switch" role="group" aria-label={t.title}>
+			<div class="switch" role="group" aria-label={t.show}>
 				{#each VIEWS as v (v)}
 					<button type="button" aria-pressed={view === v} onclick={() => choose(v)}>{t[v]}</button>
 				{/each}
 			</div>
 			<div class="list">
-				{#if view === 'recorded' && recordedError && !recordedLoaded}
+				{#if view === 'recorded' && !recordedLoaded && recordedLoading}
+					<p class="hint">{strings.auth.loading}</p>
+				{:else if view === 'recorded' && recordedError && !recordedLoaded}
 					<p class="error" role="alert">{recordedError}</p>
-					<button class="secondary more" type="button" onclick={retryRecorded}>{t.retry}</button>
+					<button class="secondary more" type="button" disabled={recordedLoading} onclick={retryRecorded}>{t.retry}</button>
+				{:else if view === 'recorded' && !recordedLoaded}
+					<p class="hint">{strings.auth.loading}</p>
 				{:else if rows.length === 0}
 					<p class="hint">{t.empty}</p>
 				{:else}

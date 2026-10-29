@@ -41,6 +41,12 @@ describe('recordedRow', () => {
 		expect(row.href).toBe('/v/' + recorded.spectator_token);
 		expect(row.date).toBe(longDate(recorded.finished_at, 'UTC'));
 		expect(row.event).toBeNull();
+		expect(row.datetime).toBe(new Date(recorded.finished_at * 1000).toISOString());
+	});
+	it('keeps the names and picked player ids for linking', () => {
+		const row = recordedRow(recorded);
+		expect(row.teams).toEqual(recorded.teams);
+		expect(row.players).toEqual(recorded.players);
 	});
 	it('carries the event label', () => {
 		const event = { id: 'e1', name: 'Cup', kind: 'tournament' as const, label: 'Semi-final' };
@@ -61,6 +67,8 @@ describe('playedRow', () => {
 		const row = playedRow(played());
 		expect([row.a, row.b]).toEqual(['Ana / Marta', 'Rui / João']);
 		expect(row.href).toBe('/v/v-abc');
+		expect(row.teams.a).toEqual(['Ana', 'Marta']);
+		expect(row.players).toBeNull();
 		expect(row.score).toBe(recordedRow(recorded).score);
 	});
 	it('hides the names and the link on a redacted entry', () => {
@@ -74,6 +82,19 @@ describe('playedRow', () => {
 		});
 		expect([row.a, row.b]).toEqual([strings.results.hidden, strings.results.hidden]);
 		expect(row.href).toBeNull();
+		expect(row.players).toBeNull();
+	});
+	it('falls back to the event kind on a redacted event', () => {
+		const row = playedRow({
+			match_id: 'm3',
+			finished_at: 1761400000,
+			outcome: 'win',
+			side: 'a',
+			score,
+			redacted: true,
+			event: { kind: 'tournament' }
+		});
+		expect(row.event).toBe(strings.events.kinds.tournament);
 	});
 });
 

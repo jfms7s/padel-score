@@ -527,6 +527,9 @@ export const strings = {
 	// The results area.
 	results: {
 		title: 'Results',
+		show: 'Show',
+		/** Read after the winning team's names. */
+		winner: 'winner',
 		played: 'Played',
 		recorded: 'Recorded',
 		won: 'Won',

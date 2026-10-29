@@ -15,8 +15,14 @@ export function viewFromQuery(search: URLSearchParams): ResultsView {
 export interface ResultRowData {
 	id: string;
 	date: string;
+	/** ISO date for `<time datetime>`. */
+	datetime: string;
 	a: string;
 	b: string;
+	/** Each team's names one by one, for linking. */
+	teams: { a: readonly string[]; b: readonly string[] };
+	/** Picked player ids aligned with `teams`; null when the list has no player pages to open. */
+	players: { a: readonly (string | null)[]; b: readonly (string | null)[] } | null;
 	winner: Team | null;
 	score: string;
 	chip: 'won' | 'lost' | 'draw' | 'recorded';
@@ -28,6 +34,7 @@ const CHIPS: Record<Outcome, ResultRowData['chip']> = { win: 'won', loss: 'lost'
 
 const names = (team: readonly string[]) => team.join(strings.teamNameSeparator);
 const finalView = (token: string) => `/v/${encodeURIComponent(token)}`;
+const isoDate = (secs: number) => new Date(secs * 1000).toISOString();
 const other = (side: Team): Team => (side === 'a' ? 'b' : 'a');
 
 /** The winning side from the player's: their own side on a win, the other on a loss. */
@@ -41,6 +48,8 @@ export function playedRow(e: LinkedEntry, timeZone?: string): ResultRowData {
 	const base = {
 		id: e.match_id,
 		date: longDate(e.finished_at, timeZone),
+		datetime: isoDate(e.finished_at),
+		players: null,
 		winner: winnerOf(e),
 		score: scoreText(e.score),
 		chip: CHIPS[e.outcome]
@@ -50,6 +59,7 @@ export function playedRow(e: LinkedEntry, timeZone?: string): ResultRowData {
 			...base,
 			a: strings.results.hidden,
 			b: strings.results.hidden,
+			teams: { a: [strings.results.hidden], b: [strings.results.hidden] },
 			event: e.event ? strings.events.kinds[e.event.kind] : null,
 			href: null
 		};
@@ -58,6 +68,7 @@ export function playedRow(e: LinkedEntry, timeZone?: string): ResultRowData {
 		...base,
 		a: names(e.teams.a),
 		b: names(e.teams.b),
+		teams: e.teams,
 		event: e.event?.label ?? null,
 		href: finalView(e.spectator_token)
 	};
@@ -68,8 +79,11 @@ export function recordedRow(e: HistoryEntry, timeZone?: string): ResultRowData {
 	return {
 		id: e.match_id,
 		date: longDate(e.finished_at, timeZone),
+		datetime: isoDate(e.finished_at),
 		a: names(e.teams.a),
 		b: names(e.teams.b),
+		teams: e.teams,
+		players: e.players,
 		winner: e.winner,
 		score: scoreText(e.score),
 		chip: 'recorded',
