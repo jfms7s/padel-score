@@ -310,6 +310,8 @@
 			display: grid;
 			grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
 			column-gap: 32px;
+			/* A spare 1fr row soaks up the tall week column, so the right sections stack tightly. */
+			grid-template-rows: repeat(4, auto) 1fr;
 			align-items: start;
 		}
 		.cols > div {
@@ -317,7 +319,7 @@
 		}
 		.cols > .week {
 			grid-column: 1;
-			grid-row: 1 / span 4;
+			grid-row: 1 / span 5;
 		}
 	}
 </style>

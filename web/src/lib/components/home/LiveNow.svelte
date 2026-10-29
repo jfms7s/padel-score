@@ -29,6 +29,7 @@
 							<span class="label">{row.label}</span>
 							<span class="when">{row.when}</span>
 						</span>
+						{#if row.score !== null}<span class="score">{row.score}</span>{/if}
 						<span class="go">{t.resume}</span>
 					</a>
 					{#if row.deletable}
@@ -100,6 +101,14 @@
 	.when {
 		font-size: 13px;
 		color: var(--muted);
+	}
+	.score {
+		flex: none;
+		margin-left: auto;
+		font-size: 20px;
+		font-weight: 800;
+		font-variation-settings: 'wdth' 75;
+		font-variant-numeric: tabular-nums;
 	}
 	.go {
 		flex: none;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { longDate } from './dates';
 import { STALE_SECS, agendaNote, agendaTitle, itemEnd, liveNow, offlineRows, shownHours, weekPips } from './home';
 import type { RecentMatch } from './setup';
-import type { CalendarItem, MatchView, MyMatch } from './types';
+import type { CalendarItem, MatchView, MyMatch, Score } from './types';
 
 type Game = Extract<CalendarItem, { kind: 'game' }>;
 type Event = Extract<CalendarItem, { kind: 'event' }>;
@@ -49,12 +49,14 @@ const match = (starts_at: number, over: Partial<Match> = {}): CalendarItem => ({
 	...over
 });
 
+const SCORE = { sets: [{ a: 6, b: 4 }], games: [2, 1], current: 'none' } as unknown as Score;
+
 const mine = (over: Partial<MyMatch> = {}): MyMatch => ({
 	id: 'm1',
 	label: 'Ana & Rui vs Marta & Joana',
 	created_at: 0,
 	last_activity_at: 0,
-	view: {} as MatchView,
+	view: { score: SCORE } as MatchView,
 	scorer_token: 'st',
 	spectator_token: 'vt',
 	...over
@@ -89,6 +91,7 @@ describe('liveNow', () => {
 			label: 'Ana & Rui vs Marta & Joana',
 			href: '/s/st#v=vt',
 			scorerToken: 'st',
+			score: '6-4',
 			when: longDate(NOW, 'UTC'),
 			deletable: true
 		});
@@ -116,8 +119,8 @@ describe('offlineRows', () => {
 			{ scorer_token: 'b', label: 'Two', created_at: (NOW + 86_400) * 1000 }
 		];
 		expect(offlineRows(recent, 'UTC')).toEqual([
-			{ label: 'One', href: '/s/a#v=v', scorerToken: 'a', when: 'Wed 28 Oct', deletable: true },
-			{ label: 'Two', href: '/s/b', scorerToken: 'b', when: 'Thu 29 Oct', deletable: true }
+			{ label: 'One', href: '/s/a#v=v', scorerToken: 'a', score: null, when: 'Wed 28 Oct', deletable: true },
+			{ label: 'Two', href: '/s/b', scorerToken: 'b', score: null, when: 'Thu 29 Oct', deletable: true }
 		]);
 	});
 });

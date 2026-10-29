@@ -3,6 +3,7 @@
 
 import { addDays, localDate, longDate, timeText } from './dates';
 import { itemStart } from './calendar';
+import { liveScoreText } from './events';
 import { scorerPath, type RecentMatch } from './setup';
 import { strings } from './strings';
 import type { CalendarItem, MyMatch } from './types';
@@ -23,6 +24,8 @@ export interface LiveRow {
 	label: string;
 	href: string;
 	scorerToken: string;
+	/** The score as it stands; null when this device only knows the match's name. */
+	score: string | null;
 	when: string;
 	deletable: boolean;
 }
@@ -37,6 +40,7 @@ export function liveNow(mine: MyMatch[], now: number, timeZone?: string): { fres
 			label: m.label,
 			href: scorerPath(m.scorer_token, m.spectator_token),
 			scorerToken: m.scorer_token,
+			score: liveScoreText(m.view.score),
 			when: longDate(m.last_activity_at, timeZone),
 			deletable: !m.context
 		};
@@ -51,6 +55,7 @@ export function offlineRows(recent: RecentMatch[], timeZone?: string): LiveRow[]
 		label: r.label,
 		href: scorerPath(r.scorer_token, r.spectator_token),
 		scorerToken: r.scorer_token,
+		score: null,
 		when: longDate(r.created_at / 1000, timeZone),
 		deletable: true
 	}));
