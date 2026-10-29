@@ -89,6 +89,6 @@ export async function claimGuest(token: string, guestId: string): Promise<BoardV
 		...signedIn,
 		method: 'POST'
 	});
-	forgetGuest(token);
+	if (rememberedGuestId(token) === guestId) forgetGuest(token);
 	return view;
 }

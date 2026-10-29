@@ -780,3 +780,47 @@ async fn claim_respects_the_piece_cap() {
     assert!(v.pieces.iter().any(|p| p.user_id == g));
     assert_eq!(s.guest_for_key(&token, &key).await.unwrap(), Some(g));
 }
+
+async fn seed_line_head(pool: &SqlitePool, game: &str, who: &str, at: i64) {
+    sqlx::query("INSERT INTO board_line_heads (game_id, user_id, at) VALUES (?, ?, ?)")
+        .bind(game)
+        .bind(who)
+        .bind(at)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn line_heads(pool: &SqlitePool, game: &str) -> Vec<(String, i64)> {
+    sqlx::query_as("SELECT user_id, at FROM board_line_heads WHERE game_id = ? ORDER BY user_id")
+        .bind(game)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn claim_seating_the_claimer_drops_their_line_head_for_that_game() {
+    let (s, pool, token, _, g) = game_with_guest().await;
+    let d = user(&s, "Joana").await;
+    let game = view(&s, &token, &d, NOW + 12).await.games[0].id.clone();
+    seed_line_head(&pool, &game, &d, 500).await;
+
+    s.claim_guest(&token, &d, &g, NOW + 20).await.unwrap();
+    assert!(seat_in(&pool, &game, &d).await.is_some());
+    assert_eq!(line_heads(&pool, &game).await, vec![]);
+}
+
+#[tokio::test]
+async fn claim_moves_the_line_head_keeping_the_earlier_time() {
+    let (s, pool, token, _, _) = game_with_guest().await;
+    let (g2, _) = guest(&s, &token, "Quim").await;
+    let d = user(&s, "Joana").await;
+    let game = view(&s, &token, &d, NOW + 12).await.games[0].id.clone();
+    assert_eq!(seat_in(&pool, &game, &g2).await, None);
+    seed_line_head(&pool, &game, &g2, 100).await;
+    seed_line_head(&pool, &game, &d, 200).await;
+
+    s.claim_guest(&token, &d, &g2, NOW + 20).await.unwrap();
+    assert_eq!(line_heads(&pool, &game).await, vec![(d.clone(), 100)]);
+}

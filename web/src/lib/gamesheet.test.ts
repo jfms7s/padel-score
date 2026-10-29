@@ -80,6 +80,13 @@ describe('gameActions', () => {
 		expect(start(G + 1.5 * H)).toBe(false);
 	});
 
+	it('a guest is not offered Start match, a member in the same spot is', () => {
+		const asGuest = view([mine()], [], { me: { user_id: 'ana', member: true, creator: false, guest: true } });
+		const asMember = view([mine()], [], { me: { user_id: 'ana', member: true, creator: false, guest: false } });
+		expect(gameActions(asGuest, 'g1', 'ana', G - 600).start.shown).toBe(false);
+		expect(gameActions(asMember, 'g1', 'ana', G - 600).start.shown).toBe(true);
+	});
+
 	it('short game starts: Start match is offered with the players it has', () => {
 		const v = view([game('g1', G, ['ana', 'rui', 'marta'])]);
 		expect(gameActions(v, 'g1', 'ana', G - 600).start).toMatchObject({ shown: true, enabled: true });

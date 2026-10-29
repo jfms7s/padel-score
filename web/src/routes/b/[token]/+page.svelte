@@ -9,6 +9,7 @@
 	import { ApiError, redirectToSignIn } from '#lib/api.ts';
 	import {
 		addRange,
+		answerBoardRequest,
 		answerRequest,
 		boardMessage,
 		deleteBoard,
@@ -19,10 +20,13 @@
 		updateBoard
 	} from '#lib/boards.ts';
 	import GameSheet from '#lib/components/boards/GameSheet.svelte';
+	import GuestJoin from '#lib/components/boards/GuestJoin.svelte';
 	import RequestCard from '#lib/components/boards/RequestCard.svelte';
 	import WeekGrid from '#lib/components/boards/WeekGrid.svelte';
 	import { browserTimeZone, dayLabel, monthYear, timeRange } from '#lib/dates.ts';
 	import { requestCards } from '#lib/gamesheet.ts';
+	import { claimGuest, forgetGuest, guestKey, removeGuest, rememberedGuestId } from '#lib/guests.ts';
+	import { guestsToPick, rememberedGuest } from '#lib/guestjoin.ts';
 	import { shareLink } from '#lib/share.ts';
 	import { MAX_NAME_LENGTH } from '#lib/setup.ts';
 	import { strings } from '#lib/strings.ts';
@@ -39,18 +43,29 @@
 	let actionError = $state<string | null>(null);
 	let working = $state(0);
 	let shareNote = $state<string | null>(null);
-	let confirming = $state<'leave' | 'delete' | null>(null);
+	type Confirming = 'leave' | 'delete' | { kind: 'removeGuest' | 'claimGuest'; id: string };
+	let confirming = $state<Confirming | null>(null);
+	// Whether the "Were you …?" banner was dismissed; the kept key is forgotten with it.
+	let dismissedWereYou = $state(false);
 	let editing = $state(false);
 	let editTitle = $state('');
 	let editPlace = $state('');
+	let editAllowGuests = $state(false);
 	let openGameId = $state<string | null>(null);
 	let askedForGame = false;
 
 	const me = $derived(view?.me ?? null);
 	const signedIn = $derived(me !== null);
+	const guest = $derived(me?.guest === true);
+	const nameWithMark = (p: { name: string; guest: boolean }) => (p.guest ? `${p.name} (${t.guestMark})` : p.name);
+	const userSignedIn = $derived(me !== null && !guest);
+	const over = $derived(view?.board.over === true);
+	const guestRows = $derived(view ? guestsToPick(view) : []);
+	const wasGuest = $derived(
+		userSignedIn && view && !over && !dismissedWereYou ? rememberedGuest(view, rememberedGuestId(token)) : null
+	);
 	const member = $derived(me?.member === true);
 	const creator = $derived(me?.creator === true);
-	const over = $derived(view?.board.over === true);
 	// Every time on the page is the viewer's own, like the notices.
 	const zone = browserTimeZone();
 	const myGames = $derived(
@@ -83,6 +98,15 @@
 			view = next;
 			now = Math.floor(Date.now() / 1000);
 			loadFailure = null;
+			// A kept guest key the board no longer honours: the guest was removed.
+			// A guest the open confirm step names may be gone by now.
+			if (confirming && typeof confirming !== 'string') {
+				const askedId = confirming.id;
+				if (!guestsToPick(next).some((g) => g.user_id === askedId)) confirming = null;
+			}
+			const heldId = rememberedGuestId(forToken);
+			if (guestKey(forToken) !== null && (next.me === null || (heldId !== null && !rememberedGuest(next, heldId))))
+				forgetGuest(forToken);
 			if (!askedForGame) {
 				askedForGame = true;
 				const wanted = page.url.searchParams.get('game');
@@ -101,6 +125,7 @@
 			loadFailure = null;
 			askedForGame = false;
 			openGameId = null;
+			dismissedWereYou = false;
 			void load(current);
 		});
 		const again = () => {
@@ -143,7 +168,14 @@
 			});
 	}
 
-	const answer = (id: string, accept: boolean) => act(() => answerRequest(id, accept));
+	const answer = (id: string, accept: boolean) =>
+		act(() => (guest ? answerBoardRequest(token, id, accept) : answerRequest(id, accept)));
+	const requestFromGuest = (id: string) => view?.requests.find((r) => r.id === id)?.from.guest === true;
+	const joinedAsGuest = (next: BoardView) => {
+		latest += 1;
+		view = next;
+		now = Math.floor(Date.now() / 1000);
+	};
 	const add = (start: number, end: number) => act(() => addRange(token, start, end));
 	const remove = (start: number, end: number) => act(() => removeRange(token, start, end));
 	const join = () => act(() => joinBoard(token));
@@ -151,10 +183,23 @@
 	async function leave() {
 		confirming = null;
 		act(async () => {
+			const asGuest = guest;
 			await leaveBoard(token);
+			// A guest has no home to go to: stay on the board, signed out, with the join form.
+			if (asGuest) return getBoard(token);
 			await goto('/');
 			return null;
 		});
+	}
+
+	function runGuestStep(step: { kind: 'removeGuest' | 'claimGuest'; id: string }) {
+		confirming = null;
+		act(() => (step.kind === 'removeGuest' ? removeGuest(token, step.id) : claimGuest(token, step.id)));
+	}
+
+	function dismissWereYou() {
+		forgetGuest(token);
+		dismissedWereYou = true;
 	}
 
 	async function destroy() {
@@ -194,7 +239,7 @@
 		queueMicrotask(() => menuButton?.focus());
 	}
 
-	function ask(what: 'leave' | 'delete') {
+	function ask(what: Confirming) {
 		menuOpen = false;
 		confirming = what;
 	}
@@ -210,6 +255,7 @@
 		menuOpen = false;
 		editTitle = view.board.title;
 		editPlace = view.board.place ?? '';
+		editAllowGuests = view.board.allow_guests;
 		editing = true;
 		confirming = null;
 	}
@@ -219,7 +265,11 @@
 		const title = editTitle.trim();
 		if (title === '') return;
 		editing = false;
-		act(() => updateBoard(token, { title, place: editPlace.trim() === '' ? null : editPlace.trim() }));
+		act(() => updateBoard(token, {
+				title,
+				place: editPlace.trim() === '' ? null : editPlace.trim(),
+				allow_guests: editAllowGuests
+			}));
 	}
 
 	async function share() {
@@ -275,11 +325,26 @@
 		<div aria-live="polite">{#if shareNote}<p class="ok">{shareNote}</p>{/if}</div>
 
 		{#if confirming}
-			<div class="confirm" role="alertdialog" tabindex="-1" bind:this={confirmEl} aria-label={confirming === 'delete' ? t.delete : t.leave}>
-				<p>{confirming === 'delete' ? t.deleteConfirm : t.leaveConfirm}</p>
+			{@const step = typeof confirming === 'string' ? null : confirming}
+			{@const guestName = step ? (guestRows.find((g) => g.user_id === step.id)?.name ?? '') : ''}
+			{@const label = step ? t[step.kind] : confirming === 'delete' ? t.delete : t.leave}
+			<div class="confirm" role="alertdialog" tabindex="-1" bind:this={confirmEl} aria-label={label}>
+				<p>
+					{step
+						? step.kind === 'removeGuest'
+							? t.removeGuestConfirm(guestName)
+							: t.claimGuestConfirm(guestName)
+						: confirming === 'delete'
+							? t.deleteConfirm
+							: t.leaveConfirm}
+				</p>
 				<div class="actions">
-					<button type="button" class="danger" onclick={confirming === 'delete' ? destroy : leave}>
-						{confirming === 'delete' ? t.delete : t.leave}
+					<button
+						type="button"
+						class={step?.kind === 'claimGuest' ? 'primary' : 'danger'}
+						onclick={step ? () => runGuestStep(step) : confirming === 'delete' ? destroy : leave}
+					>
+						{label}
 					</button>
 					<button type="button" class="secondary" onclick={closeConfirm}>{t.cancel}</button>
 				</div>
@@ -296,6 +361,11 @@
 					{t.place}
 					<input bind:value={editPlace} autocomplete="off" maxlength={MAX_PLACE_LENGTH} />
 				</label>
+				<label class="check">
+					<input type="checkbox" bind:checked={editAllowGuests} aria-describedby="edit-allow-guests-note" />
+					<span>{t.allowGuests}</span>
+				</label>
+				<p class="hint" id="edit-allow-guests-note">{t.allowGuestsNote}</p>
 				<div class="actions">
 					<button type="submit" class="primary">{t.save}</button>
 					<button type="button" class="secondary" onclick={() => (editing = false)}>{t.cancel}</button>
@@ -306,9 +376,24 @@
 		{#if over}<p class="hint">{t.over}</p>{/if}
 		{#if actionError && !openGame}<p class="error" role="alert">{actionError}</p>{/if}
 
+		{#if wasGuest}
+			<div class="confirm" role="group" aria-label={t.wereYou(wasGuest.name)}>
+				<p>{t.wereYou(wasGuest.name)}</p>
+				<div class="actions">
+					<button type="button" class="primary" disabled={working > 0} onclick={() => ask({ kind: 'claimGuest', id: wasGuest.user_id })}>
+						{t.claimGuest}
+					</button>
+					<button type="button" class="secondary" onclick={dismissWereYou}>{t.dismiss}</button>
+				</div>
+			</div>
+		{/if}
+
 		{#if !signedIn && !over}
 			<div class="join">
 				<button type="button" class="primary" onclick={redirectToSignIn}>{t.signInToAdd}</button>
+				{#if view.board.allow_guests}
+					<GuestJoin {view} {token} onjoined={joinedAsGuest} />
+				{/if}
 			</div>
 		{:else if signedIn && !member && !over}
 			<div class="join">
@@ -333,6 +418,7 @@
 								<RequestCard
 									kind={r.kind}
 									from={r.from}
+									guest={requestFromGuest(r.id)}
 									current={r.current}
 									proposed={r.proposed}
 									busy={working > 0}
@@ -357,6 +443,28 @@
 						/>
 					</div>
 				{/if}
+				{#if guestRows.length > 0 && signedIn}
+					<h2>{t.guests}</h2>
+					<ul class="list">
+						{#each guestRows as g (g.user_id)}
+							<li class="row">
+								<span class="what"><strong>{g.name}</strong></span>
+								<span class="actions">
+									{#if userSignedIn && !over}
+										<button type="button" class="secondary" disabled={working > 0} onclick={() => ask({ kind: 'claimGuest', id: g.user_id })}>
+											{t.claimGuest}
+										</button>
+									{/if}
+									{#if creator && !over}
+										<button type="button" class="secondary" disabled={working > 0} onclick={() => ask({ kind: 'removeGuest', id: g.user_id })}>
+											{t.removeGuest}
+										</button>
+									{/if}
+								</span>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 				{#if signedIn}
 					<h2>{t.yourGames}</h2>
 					{#if myGames.length === 0}
@@ -368,7 +476,7 @@
 									<button type="button" class="row game-row" onclick={() => (openGameId = g.id)}>
 										<span class="what">
 											<strong>{gameWhen(g)}</strong>
-											<span class="hint">{g.players.map((p) => p.name).join(', ')}</span>
+											<span class="hint">{g.players.map(nameWithMark).join(', ')}</span>
 										</span>
 										<span class="badge" class:off={g.state === 'short'}>{t.gameState[g.state]}</span>
 									</button>
