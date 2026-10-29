@@ -532,7 +532,7 @@ async fn answer(
     accept: bool,
 ) -> Result<Json<BoardView>, ApiError> {
     answered(
-        &state,
+        state,
         state.store.answer_request(request_id, user, accept, now()),
     )
     .await
