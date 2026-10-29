@@ -383,6 +383,7 @@ export const strings = {
 		thisIsMe: 'This is me',
 		linkedMe: 'This player is now linked to you.',
 		unlink: 'Unlink',
+		privacyTitle: 'Privacy and links',
 		unlinkConfirm: (name: string) => `Unlink ${name}? Their matches stay in your history.`,
 		unlinkYes: 'Yes, unlink',
 		keep: 'Keep the link',
@@ -444,7 +445,6 @@ export const strings = {
 		// My results and the privacy setting (/profile).
 		profile: {
 			title: 'My results',
-			link: 'My results',
 			empty: 'Ask a coordinator to show you the link QR for your name, or tap ‘That’s me’ on a match you played in.',
 			linkedEntries: 'Linked entries',
 			linkedEntry: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
