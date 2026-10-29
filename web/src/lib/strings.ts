@@ -47,7 +47,6 @@ export const strings = {
 	// New match.
 	setup: {
 		title: 'New match',
-		back: 'Back',
 		deuce: 'At 40–40',
 		deuceOptions: { advantage: 'Advantage', golden_point: 'Golden point', star_point: 'Star point' },
 		sets: 'Sets',
@@ -187,7 +186,6 @@ export const strings = {
 		name: 'Your name',
 		nameHint: 'Shown to the people you invite.',
 		passwordHint: '8 to 128 characters.',
-		back: 'Home',
 		save: 'Save',
 		saving: 'Saving…',
 		loading: 'Loading…',
@@ -342,7 +340,6 @@ export const strings = {
 	// The player list, and picking players for a match.
 	players: {
 		title: 'Players',
-		back: 'Home',
 		intro: 'Pick these players when you start a match, and their wins and losses add up.',
 		add: 'Add a player',
 		addLabel: 'New player name',
@@ -450,7 +447,6 @@ export const strings = {
 		profile: {
 			title: 'My results',
 			link: 'My results',
-			back: 'Home',
 			empty: 'Ask a coordinator to show you the link QR for your name, or tap ‘That’s me’ on a match you played in.',
 			linkedEntries: 'Linked entries',
 			linkedEntry: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
@@ -486,6 +482,7 @@ export const strings = {
 		// The public profile (/p/{token}).
 		publicProfile: {
 			title: (name: string) => `${name}’s results`,
+			unavailable: 'Results unavailable',
 			notPublic: 'This profile isn’t public.',
 			note: 'Only dates, outcomes and scores are shown. No names.'
 		},
@@ -506,8 +503,6 @@ export const strings = {
 	// The history page, a player's page, and the result row they share.
 	history: {
 		title: 'Past matches',
-		link: 'History',
-		back: 'Home',
 		empty: 'Finished matches you started while signed in show up here.',
 		loadMore: 'Load more',
 		/** A timed match that went to overtime: the tied games, then this. */
@@ -534,9 +529,11 @@ export const strings = {
 			`${to > place ? `${ordinal(place)}–${ordinal(to)}` : ordinal(place)} of ${size}, ${kind === 'tournament' ? 'tournament' : 'non-stop'}`,
 		matches: 'Matches',
 		noMatches: 'No finished matches with this player yet.',
-		archived: 'Archived. Their record is kept.',
-		backToPlayers: 'Players'
+		archived: 'Archived. Their record is kept.'
 	},
+
+	// The results area.
+	results: { recordedLink: 'Matches I recorded ›' },
 
 	// Events: the coordinator's screens, the court phone and the event's viewing page.
 	events: {
@@ -546,8 +543,6 @@ export const strings = {
 		noPhone: 'No phone yet',
 		waitingForMatch: 'Waiting for a match',
 
-		link: 'Events',
-		back: 'Home',
 		title: 'Events',
 		intro: 'Run a tournament or a non-stop: teams, courts with their own phones, and the results.',
 		none: "You haven't made any events yet.",
@@ -575,7 +570,6 @@ export const strings = {
 		noDraws: 'no draws',
 
 		// The event screen.
-		allEvents: 'Events',
 		loading: 'Loading the event…',
 		streamLost: 'Live updates stopped.',
 		reload: 'Reload',
@@ -909,7 +903,6 @@ export const strings = {
 	},
 
 	// Home, signed in.
-	yourPages: 'Your players and history',
 	myMatches: 'My matches',
 	noMyMatches: 'Matches you start while signed in show up here, on any device.',
 
@@ -930,16 +923,16 @@ export const strings = {
 	networkError: "Can't reach the server.",
 	serverError: (status: number) => `The server answered ${status}.`,
 
-	// App navigation rail.
+	// App navigation: tab bar, rail and back links.
 	nav: {
 		label: 'Main',
 		home: 'Home',
-		calendar: 'Calendar',
-		events: 'Events',
-		players: 'Players',
-		history: 'History',
-		results: 'My results',
-		account: 'Account'
+		organise: 'Organise',
+		new: 'New',
+		results: 'Results',
+		people: 'People',
+		account: 'Account',
+		back: (label: string) => `‹ ${label}`
 	},
 
 	// Notifications on this device (Account page).

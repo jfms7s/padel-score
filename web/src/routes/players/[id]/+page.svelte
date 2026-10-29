@@ -1,6 +1,7 @@
 <script lang="ts">
 	// One player: their record, any placings, then their matches, a page at a time.
 	import { page } from '$app/state';
+	import BackLink from '#lib/components/BackLink.svelte';
 	import LinkCode from '#lib/components/LinkCode.svelte';
 	import LinkedResultRow from '#lib/components/LinkedResultRow.svelte';
 	import ResultRow from '#lib/components/ResultRow.svelte';
@@ -182,7 +183,7 @@
 {/snippet}
 
 <main class="acct page-wide-desk">
-	<a class="back" href="/players">{t.backToPlayers}</a>
+	<BackLink />
 	{#if loadFailure}
 		<h1>{strings.players.title}</h1>
 		<p class="error" role="alert">{loadFailure}</p>
@@ -313,12 +314,6 @@
 </main>
 
 <style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
-	}
 	h1 {
 		overflow-wrap: anywhere;
 	}

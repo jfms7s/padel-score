@@ -5,6 +5,7 @@
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import BackLink from '#lib/components/BackLink.svelte';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import CourtsTab from '#lib/components/events/desk/CourtsTab.svelte';
 	import DeskHeader from '#lib/components/events/desk/DeskHeader.svelte';
@@ -353,7 +354,7 @@
 </script>
 
 <main class="acct page-wide">
-	<a class="back" href="/events">{t.allEvents}</a>
+	<BackLink />
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
 	{:else if $session.status === 'signed_in' && detail && ev}
@@ -450,12 +451,6 @@
 </main>
 
 <style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
-	}
 	.lost {
 		display: flex;
 		flex-wrap: wrap;

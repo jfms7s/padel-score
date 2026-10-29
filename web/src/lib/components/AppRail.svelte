@@ -1,18 +1,11 @@
 <script lang="ts">
-	import { initials, railItems } from '#lib/nav.ts';
+	import { initials, navItems } from '#lib/nav.ts';
+	import { ICONS } from '#lib/navIcons.ts';
 	import { strings } from '#lib/strings.ts';
 
 	let { pathname, name }: { pathname: string; name: string } = $props();
 
-	const items = $derived(railItems(pathname));
-	const ICONS: Record<string, string> = {
-		'/': 'M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z',
-		'/calendar': 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M8 14h3v3H8z',
-		'/events': 'M7 4h10v4a5 5 0 0 1-10 0zM5 5H3v2a3 3 0 0 0 4 3M19 5h2v2a3 3 0 0 1-4 3M12 13v4M8 20h8',
-		'/players': 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14a6.5 6.5 0 0 1 3.5 6',
-		'/history': 'M4 12a8 8 0 1 0 2.5-5.8M4 4v4h4M12 8v4l3 2',
-		'/profile': 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z'
-	};
+	const items = $derived(navItems(pathname));
 </script>
 
 <nav aria-label={strings.nav.label}>
@@ -27,8 +20,13 @@
 			/>
 		</svg>
 	</a>
-	{#each items as item (item.href)}
-		<a href={item.href} class:current={item.current} aria-current={item.current ? 'page' : undefined}>
+	{#each items as item (item.key)}
+		<a
+			href={item.href}
+			class:current={item.current}
+			class:plus={item.key === 'new'}
+			aria-current={item.current ? 'page' : undefined}
+		>
 			<svg
 				viewBox="0 0 24 24"
 				width="24"
@@ -40,7 +38,7 @@
 				stroke-linejoin="round"
 				aria-hidden="true"
 			>
-				<path d={ICONS[item.href]} />
+				<path d={ICONS[item.key]} />
 			</svg>
 			<span>{item.label}</span>
 		</a>
@@ -54,7 +52,7 @@
 	nav {
 		position: fixed;
 		inset: 0 auto 0 0;
-		width: 72px;
+		width: 64px;
 		display: none;
 		flex-direction: column;
 		align-items: stretch;
@@ -64,9 +62,17 @@
 		border-right: 1px solid var(--line);
 		z-index: 10;
 	}
-	@media (min-width: 1100px) {
+	@media (min-width: 700px) {
 		nav {
 			display: flex;
+		}
+	}
+	@media (min-width: 1100px) {
+		nav {
+			width: 72px;
+		}
+		a span {
+			font-size: 11px;
 		}
 	}
 	a {
@@ -82,13 +88,20 @@
 		text-decoration: none;
 	}
 	a span {
-		font-size: 11px;
+		font-size: 10px;
 		font-weight: 650;
 		line-height: 1.1;
 		text-align: center;
 	}
 	a.current {
 		background: var(--a-soft);
+	}
+	a.plus svg {
+		box-sizing: content-box;
+		padding: 8px;
+		border-radius: 12px;
+		background: var(--ink);
+		color: var(--glass);
 	}
 	.logo {
 		margin-bottom: 8px;

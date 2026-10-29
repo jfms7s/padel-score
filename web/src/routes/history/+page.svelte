@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Past matches: finished matches the signed-in user started, newest first, a page at a time.
 	import { onMount } from 'svelte';
+	import BackLink from '#lib/components/BackLink.svelte';
 	import ResultRow from '#lib/components/ResultRow.svelte';
 	import { getHistory, playerMessage } from '#lib/players.ts';
 	import { requireSignedIn, session } from '#lib/session.ts';
@@ -52,7 +53,7 @@
 </script>
 
 <main class="acct page-wide">
-	<a class="back" href="/">{t.back}</a>
+	<BackLink />
 	<h1>{t.title}</h1>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
@@ -77,12 +78,6 @@
 </main>
 
 <style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
-	}
 	.more {
 		width: 100%;
 		max-width: 28rem;

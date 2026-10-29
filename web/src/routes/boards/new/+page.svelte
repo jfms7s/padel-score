@@ -1,5 +1,6 @@
 <script lang="ts">
 	// A new game board: a title, an optional place and the first of its seven days.
+	import BackLink from '#lib/components/BackLink.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { boardMessage, createBoard } from '#lib/boards.ts';
@@ -46,7 +47,7 @@
 </script>
 
 <main class="acct page-narrow">
-	<a class="back" href="/">{strings.appName}</a>
+	<BackLink />
 	<h1>{t.newBoard}</h1>
 	{#if $session.status === 'signed_in'}
 		<p class="hint">{t.newIntro}</p>
@@ -73,12 +74,3 @@
 		<p class="hint">{strings.auth.loading}</p>
 	{/if}
 </main>
-
-<style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
-	}
-</style>

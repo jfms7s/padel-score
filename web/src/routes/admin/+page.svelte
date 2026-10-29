@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BackLink from '#lib/components/BackLink.svelte';
 	import { onMount } from 'svelte';
 	import { authMessage, createResetLink, disableUser, enableUser, listUsers } from '#lib/auth.ts';
 	import LinkCode from '#lib/components/LinkCode.svelte';
@@ -72,6 +73,7 @@
 </script>
 
 <main class="acct page-wide-desk">
+	<BackLink />
 	<h1>{a.title}</h1>
 	{#if phase === 'loading'}
 		<p class="hint">{t.loading}</p>

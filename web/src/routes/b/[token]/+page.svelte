@@ -235,7 +235,6 @@
 <svelte:window onclick={closeMenu} onkeydown={closeMenu} />
 
 <main class="acct page-wide-desk">
-	<a class="back" href="/">{strings.appName}</a>
 
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
@@ -383,12 +382,6 @@
 </main>
 
 <style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
-	}
 	.head {
 		display: flex;
 		flex-wrap: wrap;

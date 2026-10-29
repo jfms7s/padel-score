@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BackLink from '#lib/components/BackLink.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import KindSettings from '#lib/components/events/KindSettings.svelte';
@@ -90,7 +91,7 @@
 </script>
 
 <main class="acct page-wide-desk">
-	<a class="back" href="/">{t.back}</a>
+	<BackLink />
 	<h1>{t.title}</h1>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
@@ -204,12 +205,6 @@
 		.formcol h2 {
 			margin-top: 0;
 		}
-	}
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
 	}
 	a.event {
 		color: inherit;
