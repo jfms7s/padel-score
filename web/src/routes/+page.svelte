@@ -1,101 +1,216 @@
 <script lang="ts">
+	// Home: the matches being scored, what waits for an answer, and the week ahead.
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import { onMount } from 'svelte';
 	import { authMessage, listMyMatches } from '#lib/auth.ts';
+	import { answerRequest, boardMessage } from '#lib/boards.ts';
+	import {
+		dismissPushPrompt,
+		getCalendar,
+		itemStart,
+		pushPromptDismissed,
+		startOfToday,
+		weekStart
+	} from '#lib/calendar.ts';
+	import Agenda from '#lib/components/home/Agenda.svelte';
+	import AgendaWeek from '#lib/components/home/AgendaWeek.svelte';
+	import BoardsStrip from '#lib/components/home/BoardsStrip.svelte';
+	import DetailPane from '#lib/components/home/DetailPane.svelte';
+	import LiveNow from '#lib/components/home/LiveNow.svelte';
+	import OpenToJoin from '#lib/components/home/OpenToJoin.svelte';
+	import Waiting from '#lib/components/home/Waiting.svelte';
+	import WeekStrip from '#lib/components/home/WeekStrip.svelte';
 	import DeleteMatchSheet from '#lib/components/DeleteMatchSheet.svelte';
-	import { dateText } from '#lib/dates.ts';
-	import { homeEvents, listEvents } from '#lib/events.ts';
+	import { addDays, browserTimeZone, localDate } from '#lib/dates.ts';
+	import { isCancelled, itemEnd, itemKey, liveNow, offlineRows, type LiveRow } from '#lib/home.ts';
 	import { claimBadgeCount } from '#lib/linking.ts';
-	import { getCalendar, nextUp, startOfToday } from '#lib/calendar.ts';
-	import NextUp from '#lib/components/NextUp.svelte';
 	import { listPlayers } from '#lib/players.ts';
+	import { currentPushEnv, devicePushOn, enablePush, pushSupport } from '#lib/push.ts';
 	import { requireSignedIn, session } from '#lib/session.ts';
-	import { strings } from '#lib/strings.ts';
-	import { listRecent, removeRecent, scorerPath, type RecentMatch } from '#lib/setup.ts';
+	import { shareLink } from '#lib/share.ts';
+	import { partnerLink } from '#lib/signups.ts';
+	import { listRecent, removeRecent } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
-	import type { CalendarItem, EventSummary, MyMatch } from '#lib/types.ts';
+	import { strings } from '#lib/strings.ts';
+	import type { Calendar, MyMatch, WaitingItem } from '#lib/types.ts';
+
+	const zone = browserTimeZone();
 
 	// Home is for a signed-in user: signed out, the browser goes to sign-in. With the server out
 	// of reach it still shows what this device knows.
 	$effect(() => {
 		void requireSignedIn();
 	});
-	const shown = $derived($session.status === 'signed_in' || $session.status === 'unavailable');
-
-	let recent = $state<RecentMatch[]>([]);
-	$effect(() => {
-		recent = listRecent(safeStorage());
-	});
+	const signedIn = $derived($session.status === 'signed_in');
+	const offline = $derived($session.status === 'unavailable');
+	const shown = $derived(signedIn || offline);
 
 	// Signed in, the server's list of live matches this user started, on any device.
 	let mine = $state<MyMatch[] | null>(null);
 	let mineFailure = $state<string | null>(null);
-	const signedIn = $derived($session.status === 'signed_in');
+	let recent = $state(listRecent(safeStorage()));
+	// The clock the live list is split by; moves on whenever the page comes back.
+	let now = $state(Date.now() / 1000);
+	const live = $derived(mine ? liveNow(mine, now, zone) : { fresh: [], older: [] });
+	const offlineList = $derived(offlineRows(recent, zone));
+
 	$effect(() => {
 		if (!signedIn) return;
-		let live = true;
+		let alive = true;
 		listMyMatches().then(
 			(list) => {
-				if (live) mine = list;
+				if (alive) mine = list;
 			},
 			(e: unknown) => {
-				if (live) mineFailure = authMessage(e);
+				if (alive) mineFailure = authMessage(e);
 			}
 		);
 		return () => {
-			live = false;
+			alive = false;
 		};
 	});
 
-	// Claims waiting on the coordinator, summed over the player list. Best effort: no badge on failure.
+	// Claims waiting on the coordinator, summed over the player list. Best effort: none shown on failure.
 	let claimCount = $state(0);
 	$effect(() => {
 		if (!signedIn) return;
-		let live = true;
+		let alive = true;
 		listPlayers({ quiet: true }).then(
 			(list) => {
-				if (live) claimCount = claimBadgeCount(list);
+				if (alive) claimCount = claimBadgeCount(list);
 			},
 			() => {}
 		);
 		return () => {
-			live = false;
+			alive = false;
 		};
 	});
 
-	// What is next on the calendar; best effort, no card on failure.
-	let next = $state<CalendarItem | null>(null);
+	// The calendar: what waits for an answer, the week and the agenda, the boards and what is open.
+	let cal = $state<Calendar | null>(null);
+	let failure = $state<string | null>(null);
+	let actionError = $state<string | null>(null);
+	let working = $state(false);
+	let note = $state<string | null>(null);
+
+	// Recomputed whenever the page comes back, so a page left open past midnight moves on.
+	let today = $state(localDate(Date.now() / 1000, zone));
+	const thisWeek = $derived(weekStart(today));
+	let weekFirst = $state(weekStart(localDate(Date.now() / 1000, zone)));
+
+	// The notifications card: shown once, to someone whose browser can and who has not said no.
+	let pushCard = $state(false);
+	let pushFailure = $state<string | null>(null);
+
+	onMount(() => {
+		// Coming back to the page: what waits for an answer may be gone, and the day may have changed.
+		const wake = () => {
+			if (document.visibilityState === 'hidden' || cal === null) return;
+			void refresh();
+		};
+		document.addEventListener('visibilitychange', wake);
+		window.addEventListener('focus', wake);
+		return () => {
+			document.removeEventListener('visibilitychange', wake);
+			window.removeEventListener('focus', wake);
+		};
+	});
+
+	let started = false;
 	$effect(() => {
-		if (!signedIn) return;
-		let live = true;
-		getCalendar(startOfToday()).then(
-			(cal) => {
-				if (live) next = nextUp(cal, Date.now() / 1000);
-			},
-			() => {}
-		);
-		return () => {
-			live = false;
-		};
+		if (!signedIn || started) return;
+		started = true;
+		void refresh().then(checkPush);
 	});
 
-	// The wide layout's Events list; best effort, and hidden below 1100px.
-	let events = $state<EventSummary[]>([]);
-	$effect(() => {
-		if (!signedIn) return;
-		let live = true;
-		listEvents().then(
-			(list) => {
-				if (live) events = homeEvents(list);
-			},
-			() => {}
-		);
-		return () => {
-			live = false;
-		};
-	});
+	async function refresh() {
+		try {
+			const secs = Date.now() / 1000;
+			now = secs;
+			const fresh = localDate(secs, zone);
+			if (fresh !== today) {
+				// The day rolled over: today moves, and the week view follows if it showed the old week.
+				if (weekFirst === thisWeek) weekFirst = weekStart(fresh);
+				today = fresh;
+			}
+			cal = await getCalendar(startOfToday(zone, secs));
+			failure = null;
+		} catch (e) {
+			failure = boardMessage(e);
+		}
+	}
 
-	// The match whose delete sheet is open. Once it is gone (or kept as finished) it leaves both
-	// lists: the same match can be in each.
-	let deleting = $state<{ label: string; scorerToken: string } | null>(null);
+	async function checkPush() {
+		if (pushSupport(currentPushEnv()) !== 'available') return;
+		if (pushPromptDismissed(safeStorage())) return;
+		try {
+			pushCard = !(await devicePushOn());
+		} catch {
+			pushCard = false;
+		}
+	}
+
+	async function turnOn() {
+		const result = await enablePush();
+		if (result === 'on') pushCard = false;
+		else pushFailure = result === 'denied' ? strings.push.denied : strings.push.failed;
+	}
+
+	function notNow() {
+		dismissPushPrompt(safeStorage());
+		pushCard = false;
+	}
+
+	async function answer(id: string, accept: boolean) {
+		working = true;
+		actionError = null;
+		try {
+			await answerRequest(id, accept);
+		} catch (e) {
+			actionError = boardMessage(e);
+		} finally {
+			working = false;
+		}
+		await refresh();
+	}
+
+	async function resend(w: Extract<WaitingItem, { kind: 'partner' }>) {
+		const result = await shareLink(
+			partnerLink(location.origin, w.join_token, w.partner_token),
+			strings.calendar.partnerShareTitle(w.event_name)
+		);
+		note =
+			result === 'copied' ? strings.calendar.linkCopied : result === 'failed' ? strings.calendar.linkFailed : null;
+	}
+
+	// The week grid's selection lives in ?item=. With none (or a stale one) the first item that
+	// ends after now and isn't cancelled is selected, in the week the grid shows if there is one.
+	const chosen = $derived.by(() => {
+		const items = cal?.items ?? [];
+		const wanted = page.url.searchParams.get('item');
+		const coming = items.filter((it) => !isCancelled(it) && itemEnd(it) > now);
+		const inWeek = coming.find((it) => {
+			const date = localDate(itemStart(it), zone);
+			return date >= weekFirst && date <= addDays(weekFirst, 6);
+		});
+		return items.find((it) => itemKey(it) === wanted) ?? inWeek ?? coming[0] ?? null;
+	});
+	const chosenKey = $derived(chosen ? itemKey(chosen) : null);
+
+	/** Select in place: no new history entry, and scroll and focus stay put. */
+	function select(key: string): Promise<void> {
+		const params = new URLSearchParams(page.url.searchParams.toString());
+		params.set('item', key);
+		return goto(`?${params}`, { replace: true, reset: false });
+	}
+
+	function toDay(date: string) {
+		document.getElementById(`day-${date}`)?.scrollIntoView({ block: 'start' });
+	}
+
+	// The match whose delete sheet is open. Once it is gone (or kept as finished) it leaves the list.
+	let deleting = $state<LiveRow | null>(null);
 	function closeDelete(removed: boolean) {
 		const token = deleting?.scorerToken;
 		deleting = null;
@@ -105,105 +220,90 @@
 		recent = listRecent(storage);
 		if (mine) mine = mine.filter((m) => m.scorer_token !== token);
 	}
-
-	/** Only a session gets the tokens; without them there is no page to open. */
-	const openable = (m: MyMatch): m is MyMatch & { scorer_token: string } => typeof m.scorer_token === 'string';
 </script>
 
-{#snippet deleteButton(label: string, scorerToken: string)}
-	<button
-		class="delete"
-		type="button"
-		aria-label={strings.deleteMatch.button(label)}
-		onclick={() => (deleting = { label, scorerToken })}
-	>
-		<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-			<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-		</svg>
-	</button>
-{/snippet}
-
-<main class:signed={signedIn} class:page-wide-desk={signedIn} class:page-narrow={!signedIn}>
+<main class="page-wide">
 	{#if shown}
-	<div class="cols">
-	<div class="col">
-	<h1>{strings.appName}</h1>
-	<p class="intro">{strings.homeIntro}</p>
-	<a class="primary" href="/new">{strings.newMatch}</a>
+		<h1>{strings.home.title}</h1>
+		<a class="primary" href="/new">{strings.newMatch}</a>
 
-	{#if signedIn}
-		{#if next}<NextUp item={next} />{/if}
-		<a class="more" href="/calendar">{strings.calendar.title} ›</a>
-		{#if claimCount > 0}
-			<a class="claims" href="/players">{strings.linking.claimBadge(claimCount)}</a>
-		{/if}
-		<h2>{strings.myMatches}</h2>
-		{#if mineFailure}
-			<p class="hint" role="alert">{mineFailure}</p>
-		{:else if mine === null}
-			<p class="hint">{strings.auth.loading}</p>
-		{:else if mine.filter(openable).length === 0}
-			<p class="hint">{strings.noMyMatches}</p>
-		{:else}
-			<ul aria-label={strings.myMatches}>
-				{#each mine.filter(openable) as match (match.id)}
-					<li>
-						<a href={scorerPath(match.scorer_token, match.spectator_token)}>
-							<span class="label">{match.label}</span>
-							<time datetime={new Date(match.last_activity_at * 1000).toISOString()}>
-								{dateText(match.last_activity_at)}
-							</time>
-						</a>
-						{#if !match.context}
-							{@render deleteButton(match.label, match.scorer_token)}
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	{/if}
-
-	</div>
-	<div class="col">
-	{#if signedIn}
-		<section class="events">
-			<h2>{strings.events.title}</h2>
-			{#if events.length === 0}
-				<p class="hint">{strings.events.none}</p>
-			{:else}
-				<ul aria-label={strings.events.title}>
-					{#each events as ev (ev.id)}
-						<li>
-							<a href="/events/{encodeURIComponent(ev.id)}">
-								<span class="label">{ev.name}</span>
-								<span class="chip" class:run={ev.status === 'running'}>{strings.events.status[ev.status]}</span>
-							</a>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</section>
-	{/if}
-	<h2>{strings.recentMatches}</h2>
-	{#if recent.length === 0}
-		<p class="hint">{strings.noRecent}</p>
-	{:else}
-		<ul>
-			{#each recent as match (match.scorer_token)}
-				<li>
-					<a href={scorerPath(match.scorer_token, match.spectator_token)}>
-						<span class="label">{match.label}</span>
-						<time datetime={new Date(match.created_at).toISOString()}>
-							{dateText(match.created_at / 1000)}
-						</time>
-					</a>
-					{@render deleteButton(match.label, match.scorer_token)}
-				</li>
-			{/each}
-		</ul>
-	{/if}
-	</div>
-	</div>
+		<div class="cols">
+			<div class="live">
+				{#if offline}
+					<LiveNow fresh={offlineList} older={[]} offline={true} ondelete={(row) => (deleting = row)} />
+					<p class="hint">{strings.networkError}</p>
+				{:else if mineFailure}
+					<p class="hint" role="alert">{mineFailure}</p>
+				{:else if mine === null}
+					<p class="hint">{strings.auth.loading}</p>
+				{:else}
+					<LiveNow fresh={live.fresh} older={live.older} offline={false} ondelete={(row) => (deleting = row)} />
+				{/if}
+			</div>
+			<div class="waiting">
+				{#if signedIn && cal}
+					<Waiting
+						{cal}
+						claims={claimCount}
+						{pushCard}
+						onanswer={answer}
+						onresend={resend}
+						onpush={turnOn}
+						onnotnow={notNow}
+						busy={working}
+						error={actionError}
+						{pushFailure}
+						{note}
+					/>
+				{/if}
+			</div>
+			<div class="week">
+				{#if signedIn}
+					{#if failure}
+						<p class="error" role="alert">{failure}</p>
+					{:else if cal === null}
+						<p class="hint">{strings.calendar.loading}</p>
+					{/if}
+					{#if cal}
+						<div class="below">
+							<WeekStrip
+								items={cal.items}
+								first={weekFirst}
+								{today}
+								timeZone={zone}
+								onweek={(first) => (weekFirst = first)}
+								onday={toDay}
+							/>
+							<Agenda items={cal.items} timeZone={zone} />
+						</div>
+						<div class="above">
+							<AgendaWeek
+								items={cal.items}
+								open={cal.open}
+								first={weekFirst}
+								{today}
+								timeZone={zone}
+								selected={chosenKey}
+								onselect={select}
+								onweek={(first) => (weekFirst = first)}
+							/>
+						</div>
+					{/if}
+				{/if}
+			</div>
+			<div class="detail above">
+				{#if signedIn && cal}
+					<h2>{strings.home.selected}</h2>
+					<DetailPane item={chosen} timeZone={zone} />
+				{/if}
+			</div>
+			<div class="boards">
+				{#if signedIn && cal}<BoardsStrip boards={cal.boards} />{/if}
+			</div>
+			<div class="open below">
+				{#if signedIn && cal}<OpenToJoin open={cal.open} />{/if}
+			</div>
+		</div>
 	{/if}
 </main>
 
@@ -216,28 +316,26 @@
 		padding-top: 16px;
 		padding-bottom: 48px;
 	}
+	/* A phone column below 700; the two-column layout is wide at every width from there. */
+	.cols,
 	h1 {
-		margin: 0 0 8px;
-		font-size: 40px;
+		max-width: 28rem;
+	}
+	h1 {
+		margin: 0 0 12px;
+		font-size: 32px;
 		font-weight: 800;
 		font-variation-settings: 'wdth' 75;
-		line-height: 1;
 	}
-	h2 {
-		margin: 40px 0 12px;
-		font-size: 18px;
-		font-weight: 750;
-		font-variation-settings: 'wdth' 85;
-	}
-	.intro,
 	.hint {
+		margin: 0 0 8px;
 		color: var(--muted);
-		margin: 0 0 24px;
 	}
-	.hint {
-		margin: 0;
+	.error {
+		color: var(--warn);
 	}
 	.primary {
+		max-width: 28rem;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -249,96 +347,54 @@
 		font-weight: 650;
 		text-decoration: none;
 	}
-	.more {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
+	h2 {
+		margin: 24px 0 8px;
+		font-size: 18px;
+		font-weight: 750;
+		font-variation-settings: 'wdth' 85;
 	}
-	.claims {
-		display: flex;
-		align-items: center;
-		min-height: var(--tap);
-		padding: 0 14px;
-		border: 1px solid var(--line);
-		border-radius: 12px;
-		background: var(--panel);
-		color: var(--ink);
-		text-decoration: none;
-	}
-	.chip {
-		flex: none;
-		padding: 0 8px;
-		border: 1px solid var(--line);
-		border-radius: 999px;
-		font-size: 12px;
-		font-weight: 650;
-		line-height: 22px;
-	}
-	.chip.run {
-		background: var(--a-soft);
-	}
-	.events {
+	/* The week grid and its detail are for 1100 and up. */
+	.above {
 		display: none;
 	}
-	@media (min-width: 1100px) {
-		main.signed .cols {
+	/* Below 700 one column in reading order: live, waiting, week, agenda, boards, open. */
+	.cols {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+	.cols > div {
+		min-width: 0;
+	}
+	/* From 700 the week and agenda stand on the left, the rest stack on the right. */
+	@media (min-width: 700px) {
+		.cols,
+		h1 {
+			max-width: none;
+		}
+		.cols {
 			display: grid;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-			gap: 0 48px;
+			grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+			column-gap: 32px;
+			/* A spare 1fr row soaks up the tall week column, so the right sections stack tightly. */
+			grid-template-rows: repeat(4, auto) 1fr;
 			align-items: start;
 		}
-		main.signed .events {
+		.cols > div {
+			grid-column: 2;
+		}
+		.cols > .week {
+			grid-column: 1;
+			grid-row: 1 / span 5;
+		}
+	}
+	/* From 1100 the week is a grid with a detail pane; the strip, agenda and open list give way. */
+	@media (min-width: 1100px) {
+		.above {
 			display: block;
 		}
-		main.signed .events h2 {
-			margin-top: 0;
+		.below {
+			display: none;
 		}
-	}
-	ul {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-		display: grid;
-		gap: 8px;
-	}
-	li {
-		display: flex;
-		gap: 8px;
-	}
-	li a {
-		flex: 1;
-		min-width: 0;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 12px;
-		min-height: var(--tap);
-		padding: 8px 14px;
-		border: 1px solid var(--line);
-		border-radius: 12px;
-		background: var(--panel);
-		color: var(--ink);
-		text-decoration: none;
-	}
-	.delete {
-		flex: none;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: var(--tap);
-		border: 1px solid var(--line);
-		border-radius: 12px;
-		background: var(--panel);
-		color: var(--muted);
-	}
-	.label {
-		font-weight: 650;
-		overflow-wrap: anywhere;
-	}
-	time {
-		color: var(--muted);
-		font-size: 13px;
-		flex: none;
 	}
 </style>

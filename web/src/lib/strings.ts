@@ -40,9 +40,7 @@ export const strings = {
 
 	// Home.
 	newMatch: 'New match',
-	recentMatches: 'Recent matches on this device',
 	noRecent: 'Matches you start here will show up in this list.',
-	homeIntro: 'Score a padel match from the fence.',
 
 	// New match.
 	setup: {
@@ -903,7 +901,6 @@ export const strings = {
 	},
 
 	// Home, signed in.
-	myMatches: 'My matches',
 	noMyMatches: 'Matches you start while signed in show up here, on any device.',
 
 	// Deleting a match started by mistake, from a home list.
@@ -984,12 +981,9 @@ export const strings = {
 		eventSoon: 'Starts in 24 hours'
 	},
 
-	// The calendar page and Next up on Home.
+	// The calendar behind Home: what it fetches and the words its pieces share.
 	calendar: {
-		title: 'Calendar',
 		loading: 'Loading your calendar…',
-		nextUp: 'Next up',
-		waiting: 'Waiting for your answer',
 		partnerWaiting: (event: string) => `Waiting for your partner in ${event}`,
 		partnerHint: 'They have not answered yet. Send the link again if they lost it.',
 		partnerResend: 'Send the link again',
@@ -998,7 +992,6 @@ export const strings = {
 		linkFailed: "Couldn't share the link.",
 		upcoming: 'Coming up',
 		empty: 'Nothing planned yet. Make a board, plan a match or join an event.',
-		week: 'Week',
 		weekOf: (first: string, last: string) => `${first} – ${last}`,
 		prevWeek: 'Previous week',
 		nextWeek: 'Next week',
@@ -1008,9 +1001,7 @@ export const strings = {
 		openNone: 'Nothing open to join right now.',
 		newBoard: 'New board',
 		match: 'Match',
-		matchBy: (name: string) => `Match by ${name}`,
 		role: { organiser: 'You organise', player: 'You play', line: 'In line' },
-		inLine: (n: number) => `In line, number ${n}`,
 		matchState: { open: 'Open', full: 'Full', started: 'Started', cancelled: 'Cancelled', past: 'Over' },
 		teamsOpen: (teams: number, max: number) => `${teams} of ${max} teams`,
 		placesOpen: (n: number) => (n === 1 ? '1 place open' : `${n} places open`),
@@ -1018,6 +1009,30 @@ export const strings = {
 		pushHint: 'Hear when a game forms, a player is missing or someone asks to swap.',
 		pushOn: 'Turn on',
 		pushNotNow: 'Not now'
+	},
+
+	// Home: live matches, what waits for you, and this week.
+	home: {
+		title: 'Home',
+		live: 'Live now',
+		resume: 'Resume',
+		older: (n: number) => (n === 1 ? '1 older unfinished match · tidy up' : `${n} older unfinished matches · tidy up`),
+		offlineHint: 'Offline: matches started on this device',
+		waiting: 'Waiting for you',
+		claims: (n: number) => (n === 1 ? '1 claim to approve' : `${n} claims to approve`),
+		review: 'Review',
+		week: 'This week',
+		withYou: (others: string) => `${others} & you`,
+		matchBy: (name: string) => `${name}’s match`,
+		game: 'Game',
+		short: 'needs a player',
+		inLine: 'in line',
+		teams: (n: number) => `${n} teams`,
+		open: (n: number) => `${n} open`,
+		selected: 'Selected',
+		openBoard: 'Open on the board',
+		openPage: 'Open',
+		nothing: 'Nothing planned this week.'
 	},
 
 	// Game boards: the board page, the week grid and the new-board form.

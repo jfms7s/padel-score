@@ -8,8 +8,17 @@ use crate::calendar::{CalendarItem, MAX_ITEMS, MAX_OPEN, OpenItem, Role};
 use crate::push::{Notice, NoticeKind, Payload, queue_in};
 use crate::store::{StoreError, Tx};
 
-/// `(id, owner, join token, starts at, place, cancelled, started)`.
-type MatchRow = (String, String, String, i64, Option<String>, bool, bool);
+/// `(id, owner, owner name, join token, starts at, place, cancelled, started)`.
+type MatchRow = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    Option<String>,
+    bool,
+    bool,
+);
 
 /// The matches starting at or after `from` that `user` owns, holds a place in (directly or
 /// through an entry of the owner's linked to them) or waits in line for, cancelled ones too.
@@ -21,8 +30,9 @@ pub(crate) async fn calendar_matches_in(
     now: i64,
 ) -> Result<Vec<(String, CalendarItem)>, StoreError> {
     let rows: Vec<MatchRow> = sqlx::query_as(
-        "SELECT s.id, s.owner_user_id, s.join_token, s.starts_at, s.place, \
-         s.cancelled_at IS NOT NULL, s.started_at IS NOT NULL FROM scheduled_matches s \
+        "SELECT s.id, s.owner_user_id, u.display_name, s.join_token, s.starts_at, \
+         s.place, s.cancelled_at IS NOT NULL, s.started_at IS NOT NULL \
+         FROM scheduled_matches s JOIN users u ON u.id = s.owner_user_id \
          WHERE s.starts_at >= ?1 AND (s.owner_user_id = ?2 \
            OR EXISTS (SELECT 1 FROM scheduled_places p LEFT JOIN players pl ON pl.id = p.player_id \
              WHERE p.scheduled_id = s.id AND (p.user_id = ?2 OR pl.linked_user_id = ?2)) \
@@ -36,7 +46,7 @@ pub(crate) async fn calendar_matches_in(
     .fetch_all(&mut *conn)
     .await?;
     let mut out = Vec::new();
-    for (id, owner, join_token, starts_at, place, cancelled, started) in rows {
+    for (id, owner, owner_name, join_token, starts_at, place, cancelled, started) in rows {
         let filled = filled_in(conn, &id).await?;
         let role = if owner == user {
             Role::Organiser
@@ -57,6 +67,7 @@ pub(crate) async fn calendar_matches_in(
             id,
             CalendarItem::Match {
                 join_token,
+                owner_name,
                 starts_at,
                 place,
                 role,

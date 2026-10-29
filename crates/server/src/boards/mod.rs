@@ -1004,7 +1004,7 @@ impl Store {
                 board.notice(
                     p,
                     NoticeKind::BoardDeleted,
-                    "/calendar".to_owned(),
+                    "/".to_owned(),
                     (start, end),
                     None,
                 )

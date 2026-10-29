@@ -287,7 +287,7 @@ pub enum NoticeKind {
 }
 
 /// What a notification says, as data. `url` is always a same-origin path (`/b/{token}`,
-/// `/j/{token}`, `/calendar`, `/account`); the other fields depend on the kind.
+/// `/j/{token}`, `/`, `/account`); the other fields depend on the kind.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Payload {
     pub kind: NoticeKind,

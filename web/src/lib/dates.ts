@@ -23,6 +23,13 @@ export function dayLabel(secs: number, timeZone?: string, locale = DEFAULT_LOCAL
 	return new Date(ms(secs)).toLocaleDateString(locale, { weekday: 'short', day: 'numeric', ...zone(timeZone) });
 }
 
+/** "Tue 27 Oct". */
+export function longDate(secs: number, timeZone?: string, locale = DEFAULT_LOCALE): string {
+	return new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short', ...zone(timeZone) })
+		.format(new Date(ms(secs)))
+		.replace(/,/g, '');
+}
+
 /** "20:00". */
 export function timeText(secs: number, timeZone?: string, locale = DEFAULT_LOCALE): string {
 	return new Date(ms(secs)).toLocaleTimeString(locale, {

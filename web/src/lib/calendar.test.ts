@@ -5,12 +5,8 @@ import {
 	dismissPushPrompt,
 	getCalendar,
 	itemHref,
-	itemDetail,
-	itemNote,
 	itemStart,
 	itemTime,
-	itemTitle,
-	nextUp,
 	pushPromptDismissed,
 	shiftWeek,
 	startOfToday,
@@ -27,6 +23,8 @@ const game = (start: number, over: Partial<Extract<CalendarItem, { kind: 'game' 
 	end: start + 5400,
 	players: ['Ana', 'Rui', 'Marta', 'Joana'],
 	state: 'full',
+	board_place: null,
+	me: 0,
 	...over
 });
 const event = (starts_at: number, over: Partial<Extract<CalendarItem, { kind: 'event' }>> = {}): CalendarItem => ({
@@ -41,6 +39,8 @@ const event = (starts_at: number, over: Partial<Extract<CalendarItem, { kind: 'e
 	team: ['Ana', 'Rui'],
 	place_in_line: null,
 	status: 'setup',
+	teams: 0,
+	max_teams: 8,
 	...over
 });
 const match = (starts_at: number, over: Partial<Extract<CalendarItem, { kind: 'match' }>> = {}): CalendarItem => ({
@@ -51,6 +51,7 @@ const match = (starts_at: number, over: Partial<Extract<CalendarItem, { kind: 'm
 	role: 'player',
 	players: ['Ana', null, null, null],
 	state: 'open',
+	owner_name: 'Marta',
 	...over
 });
 const cal = (items: CalendarItem[]): Calendar => ({ waiting: [], items, boards: [], open: [] });
@@ -73,50 +74,6 @@ describe('byDay', () => {
 		const a = event(Date.UTC(2026, 7, 4, 9) / 1000);
 		const b = match(Date.UTC(2026, 7, 4, 10) / 1000);
 		expect(byDay([a, b], 'UTC')[0]?.items).toEqual([a, b]);
-	});
-});
-
-describe('nextUp', () => {
-	const now = 1_800_000_000;
-	it('next_up_skips_past_and_cancelled', () => {
-		const played = game(now - 7200, { state: 'played' });
-		const over = game(now - 7200, { state: 'past' });
-		const justEnded = game(now - 5400);
-		const cancelled = event(now + 600, { status: 'cancelled' });
-		const finished = event(now + 600, { status: 'finished' });
-		const longAgo = event(now - 3601);
-		const startedMatch = match(now + 700, { state: 'started' });
-		const cancelledMatch = match(now + 700, { state: 'cancelled' });
-		const pastMatch = match(now + 700, { state: 'past' });
-		const wanted = match(now + 3600, { state: 'full' });
-		const c = cal([
-			played,
-			over,
-			justEnded,
-			cancelled,
-			finished,
-			longAgo,
-			startedMatch,
-			cancelledMatch,
-			pastMatch,
-			wanted,
-			game(now + 7200)
-		]);
-		expect(nextUp(c, now)).toBe(wanted);
-	});
-
-	it('takes a game still being played, a short game, and an event that started under an hour ago', () => {
-		const playing = game(now - 1800);
-		expect(nextUp(cal([playing]), now)).toBe(playing);
-		const short = game(now + 60, { state: 'short' });
-		expect(nextUp(cal([short]), now)).toBe(short);
-		const started = event(now - 3600, { status: 'running' });
-		expect(nextUp(cal([started]), now)).toBe(started);
-	});
-
-	it('is null when nothing is coming up', () => {
-		expect(nextUp(cal([]), now)).toBeNull();
-		expect(nextUp(cal([game(now - 9000)]), now)).toBeNull();
 	});
 });
 
@@ -143,9 +100,9 @@ describe('itemHref', () => {
 		).toBe('/j/o2');
 	});
 
-	it('encodes what is not url safe and falls back to the calendar without a link', () => {
+	it('encodes what is not url safe and falls back to Home without a link', () => {
 		expect(itemHref(game(1, { board_token: 'a/b', game_id: 'c d' }))).toBe('/b/a%2Fb?game=c%20d');
-		expect(itemHref(event(1, { join_token: null }))).toBe('/calendar');
+		expect(itemHref(event(1, { join_token: null }))).toBe('/');
 	});
 });
 
@@ -229,44 +186,11 @@ describe('the push prompt', () => {
 	});
 });
 
-describe('item words', () => {
-	it('titles each kind', () => {
-		expect(itemTitle(game(1))).toBe('Thursday padel');
-		expect(itemTitle(event(1))).toBe('Sunday cup');
-		expect(itemTitle(match(1))).toBe('Match');
-		expect(itemTitle(match(1, { place: 'Club' }))).toBe('Match · Club');
-	});
-
+describe('itemTime', () => {
 	it('prints the time in the zone', () => {
 		const at = Date.UTC(2026, 10, 4, 20) / 1000;
 		expect(itemTime(game(at), 'UTC')).toBe('20:00–21:30');
 		expect(itemTime(event(at), 'Asia/Tokyo')).toBe('05:00');
 		expect(itemTime(match(at), 'UTC')).toBe('20:00');
-	});
-
-	it('says the state of a game and the part in an event or a match', () => {
-		expect(itemNote(game(1, { state: 'short' }))).toBe('One missing');
-		expect(itemNote(event(1, { role: 'organiser' }))).toBe('You organise');
-		expect(itemNote(event(1, { role: 'line', team: null, place_in_line: 2 }))).toBe('In line, number 2');
-		expect(itemNote(event(1, { status: 'cancelled' }))).toBe('Cancelled');
-		expect(itemNote(match(1))).toBe('You play');
-		expect(itemNote(match(1, { role: 'line' }))).toBe('In line');
-		expect(itemNote(match(1, { state: 'cancelled' }))).toBe('Cancelled');
-	});
-
-	it('says what the viewer is in a full match, not just that it is full', () => {
-		expect(itemNote(match(1, { state: 'full', role: 'organiser' }))).toBe('You organise');
-		expect(itemNote(match(1, { state: 'full', role: 'player' }))).toBe('You play');
-		expect(itemNote(match(1, { state: 'full', role: 'line' }))).toBe('In line');
-		expect(itemNote(match(1, { state: 'started', role: 'player' }))).toBe('Started');
-	});
-
-	it('details_for_each_kind', () => {
-		expect(itemDetail(game(1))).toBe('Ana, Rui, Marta, Joana');
-		expect(itemDetail(event(1, { place: 'Club', team: ['Ana', 'Rui'] }))).toBe('Club · Ana & Rui');
-		expect(itemDetail(event(1, { place: 'Club', team: null }))).toBe('Club');
-		expect(itemDetail(event(1, { place: null, team: ['Ana'] }))).toBe('Ana');
-		expect(itemDetail(event(1, { place: null, team: null }))).toBe('');
-		expect(itemDetail(match(1, { place: 'Club' }))).toBe('');
 	});
 });

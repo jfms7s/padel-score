@@ -5,14 +5,10 @@
 import { accountRequest } from './api';
 import { addDays, browserTimeZone, localDate, localMidnight, timeRange, timeText } from './dates';
 import type { StorageLike } from './setup';
-import { strings } from './strings';
 import type { Calendar, CalendarItem, OpenItem } from './types';
 
 /** Set once someone says "Not now" to the notifications card. */
 export const PUSH_PROMPT_KEY = 'padel-score:push-prompt-dismissed';
-
-/** An hour after its start an event or a game still counts as "now" for Next up (spec: P135). */
-const STARTED_GRACE_SECS = 3600;
 
 /** The calendar from `from` on; the server reads back at most two days before now. */
 export function getCalendar(from: number): Promise<Calendar> {
@@ -42,52 +38,9 @@ export function byDay(items: CalendarItem[], timeZone?: string): { date: string;
 	return days;
 }
 
-/** What to call an item: the board, the event, or the match with its place. */
-export function itemTitle(item: CalendarItem): string {
-	switch (item.kind) {
-		case 'game':
-			return item.board_title;
-		case 'event':
-			return item.name;
-		case 'match':
-			return item.place ? `${strings.calendar.match} · ${item.place}` : strings.calendar.match;
-	}
-}
-
 /** "20:00–21:30" for a game, "20:00" for an event or a match (their end is not planned). */
 export function itemTime(item: CalendarItem, timeZone?: string): string {
 	return item.kind === 'game' ? timeRange(item.start, item.end, timeZone) : timeText(item.starts_at, timeZone);
-}
-
-/** The line under the title: the game's state, or the viewer's part in an event or a match. */
-export function itemNote(item: CalendarItem): string {
-	const t = strings.calendar;
-	switch (item.kind) {
-		case 'game':
-			return strings.boards.gameState[item.state];
-		case 'event': {
-			if (item.status === 'cancelled') return strings.events.status.cancelled;
-			if (item.role === 'line' && item.place_in_line !== null) return t.inLine(item.place_in_line);
-			return t.role[item.role];
-		}
-		case 'match': {
-			// A full match says what the viewer is in it; the other states say what became of it.
-			if (item.state !== 'open' && item.state !== 'full') return t.matchState[item.state];
-			return t.role[item.role];
-		}
-	}
-}
-
-/** The line under the note: who plays a game, or the place and team of an event. Empty if none. */
-export function itemDetail(item: CalendarItem): string {
-	switch (item.kind) {
-		case 'game':
-			return item.players.join(', ');
-		case 'event':
-			return [item.place, item.team?.join(' & ')].filter(Boolean).join(' · ');
-		case 'match':
-			return '';
-	}
 }
 
 const enc = encodeURIComponent;
@@ -99,29 +52,10 @@ export function itemHref(item: CalendarItem | OpenItem): string {
 			return `/b/${enc(item.board_token)}?game=${enc(item.game_id)}`;
 		case 'event':
 			if ('event_id' in item && item.event_id) return `/events/${enc(item.event_id)}`;
-			return item.join_token ? `/j/${enc(item.join_token)}` : '/calendar';
+			return item.join_token ? `/j/${enc(item.join_token)}` : '/';
 		case 'match':
 			return `/j/${enc(item.join_token)}`;
 	}
-}
-
-/**
- * The first item worth showing as "Next up": a full or short game that has not ended, an event
- * in setup or running that started less than an hour ago or later, or an open or full match.
- */
-export function nextUp(cal: Calendar, now: number): CalendarItem | null {
-	return (
-		cal.items.find((item) => {
-			switch (item.kind) {
-				case 'game':
-					return (item.state === 'full' || item.state === 'short') && item.end > now;
-				case 'event':
-					return (item.status === 'setup' || item.status === 'running') && item.starts_at >= now - STARTED_GRACE_SECS;
-				case 'match':
-					return item.state === 'open' || item.state === 'full';
-			}
-		}) ?? null
-	);
 }
 
 /** The Monday of the week a day ("2026-11-04") falls in. */

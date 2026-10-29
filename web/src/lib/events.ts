@@ -45,15 +45,6 @@ export async function listEvents(): Promise<EventSummary[]> {
 	return page.items;
 }
 
-/** The home page's Events list: running first, then setup, newest first within each, at most five. */
-export function homeEvents(list: EventSummary[]): EventSummary[] {
-	const rank = { running: 0, setup: 1, finished: 2, cancelled: 3 } as const;
-	return list
-		.filter((e) => e.status !== 'finished' && e.status !== 'cancelled')
-		.sort((x, y) => rank[x.status] - rank[y.status] || y.created_at - x.created_at)
-		.slice(0, 5);
-}
-
 export function createEvent(req: NewEvent): Promise<EventDetail> {
 	return accountRequest('/api/events', { ...signedIn, method: 'POST', body: req, ok: 201 });
 }

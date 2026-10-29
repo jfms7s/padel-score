@@ -12,7 +12,6 @@ import {
 	eventViewStreamUrl,
 	getCourt,
 	groupsFromTies,
-	homeEvents,
 	invalidScoreKey,
 	invalidScoreText,
 	isEventDetail,
@@ -393,44 +392,5 @@ describe('coordinator screens', () => {
 		expect(isEventDetail({ ...detail, courts: null })).toBe(false);
 		expect(isEventDetail(null)).toBe(false);
 		expect(isEventDetail({ ...detail, event: 'x' })).toBe(false);
-	});
-});
-
-describe('homeEvents', () => {
-	const ev = (id: string, status: EventSummary['status'], created_at: number): EventSummary =>
-		({ id, status, created_at }) as EventSummary;
-	const ids = (list: EventSummary[]) => list.map((e) => e.id);
-
-	it('lists running before setup', () => {
-		expect(ids(homeEvents([ev('s', 'setup', 9), ev('r', 'running', 1)]))).toEqual(['r', 's']);
-	});
-
-	it('puts the newest first within each status', () => {
-		const list = [ev('r1', 'running', 1), ev('s2', 'setup', 5), ev('r2', 'running', 3), ev('s1', 'setup', 2)];
-		expect(ids(homeEvents(list))).toEqual(['r2', 'r1', 's2', 's1']);
-	});
-
-	it('leaves finished events out', () => {
-		expect(ids(homeEvents([ev('f', 'finished', 9), ev('s', 'setup', 1)]))).toEqual(['s']);
-	});
-
-	it('leaves cancelled events out', () => {
-		expect(ids(homeEvents([ev('c', 'cancelled', 9), ev('s', 'setup', 1)]))).toEqual(['s']);
-	});
-
-	it('shows at most five', () => {
-		const list = Array.from({ length: 8 }, (_, i) => ev(`e${i}`, 'running', i));
-		expect(ids(homeEvents(list))).toEqual(['e7', 'e6', 'e5', 'e4', 'e3']);
-	});
-
-	it('is empty for no events', () => {
-		expect(homeEvents([])).toEqual([]);
-	});
-
-	it('does not change its input', () => {
-		const list = [ev('s', 'setup', 1), ev('f', 'finished', 2), ev('r', 'running', 3)];
-		const before = ids(list);
-		homeEvents(list);
-		expect(ids(list)).toEqual(before);
 	});
 });

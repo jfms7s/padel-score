@@ -18,9 +18,9 @@ describe('noticeText', () => {
 		expect(n.tag).toBe('from_the_future:/b/abc:');
 	});
 
-	it('opens the calendar when the payload has no usable url', () => {
-		expect(noticeText({ kind: 'test' }).url).toBe('/calendar');
-		expect(noticeText({ kind: 'test', url: 'https://evil.test/x' }).tag).toBe('test:/calendar:');
+	it('opens Home when the payload has no usable url', () => {
+		expect(noticeText({ kind: 'test' }).url).toBe('/');
+		expect(noticeText({ kind: 'test', url: 'https://evil.test/x' }).tag).toBe('test:/:');
 	});
 });
 
@@ -161,8 +161,9 @@ describe('safeNoticeUrl', () => {
 			'',
 			'/\t/evil.test'
 		]) {
-			expect(safeNoticeUrl(bad)).toBe('/calendar');
+			expect(safeNoticeUrl(bad)).toBe('/');
 		}
+		expect(safeNoticeUrl(undefined)).toBe('/');
 		expect(safeNoticeUrl('/b/abc')).toBe('/b/abc');
 		expect(safeNoticeUrl('/j/abc?x=1')).toBe('/j/abc?x=1');
 	});
@@ -252,8 +253,8 @@ describe('noticeText for the reminders', () => {
 	});
 
 	it('keeps the same-origin guard first for the new kinds', () => {
-		expect(noticeText({ kind: 'short_game', url: '//evil.test/x' }, utc).url).toBe('/calendar');
-		expect(noticeText({ kind: 'event_soon', url: 'https://evil.test' }, utc).url).toBe('/calendar');
+		expect(noticeText({ kind: 'short_game', url: '//evil.test/x' }, utc).url).toBe('/');
+		expect(noticeText({ kind: 'event_soon', url: 'https://evil.test' }, utc).url).toBe('/');
 	});
 
 	it('leaves out what the payload lacks', () => {

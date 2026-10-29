@@ -40,7 +40,10 @@ pub enum CalendarItem {
         game_id: String,
         start: i64,
         end: i64,
+        board_place: Option<String>,
         players: Vec<String>,
+        /// The caller's index in `players`.
+        me: usize,
         state: GameState,
     },
     Event {
@@ -55,9 +58,13 @@ pub enum CalendarItem {
         team: Option<Vec<String>>,
         place_in_line: Option<u32>,
         status: Status,
+        /// Teams with a place, hand-added ones included.
+        teams: usize,
+        max_teams: Option<u32>,
     },
     Match {
         join_token: String,
+        owner_name: String,
         starts_at: i64,
         place: Option<String>,
         role: Role,

@@ -5,6 +5,7 @@ import {
 	fromLocalInputs,
 	localDate,
 	localMidnight,
+	longDate,
 	monthYear,
 	nextMonday,
 	timeRange,
@@ -23,6 +24,10 @@ describe('dates', () => {
 		// Tokyo is nine hours ahead: already Thursday the 5th.
 		expect(dayLabel(WED_2000, 'Asia/Tokyo')).toBe('Thu 5');
 		expect(timeText(WED_2000, 'Asia/Tokyo')).toBe('05:00');
+	});
+
+	it('writes a long date without commas', () => {
+		expect(longDate(Date.UTC(2026, 9, 27, 12) / 1000, 'Europe/Lisbon')).toBe('Tue 27 Oct');
 	});
 
 	it('writes midnight as 00:00, not 24:00', () => {

@@ -722,7 +722,7 @@ async fn delete_board_tells_players_with_games() {
     assert_eq!(kinds(&rows, "board_deleted"), sorted(&[&b, &c, &d]));
     assert_eq!(rows.len(), 3);
     for (_, p) in &rows {
-        assert_eq!(p["url"], "/calendar");
+        assert_eq!(p["url"], "/");
         assert_eq!(p["title"], "Thursday padel");
         assert_eq!(p["start"], START);
         assert_eq!(p["end"], START + HOUR);

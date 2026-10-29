@@ -7,7 +7,7 @@ import { strings } from './strings';
 import type { NoticePayload } from './types';
 
 const t = strings.notices;
-const HOME = '/calendar';
+const HOME = '/';
 
 export interface NoticeText {
 	title: string;
@@ -17,7 +17,7 @@ export interface NoticeText {
 }
 
 /**
- * A same-origin path to open on tap, or the calendar. A single leading `/` and nothing that a
+ * A same-origin path to open on tap, or Home. A single leading `/` and nothing that a
  * browser reads as another host (`//x`, `/\x`) or a scheme.
  */
 export function safeNoticeUrl(url: unknown): string {

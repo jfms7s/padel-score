@@ -35,9 +35,11 @@
 	--a-soft: #e3ecfb;
 	--b: #0c8a5e;
 	--b-soft: #ddf2ea;
+	--ev: #7a4fd0;
 	/* The court tile's halves, which carry white text: --a and --b darkened to 4.5:1 or more. */
 	--a-court: #1c5fd0;
 	--b-court: #0c845a;
+	--ev-court: #7a4fd0;
 	--ball: #d9ea2a;
 	--warn: #b42318;
 	--page: #e7ecef;
@@ -57,8 +59,10 @@
 		--a-soft: #1a3358;
 		--b: #1fa474;
 		--b-soft: #123c30;
+		--ev: #a585f0;
 		--a-court: #3871d7;
 		--b-court: #19835d;
+		--ev-court: #8058d6;
 		--page: #0a1520;
 		color-scheme: dark;
 	}
@@ -73,8 +77,10 @@
 	--a-soft: #1a3358;
 	--b: #1fa474;
 	--b-soft: #123c30;
+	--ev: #a585f0;
 	--a-court: #3871d7;
 	--b-court: #19835d;
+	--ev-court: #8058d6;
 	--page: #0a1520;
 	color-scheme: dark;
 }
@@ -319,7 +325,8 @@ button {
 	}
 }
 
-/* Narrow like a phone column below 1100px, wide from there (the desktop layouts). */
+/* Narrow like a phone column below 1100px, wide from there (the desktop layouts). Only for pages
+   whose own layout starts at 1100; a page that goes two-column earlier uses page-wide. */
 .page-wide-desk {
 	max-width: 28rem;
 }
