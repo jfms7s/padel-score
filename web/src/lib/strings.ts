@@ -39,7 +39,6 @@ export const strings = {
 	advantageShort: 'AD',
 
 	// Home.
-	newMatch: 'New match',
 	noRecent: 'Matches you start here will show up in this list.',
 
 	// New match.
@@ -1022,7 +1021,6 @@ export const strings = {
 		boardGames: (n: number) => (n === 0 ? 'No games yet' : n === 1 ? '1 game' : `${n} games`),
 		openToJoin: 'Open to join',
 		openNone: 'Nothing open to join right now.',
-		newBoard: 'New board',
 		match: 'Match',
 		role: { organiser: 'You organise', player: 'You play', line: 'In line' },
 		matchState: { open: 'Open', full: 'Full', started: 'Started', cancelled: 'Cancelled', past: 'Over' },
@@ -1493,7 +1491,6 @@ export const strings = {
 	// Organise: what you run, in three segments.
 	organise: {
 		title: 'Organise',
-		newEvent: 'New event',
 		empty: 'Nothing here.',
 		segments: { coming: 'Coming up', running: 'Running', past: 'Past' },
 		signups: 'Sign-ups',

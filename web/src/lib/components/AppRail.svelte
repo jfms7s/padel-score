@@ -1,12 +1,29 @@
 <script lang="ts">
-	import { initials, navItems } from '#lib/nav.ts';
+	import { initials, navItems, type NavItem } from '#lib/nav.ts';
 	import { ICONS } from '#lib/navIcons.ts';
 	import { strings } from '#lib/strings.ts';
 
-	let { pathname, name }: { pathname: string; name: string } = $props();
+	let { pathname, name, onnew }: { pathname: string; name: string; onnew?: () => void } = $props();
 
 	const items = $derived(navItems(pathname));
 </script>
+
+{#snippet face(item: NavItem)}
+				<svg
+				viewBox="0 0 24 24"
+				width="24"
+				height="24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.8"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
+				<path d={ICONS[item.key]} />
+			</svg>
+			<span>{item.label}</span>
+{/snippet}
 
 <nav aria-label={strings.nav.label}>
 	<a class="logo" href="/" aria-label={strings.appName}>
@@ -21,27 +38,20 @@
 		</svg>
 	</a>
 	{#each items as item (item.key)}
-		<a
-			href={item.href}
-			class:current={item.current}
-			class:plus={item.key === 'new'}
-			aria-current={item.current ? 'page' : undefined}
-		>
-			<svg
-				viewBox="0 0 24 24"
-				width="24"
-				height="24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1.8"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				aria-hidden="true"
+		{#if item.key === 'new' && onnew}
+			<button type="button" class="plus" onclick={onnew}>
+				{@render face(item)}
+			</button>
+		{:else}
+			<a
+				href={item.href}
+				class:current={item.current}
+				class:plus={item.key === 'new'}
+				aria-current={item.current ? 'page' : undefined}
 			>
-				<path d={ICONS[item.key]} />
-			</svg>
-			<span>{item.label}</span>
-		</a>
+				{@render face(item)}
+			</a>
+		{/if}
 	{/each}
 	<a class="who" href="/account" aria-label={strings.nav.account} title={name}>
 		<span class="circle">{initials(name)}</span>
@@ -75,7 +85,8 @@
 			font-size: 11px;
 		}
 	}
-	a {
+	a,
+	button {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -83,11 +94,15 @@
 		gap: 2px;
 		min-height: var(--tap);
 		padding: 6px 2px;
+		border: 0;
 		border-radius: 10px;
+		background: none;
+		font: inherit;
 		color: var(--ink);
 		text-decoration: none;
 	}
-	a span {
+	a span,
+	button span {
 		font-size: 10px;
 		font-weight: 650;
 		line-height: 1.1;
@@ -96,7 +111,7 @@
 	a.current {
 		background: var(--a-soft);
 	}
-	a.plus svg {
+	.plus svg {
 		box-sizing: content-box;
 		padding: 8px;
 		border-radius: 12px;

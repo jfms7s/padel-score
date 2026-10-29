@@ -6,6 +6,7 @@
 	import { updatesHeld } from '#lib/holds.svelte.ts';
 	import { bootSession, session } from '#lib/session.ts';
 	import AppRail from '#lib/components/AppRail.svelte';
+	import NewChooser from '#lib/components/NewChooser.svelte';
 	import TabBar from '#lib/components/TabBar.svelte';
 	import { chromeOf, initials } from '#lib/nav.ts';
 	import { safeSessionStorage } from '#lib/storage.ts';
@@ -23,6 +24,9 @@
 	const chrome = $derived(chromeOf(page.url.pathname));
 	const navved = $derived(chrome === 'app' && $session.status === 'signed_in');
 	const onLogin = $derived(page.url.pathname === '/login');
+
+	// The ＋ New sheet.
+	let choosing = $state(false);
 
 	// A new deploy: SvelteKit notices it (on focus, on return and every minute); switch to it
 	// when nothing here can be lost. Until then, a small button reloads on demand.
@@ -65,9 +69,11 @@
 </svelte:head>
 
 {#if navved && $session.status === 'signed_in'}
-	<AppRail pathname={page.url.pathname} name={$session.me.display_name} />
-	<TabBar pathname={page.url.pathname} />
+	<AppRail pathname={page.url.pathname} name={$session.me.display_name} onnew={() => (choosing = true)} />
+	<TabBar pathname={page.url.pathname} onnew={() => (choosing = true)} />
 {/if}
+
+{#if choosing}<NewChooser onclose={() => (choosing = false)} />{/if}
 
 <div class:has-nav={navved}>
 	{#if chrome === 'standalone'}

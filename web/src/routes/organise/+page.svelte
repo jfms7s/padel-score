@@ -75,10 +75,7 @@
 </script>
 
 <main class="acct page-wide-desk">
-	<header>
-		<h1>{t.title}</h1>
-		<a class="secondary" href="/new/event">{t.newEvent}</a>
-	</header>
+	<h1>{t.title}</h1>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
 	{/if}
@@ -129,15 +126,6 @@
 </main>
 
 <style>
-	header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-	}
-	header h1 {
-		margin-right: auto;
-	}
 	.switch {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);

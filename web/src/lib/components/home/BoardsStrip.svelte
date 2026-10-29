@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The game boards the user is in, and the way to start another.
+	// The game boards the user is in.
 	import { browserTimeZone, dayLabel } from '#lib/dates.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { BoardStrip } from '#lib/types.ts';
@@ -26,7 +26,6 @@
 			{/each}
 		</ul>
 	{/if}
-	<a class="new" href="/new/board">{t.newBoard}</a>
 </section>
 
 <style>
@@ -60,17 +59,5 @@
 	.sub {
 		font-size: 13px;
 		color: var(--muted);
-	}
-	.new {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		min-height: var(--tap);
-		border: 1px solid var(--line);
-		border-radius: 14px;
-		background: var(--panel);
-		color: var(--ink);
-		font-weight: 650;
-		text-decoration: none;
 	}
 </style>
