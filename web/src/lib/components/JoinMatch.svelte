@@ -4,7 +4,7 @@
 	Start match. The page reads and runs the calls; this shows and asks.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { browserTimeZone, toLocalInputs } from '#lib/dates.ts';
 	import { rulesText } from '#lib/events.ts';
 	import {
@@ -125,15 +125,15 @@
 	function keepPlace() {
 		const slot = removing;
 		removing = null;
-		queueMicrotask(() => (slot === null ? undefined : removeButtons[slot])?.focus());
+		void tick().then(() => (slot === null ? undefined : removeButtons[slot])?.focus());
 	}
 	function keepLeave() {
 		confirmLeave = false;
-		queueMicrotask(() => leaveButton?.focus());
+		void tick().then(() => leaveButton?.focus());
 	}
 	function keepMatch() {
 		confirmCancel = false;
-		queueMicrotask(() => cancelButton?.focus());
+		void tick().then(() => cancelButton?.focus());
 	}
 
 	const removeName = $derived(removing === null ? '' : (view.places.find((p) => p.slot === removing)?.name ?? ''));

@@ -94,6 +94,7 @@ describe('join page while the session loads', () => {
 		const loading = text(render(JoinEvent, { props: { ...eventProps, sessionLoading: true } }).body);
 		expect(loading).not.toContain(strings.signups.signInToJoin);
 		expect(loading).not.toContain(strings.signups.joinAlone);
+		expect(loading).not.toContain(`aria-label="${strings.signups.signupsLabel}"`);
 	});
 
 	it('invitation: no sign-in and no accept while loading', () => {

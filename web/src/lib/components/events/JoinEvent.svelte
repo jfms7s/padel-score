@@ -4,6 +4,7 @@
 	opened from a partner link. The page reads and runs the calls; this shows and asks.
 -->
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { rulesText } from '#lib/events.ts';
 	import { myEntryText, partnerLink, scheduleText } from '#lib/signups.ts';
 	import { strings } from '#lib/strings.ts';
@@ -76,13 +77,20 @@
 	});
 	function closeLeaveConfirm() {
 		confirmLeave = false;
-		queueMicrotask(() => leaveButton?.focus());
+		void tick().then(() => leaveButton?.focus());
 	}
-	let hadCard = false;
+	// Each card is tracked on its own: after Accept the invitation is gone but the entry appears.
+	let hadInvite = false;
 	$effect(() => {
-		const has = invite !== null || me !== null;
-		if (hadCard && !has) heading?.focus();
-		hadCard = has;
+		const has = invite !== null;
+		if (hadInvite && !has) heading?.focus();
+		hadInvite = has;
+	});
+	let hadEntry = false;
+	$effect(() => {
+		const has = me !== null;
+		if (hadEntry && !has) heading?.focus();
+		hadEntry = has;
 	});
 
 	function continueWithPartner(event: SubmitEvent) {
@@ -157,11 +165,9 @@
 			<button class="danger" type="button" bind:this={leaveButton} disabled={working} onclick={() => (confirmLeave = true)}>{t.leave}</button>
 		{/if}
 	</section>
-{:else if open && !inviteGone && !inviteFailed && !invite}
+{:else if open && !sessionLoading && !inviteGone && !inviteFailed && !invite}
 	<section class="card" aria-label={t.signupsLabel}>
-		{#if sessionLoading}
-			<!-- Neither action until we know who is looking. -->
-		{:else if !signedIn}
+		{#if !signedIn}
 			<button class="primary" type="button" onclick={onsignin}>{t.signInToJoin}</button>
 		{:else if withPartner}
 			<form onsubmit={continueWithPartner}>
