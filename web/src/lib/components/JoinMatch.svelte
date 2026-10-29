@@ -4,7 +4,7 @@
 	Start match. The page reads and runs the calls; this shows and asks.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { browserTimeZone, toLocalInputs } from '#lib/dates.ts';
 	import { rulesText } from '#lib/events.ts';
 	import {
@@ -22,6 +22,7 @@
 		view,
 		origin,
 		signedIn,
+		sessionLoading,
 		working,
 		error,
 		note,
@@ -37,6 +38,8 @@
 		view: ScheduledView;
 		origin: string;
 		signedIn: boolean;
+		/** The session is still being read: neither the sign-in button nor the signed-in action shows. */
+		sessionLoading: boolean;
 		working: boolean;
 		error: string | null;
 		/** A short confirmation, like "Link copied". */
@@ -98,11 +101,46 @@
 		me?.in_line === true && !owner ? view.line.findIndex((p) => p.user_id !== null) : -1
 	);
 
+	// Focus goes where the closed confirm was: back on its button when dismissed, on the heading
+	// when the action is sent (the card it sat in may be gone by the time the page is read again).
+	let placesHeading: HTMLElement | undefined = $state();
+	let pageHeading: HTMLElement | undefined = $state();
+	let removeConfirmEl: HTMLElement | undefined = $state();
+	let leaveConfirmEl: HTMLElement | undefined = $state();
+	let cancelConfirmEl: HTMLElement | undefined = $state();
+	let leaveButton: HTMLElement | undefined = $state();
+	let cancelButton: HTMLElement | undefined = $state();
+	let removeButtons = $state<Record<number, HTMLElement | undefined>>({});
+
+	$effect(() => {
+		if (removing !== null && removeConfirmEl) removeConfirmEl.focus();
+	});
+	$effect(() => {
+		if (confirmLeave && leaveConfirmEl) leaveConfirmEl.focus();
+	});
+	$effect(() => {
+		if (confirmCancel && cancelConfirmEl) cancelConfirmEl.focus();
+	});
+
+	function keepPlace() {
+		const slot = removing;
+		removing = null;
+		void tick().then(() => (slot === null ? undefined : removeButtons[slot])?.focus());
+	}
+	function keepLeave() {
+		confirmLeave = false;
+		void tick().then(() => leaveButton?.focus());
+	}
+	function keepMatch() {
+		confirmCancel = false;
+		void tick().then(() => cancelButton?.focus());
+	}
+
 	const removeName = $derived(removing === null ? '' : (view.places.find((p) => p.slot === removing)?.name ?? ''));
 </script>
 
 <header class="head">
-	<h1>{t.title}</h1>
+	<h1 tabindex="-1" bind:this={pageHeading}>{t.title}</h1>
 	<p class="when">{when}</p>
 	<p class="hint">{rulesText(view.format)}</p>
 	<p class="hint">{t.by(view.owner_name)}</p>
@@ -123,8 +161,8 @@
 <div aria-live="polite">{#if note}<p class="ok">{note}</p>{/if}</div>
 
 <section aria-labelledby="h-places">
-	<h2 id="h-places">{t.placesTitle}</h2>
-	<ul class="list" aria-label={t.placesTitle}>
+	<h2 id="h-places" tabindex="-1" bind:this={placesHeading}>{t.placesTitle}</h2>
+	<ul class="list" aria-label={t.placesListLabel}>
 		{#each view.places as p (p.slot)}
 			<li class="row">
 				<span class="what">
@@ -141,6 +179,7 @@
 					<button
 						class="secondary small"
 						type="button"
+						bind:this={removeButtons[p.slot]}
 						disabled={working}
 						aria-label={t.removeLabel(p.name)}
 						onclick={() => (removing = p.slot)}
@@ -153,7 +192,7 @@
 	</ul>
 	{#if live && filled < 4}<p class="hint">{t.short(4 - filled)}</p>{/if}
 	{#if removing !== null}
-		<div class="confirm" role="group" aria-label={t.removeConfirm(removeName)}>
+		<div class="confirm" role="group" tabindex="-1" bind:this={removeConfirmEl} aria-label={t.removeConfirm(removeName)}>
 			<p>{t.removeConfirm(removeName)}</p>
 			<div class="actions">
 				<button
@@ -163,12 +202,13 @@
 					onclick={() => {
 						const slot = removing;
 						removing = null;
+						placesHeading?.focus();
 						if (slot !== null) onremove(slot);
 					}}
 				>
 					{t.removeYes}
 				</button>
-				<button class="secondary" type="button" onclick={() => (removing = null)}>{t.keep}</button>
+				<button class="secondary" type="button" onclick={keepPlace}>{t.keep}</button>
 			</div>
 		</div>
 	{/if}
@@ -199,15 +239,17 @@
 	</p>
 {/if}
 
-{#if actions.join}
-	<section class="card" aria-label={t.placesTitle}>
+{#if sessionLoading}
+	<!-- Neither action until we know who is looking. -->
+{:else if actions.join}
+	<section class="card" aria-label={t.joinCardLabel}>
 		<button class="primary" type="button" disabled={working} onclick={onjoin}>
 			{working ? t.joining : view.state === 'full' ? t.joinLine : t.join}
 		</button>
 		<p class="hint">{t.joinNote}</p>
 	</section>
 {:else if !signedIn && live}
-	<section class="card" aria-label={t.placesTitle}>
+	<section class="card" aria-label={t.joinCardLabel}>
 		<button class="primary" type="button" onclick={onsignin}>{t.signInToJoin}</button>
 	</section>
 {/if}
@@ -215,7 +257,7 @@
 {#if actions.leave}
 	<section class="card" aria-label={t.leave}>
 		{#if confirmLeave}
-			<p>{t.leaveConfirm}</p>
+			<p tabindex="-1" bind:this={leaveConfirmEl}>{t.leaveConfirm}</p>
 			<div class="actions">
 				<button
 					class="danger"
@@ -223,15 +265,16 @@
 					disabled={working}
 					onclick={() => {
 						confirmLeave = false;
+						placesHeading?.focus();
 						onleave();
 					}}
 				>
 					{working ? t.leaving : t.leave}
 				</button>
-				<button class="secondary" type="button" onclick={() => (confirmLeave = false)}>{t.keep}</button>
+				<button class="secondary" type="button" onclick={keepLeave}>{t.keep}</button>
 			</div>
 		{:else}
-			<button class="danger" type="button" disabled={working} onclick={() => (confirmLeave = true)}>{t.leave}</button>
+			<button class="danger" type="button" bind:this={leaveButton} disabled={working} onclick={() => (confirmLeave = true)}>{t.leave}</button>
 		{/if}
 	</section>
 {/if}
@@ -288,7 +331,7 @@
 		{/if}
 
 		{#if confirmCancel}
-			<p>{t.cancelConfirm}</p>
+			<p tabindex="-1" bind:this={cancelConfirmEl}>{t.cancelConfirm}</p>
 			<div class="actions">
 				<button
 					class="danger"
@@ -296,15 +339,16 @@
 					disabled={working}
 					onclick={() => {
 						confirmCancel = false;
+						pageHeading?.focus();
 						oncancel();
 					}}
 				>
 					{t.cancelYes}
 				</button>
-				<button class="secondary" type="button" onclick={() => (confirmCancel = false)}>{t.cancelNo}</button>
+				<button class="secondary" type="button" onclick={keepMatch}>{t.cancelNo}</button>
 			</div>
 		{:else}
-			<button class="danger" type="button" disabled={working} onclick={() => (confirmCancel = true)}>{t.cancelMatch}</button>
+			<button class="danger" type="button" bind:this={cancelButton} disabled={working} onclick={() => (confirmCancel = true)}>{t.cancelMatch}</button>
 		{/if}
 	</section>
 {/if}

@@ -4,6 +4,7 @@
 	opened from a partner link. The page reads and runs the calls; this shows and asks.
 -->
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { rulesText } from '#lib/events.ts';
 	import { myEntryText, partnerLink, scheduleText } from '#lib/signups.ts';
 	import { strings } from '#lib/strings.ts';
@@ -14,6 +15,7 @@
 		token,
 		origin,
 		signedIn,
+		sessionLoading,
 		working,
 		error,
 		note,
@@ -32,6 +34,8 @@
 		token: string;
 		origin: string;
 		signedIn: boolean;
+		/** The session is still being read: neither the sign-in button nor the signed-in action shows. */
+		sessionLoading: boolean;
 		working: boolean;
 		error: string | null;
 		/** A short confirmation, like "Link copied". */
@@ -63,6 +67,36 @@
 	let partnerName = $state('');
 	let confirmLeave = $state(false);
 
+	// Focus goes where the closed card was: the Leave button when the confirm is dismissed, the
+	// heading when the invitation or the entry is gone (the card it was in no longer exists).
+	let heading: HTMLElement | undefined = $state();
+	let leaveConfirmEl: HTMLElement | undefined = $state();
+	let leaveButton: HTMLElement | undefined = $state();
+	$effect(() => {
+		if (confirmLeave && leaveConfirmEl) leaveConfirmEl.focus();
+	});
+	function closeLeaveConfirm() {
+		confirmLeave = false;
+		void tick().then(() => leaveButton?.focus());
+	}
+	// Each card is tracked on its own: after Accept the invitation is gone but the entry appears.
+	let hadInvite = false;
+	$effect(() => {
+		const has = invite !== null;
+		if (hadInvite && !has) heading?.focus();
+		hadInvite = has;
+	});
+	let hadEntry = false;
+	$effect(() => {
+		const has = me !== null;
+		if (hadEntry && !has) {
+			// The entry is gone (left): a later rejoin must open its card without the confirm.
+			confirmLeave = false;
+			heading?.focus();
+		}
+		hadEntry = has;
+	});
+
 	function continueWithPartner(event: SubmitEvent) {
 		event.preventDefault();
 		const name = partnerName.trim();
@@ -74,7 +108,7 @@
 </script>
 
 <header class="head">
-	<h1>{ev.name}</h1>
+	<h1 tabindex="-1" bind:this={heading}>{ev.name}</h1>
 	{#if when !== ''}<p class="when">{when}</p>{/if}
 	<p class="hint">{strings.events.kinds[ev.kind]} · {rulesText(ev.format)}</p>
 	<p class="hint">{t.by(ev.organiser_name)}</p>
@@ -97,7 +131,9 @@
 	<section class="card" aria-labelledby="h-invite">
 		<h2 id="h-invite">{t.inviteTitle(invite.inviter_name, invite.event_name)}</h2>
 		<p class="hint">{t.inviteHint}</p>
-		{#if signedIn}
+		{#if sessionLoading}
+			<!-- Neither action until we know who is looking. -->
+		{:else if signedIn}
 			<div class="actions">
 				<button class="primary" type="button" disabled={working || !open} onclick={onaccept}>{t.accept}</button>
 				<button class="secondary" type="button" disabled={working} onclick={ondecline}>{t.decline}</button>
@@ -124,16 +160,16 @@
 			</button>
 		{/if}
 		{#if confirmLeave}
-			<p>{t.leaveConfirm}</p>
+			<p tabindex="-1" bind:this={leaveConfirmEl}>{t.leaveConfirm}</p>
 			<div class="actions">
 				<button class="danger" type="button" disabled={working} onclick={onleave}>{working ? t.leaving : t.leave}</button>
-				<button class="secondary" type="button" onclick={() => (confirmLeave = false)}>{t.keepEvent}</button>
+				<button class="secondary" type="button" onclick={closeLeaveConfirm}>{t.keepEvent}</button>
 			</div>
 		{:else if !cancelled && !started}
-			<button class="danger" type="button" disabled={working} onclick={() => (confirmLeave = true)}>{t.leave}</button>
+			<button class="danger" type="button" bind:this={leaveButton} disabled={working} onclick={() => (confirmLeave = true)}>{t.leave}</button>
 		{/if}
 	</section>
-{:else if open && !inviteGone && !inviteFailed && !invite}
+{:else if open && !sessionLoading && !inviteGone && !inviteFailed && !invite}
 	<section class="card" aria-label={t.signupsLabel}>
 		{#if !signedIn}
 			<button class="primary" type="button" onclick={onsignin}>{t.signInToJoin}</button>

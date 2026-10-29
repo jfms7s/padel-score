@@ -99,6 +99,12 @@ describe('the device calls', () => {
 		expect(request).not.toHaveBeenCalled();
 	});
 
+	it('is dismissed, not denied, when the prompt is closed without an answer', async () => {
+		browser('default');
+		expect(await enablePush()).toBe('dismissed');
+		expect(request).not.toHaveBeenCalled();
+	});
+
 	it('fails, and drops the subscription, when the server refuses it', async () => {
 		const unsubscribe = vi.fn().mockResolvedValue(true);
 		browser('granted', { toJSON: () => ({}), unsubscribe });

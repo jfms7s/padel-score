@@ -52,6 +52,18 @@ export function dayCells(day: Pick<Day, 'start' | 'end'>, timeZone: string, anch
 	});
 }
 
+/**
+ * The row an arrow key moves to: the nearest row from `row` in the direction `dir` (1 later, -1
+ * earlier) that the day has a cell on, or null at the end of the day. A day where the clocks
+ * went forward has no cells on the skipped rows, so the step jumps over them.
+ */
+export function steppedRow(rows: ReadonlySet<number>, row: number, dir: 1 | -1): number | null {
+	if (rows.size === 0) return null;
+	const last = Math.max(...rows);
+	for (let r = row + dir; r >= 0 && r <= last; r += dir) if (rows.has(r)) return r;
+	return null;
+}
+
 /** The range two cells make, whichever was tapped first: it ends after the later cell. */
 export function rangeFromCells(a: number, b: number): Range {
 	return { start: Math.min(a, b), end: Math.max(a, b) + SLOT_SECS };

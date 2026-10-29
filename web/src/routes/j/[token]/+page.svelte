@@ -51,6 +51,8 @@
 	let inviteFailed = $state(false);
 
 	const signedIn = $derived($session.status === 'signed_in');
+	// Until the session is read, the page is neither signed in nor signed out.
+	const sessionLoading = $derived($session.status === 'loading');
 
 	// A response only counts if nothing newer was asked for since.
 	let latest = 0;
@@ -182,6 +184,7 @@
 			view={view.view}
 			{origin}
 			{signedIn}
+			{sessionLoading}
 			{working}
 			error={actionError}
 			{note}
@@ -200,6 +203,7 @@
 			{token}
 			{origin}
 			{signedIn}
+			{sessionLoading}
 			{working}
 			error={actionError}
 			{note}

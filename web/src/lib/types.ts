@@ -975,7 +975,6 @@ export type SignupErrorCode =
 	| 'already_signed_up'
 	| 'not_solo'
 	| 'signup_taken'
-	| 'not_public'
 	| 'not_auto_paired'
 	| 'nothing_to_take';
 

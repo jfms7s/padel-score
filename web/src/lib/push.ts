@@ -117,13 +117,20 @@ export async function syncPush(): Promise<boolean> {
 }
 
 /**
- * Asks for permission, subscribes this device and tells the server. Any failure past the
- * permission prompt is `failed`; the browser's subscription is dropped so the switch stays off.
+ * Asks for permission, subscribes this device and tells the server. Outcomes:
+ * - `on`: subscribed and the server has it.
+ * - `denied`: permission is blocked.
+ * - `dismissed`: the prompt was closed unanswered.
+ * - `failed`: any failure past the permission prompt; the browser's subscription is dropped so
+ *   the switch stays off.
  */
-export async function enablePush(): Promise<'on' | 'denied' | 'failed'> {
+export async function enablePush(): Promise<'on' | 'denied' | 'dismissed' | 'failed'> {
 	let sub: PushSubscription | null = null;
 	try {
-		if ((await Notification.requestPermission()) !== 'granted') return 'denied';
+		const permission = await Notification.requestPermission();
+		// `default` after asking means the prompt was closed unanswered; only `denied` is a block.
+		if (permission === 'default') return 'dismissed';
+		if (permission !== 'granted') return 'denied';
 		const reg = await navigator.serviceWorker.ready;
 		const { key } = await accountRequest<{ key: string }>('/api/push/key');
 		sub = await reg.pushManager.subscribe({

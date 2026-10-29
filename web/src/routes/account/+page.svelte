@@ -59,6 +59,7 @@
 	let pushBusy = $state(false);
 	let pushFailure = $state<string | null>(null);
 	let pushNote = $state<string | null>(null);
+	let pushDismissed = $state<string | null>(null);
 	let origin = $state('');
 
 	onMount(() => {
@@ -165,11 +166,13 @@
 		pushBusy = true;
 		pushFailure = null;
 		pushNote = null;
+		pushDismissed = null;
 		try {
 			if (want) {
 				const result = await enablePush();
 				pushOn = result === 'on';
 				if (result === 'failed') pushFailure = p.failed;
+				else if (result === 'dismissed') pushDismissed = p.dismissed;
 				// The prompt may have just been refused for good.
 				support = pushSupport(currentPushEnv());
 			} else {
@@ -189,6 +192,7 @@
 		pushBusy = true;
 		pushFailure = null;
 		pushNote = null;
+		pushDismissed = null;
 		try {
 			await sendTestPush();
 			pushNote = p.testSent;
@@ -316,6 +320,7 @@
 			{/if}
 			{#if pushFailure}<p class="error" role="alert">{pushFailure}</p>{/if}
 			{#if pushNote}<p class="ok" role="status">{pushNote}</p>{/if}
+			{#if pushDismissed}<p class="hint" role="status">{pushDismissed}</p>{/if}
 		{:else if support === 'ios-needs-home-screen'}
 			<p class="hint">{p.iosNeedsHomeScreen}</p>
 		{:else if support === 'denied'}

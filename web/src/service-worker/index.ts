@@ -82,7 +82,8 @@ sw.addEventListener('notificationclick', (event) => {
 		sw.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (windows) => {
 			const open = windows.find((w) => new URL(w.url).origin === sw.location.origin);
 			if (open) {
-				await open.focus();
+				// A focus that rejects must not skip the navigate or the new window below.
+				await open.focus().catch(() => null);
 				// A client that cannot navigate (it is closing) falls through to a new window.
 				if (await open.navigate(url).catch(() => null)) return;
 			}
