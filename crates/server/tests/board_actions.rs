@@ -48,6 +48,7 @@ async fn board(s: &Store, creator: &str) -> String {
     s.create_board(
         creator,
         NewBoard {
+            allow_guests: false,
             title: "Thursday padel".to_owned(),
             place: None,
             time_zone: "Europe/Lisbon".to_owned(),
@@ -1340,6 +1341,7 @@ async fn live_game() -> (
         .create_board(
             &users[0].0,
             NewBoard {
+                allow_guests: false,
                 title: "Live".to_owned(),
                 place: None,
                 time_zone: "Europe/Lisbon".to_owned(),

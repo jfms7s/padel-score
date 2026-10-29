@@ -10,5 +10,6 @@ fn main() -> std::io::Result<()> {
         )?;
     }
     println!("cargo:rerun-if-changed=../../web/build");
+    println!("cargo:rerun-if-changed=migrations");
     Ok(())
 }

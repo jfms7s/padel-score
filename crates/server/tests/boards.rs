@@ -42,6 +42,7 @@ async fn user(s: &Store, name: &str) -> String {
 
 fn new_board(starts_at: i64) -> NewBoard {
     NewBoard {
+        allow_guests: false,
         title: "Thursday padel".to_owned(),
         place: Some("Club".to_owned()),
         time_zone: "Europe/Lisbon".to_owned(),
@@ -607,6 +608,7 @@ async fn only_the_creator_edits_or_deletes() {
     let token = board(&s, &a).await;
     s.join_board(&token, &b, T0).await.unwrap();
     let change = || BoardChange {
+        allow_guests: None,
         title: Some("New name".to_owned()),
         place: None,
     };
@@ -629,6 +631,7 @@ async fn only_the_creator_edits_or_deletes() {
             &token,
             &a,
             BoardChange {
+                allow_guests: None,
                 title: None,
                 place: Some(None),
             },
@@ -643,6 +646,7 @@ async fn only_the_creator_edits_or_deletes() {
             &token,
             &a,
             BoardChange {
+                allow_guests: None,
                 title: Some(" ".to_owned()),
                 place: None,
             },
@@ -654,6 +658,43 @@ async fn only_the_creator_edits_or_deletes() {
 
     s.delete_board(&token, &a, T0).await.unwrap();
     assert!(s.board_view(&token, Some(&a), T0).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn allow_guests_defaults_off_and_the_creator_turns_it_on() {
+    let (s, _) = setup().await;
+    let a = user(&s, "Ana").await;
+    let b = user(&s, "Rui").await;
+    let token = board(&s, &a).await;
+    s.join_board(&token, &b, T0).await.unwrap();
+    let view = s.board_view(&token, Some(&a), T0).await.unwrap().unwrap();
+    assert!(!view.board.allow_guests);
+
+    let on = || BoardChange {
+        allow_guests: Some(true),
+        ..Default::default()
+    };
+    let err = s.update_board(&token, &b, on(), T0).await.unwrap_err();
+    assert!(
+        matches!(err, StoreError::Conflict("creator_only")),
+        "{err:?}"
+    );
+    let view = s.update_board(&token, &a, on(), T0).await.unwrap();
+    assert!(view.board.allow_guests);
+    let view = s
+        .update_board(
+            &token,
+            &a,
+            BoardChange {
+                title: Some("Renamed".to_owned()),
+                ..Default::default()
+            },
+            T0,
+        )
+        .await
+        .unwrap();
+    assert!(view.board.allow_guests);
+    assert_eq!(view.board.title, "Renamed");
 }
 
 #[tokio::test]
@@ -886,6 +927,7 @@ async fn the_creator_may_leave_and_still_edit_and_delete() {
             &token,
             &a,
             BoardChange {
+                allow_guests: None,
                 title: Some("Renamed".to_owned()),
                 place: None,
             },
@@ -949,4 +991,110 @@ async fn leaving_keeps_an_ended_game_as_history_and_tells_nobody() {
     assert_eq!(view.games[0].state, GameState::Past);
     assert!(view.members.iter().all(|m| m.user_id != b));
     assert!(outbox(&pool).await.is_empty());
+}
+
+/// A board where a guest "Zé" (`guest_x`) and three users share `[START, START + 1h)`, so a game
+/// has formed. The guest is inserted by raw SQL: the store API for guests comes later.
+async fn formed_with_guest() -> (Store, SqlitePool, String, [String; 3]) {
+    let (s, pool) = setup().await;
+    let a = user(&s, "Ana").await;
+    let b = user(&s, "Rui").await;
+    let c = user(&s, "Marta").await;
+    let token = board(&s, &a).await;
+    let board_id: String = sqlx::query_scalar("SELECT id FROM boards WHERE token = ?")
+        .bind(&token)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO board_guests (id, board_id, name, name_key, created_at) \
+         VALUES ('guest_x', ?, 'Zé', 'zé', ?)",
+    )
+    .bind(&board_id)
+    .bind(T0)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO board_members (board_id, user_id, joined_at) VALUES (?, 'guest_x', ?)",
+    )
+    .bind(&board_id)
+    .bind(T0)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO board_ranges (id, board_id, user_id, starts_at, ends_at, created_at) \
+         VALUES ('r_x', ?, 'guest_x', ?, ?, ?)",
+    )
+    .bind(&board_id)
+    .bind(START)
+    .bind(START + HOUR)
+    .bind(T0)
+    .execute(&pool)
+    .await
+    .unwrap();
+    for (i, who) in [&a, &b, &c].into_iter().enumerate() {
+        let now = T0 + 1 + i64::try_from(i).unwrap();
+        s.add_free(&token, who, START, START + HOUR, now)
+            .await
+            .unwrap();
+    }
+    (s, pool, token, [a, b, c])
+}
+
+#[tokio::test]
+async fn view_names_guests_and_marks_them() {
+    let (s, _pool, token, [a, b, c]) = formed_with_guest().await;
+    let view = s
+        .board_view(&token, Some(&a), T0 + 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let guest = view
+        .members
+        .iter()
+        .find(|m| m.user_id == "guest_x")
+        .unwrap();
+    assert_eq!((guest.name.as_str(), guest.guest), ("Zé", true));
+    for u in [&a, &b, &c] {
+        let m = view.members.iter().find(|m| &m.user_id == u).unwrap();
+        assert!(!m.guest);
+    }
+    assert!(!view.me.as_ref().unwrap().guest);
+    assert_eq!(view.games.len(), 1);
+    let players = &view.games[0].players;
+    let zed = players.iter().find(|p| p.user_id == "guest_x").unwrap();
+    assert_eq!((zed.name.as_str(), zed.guest), ("Zé", true));
+    assert!(
+        players
+            .iter()
+            .filter(|p| p.user_id != "guest_x")
+            .all(|p| !p.guest)
+    );
+}
+
+#[tokio::test]
+async fn notices_skip_guest_ids() {
+    let (_s, pool, _token, [a, b, c]) = formed_with_guest().await;
+    let rows = outbox(&pool).await;
+    assert!(rows.iter().all(|(u, _)| !u.starts_with("guest_")));
+    assert_eq!(kinds(&rows, "game_formed"), sorted(&[&a, &b, &c]));
+}
+
+#[tokio::test]
+async fn calendar_counts_guest_players() {
+    let (s, _pool, _token, [a, _b, _c]) = formed_with_guest().await;
+    let cal = serde_json::to_value(s.calendar(&a, T0, T0 + 10).await.unwrap()).unwrap();
+    let text = cal.to_string();
+    let game = cal
+        .as_array()
+        .or_else(|| cal["items"].as_array())
+        .unwrap_or_else(|| panic!("calendar shape: {text}"))
+        .iter()
+        .find(|i| i["players"].is_array())
+        .unwrap_or_else(|| panic!("no game in {text}"));
+    let players = game["players"].as_array().unwrap();
+    assert_eq!(players.len(), 4);
+    assert!(players.iter().any(|p| p == "Zé"));
 }
