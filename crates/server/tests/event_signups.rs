@@ -1639,3 +1639,68 @@ async fn removing_a_taken_team_moves_it_down_and_nobody_moves_up_until_another_t
     assert_eq!(w.kinds(&users[6]).await, ["no_place"]);
     assert!(matches!(w.me(&users[6]).await, Some(MyEntry::Line { .. })));
 }
+
+impl World {
+    /// The team the organiser took for `user`'s sign-up.
+    async fn taken_team_of(&self, user: &str) -> String {
+        sqlx::query_scalar("SELECT taken_team_id FROM event_signups WHERE user1_id = ?")
+            .bind(user)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap()
+    }
+
+    async fn remove_taken(&self, user: &str, at: i64) {
+        let team = self.taken_team_of(user).await;
+        self.state
+            .store
+            .delete_team(&self.owner, &self.event, &team, at)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn an_entry_left_out_again_after_being_taken_is_told_no_place_again() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 7).await;
+    let x = &users[6];
+    // Take 1: six of seven, X left out.
+    w.take(T0 + 500).await.unwrap();
+    assert_eq!(w.kinds(x).await, ["no_place"]);
+    // Take 2: a hand-added team makes room, X is in. The outbox is not pruned in between.
+    w.hand_team("Hand A", "Hand B").await;
+    assert_eq!(w.take(T0 + 600).await.unwrap().taken, 1);
+    assert_eq!(w.kinds(x).await, ["no_place", "moved_up"]);
+    // The organiser removes X's team and two more, then hand-adds one: Take 3 has room for two
+    // of the three back on the line, and X signed up last.
+    for u in [x, &users[0], &users[1]] {
+        w.remove_taken(u, T0 + 700).await;
+    }
+    w.hand_team("Hand C", "Hand D").await;
+    assert_eq!(w.take(T0 + 800).await.unwrap().taken, 2);
+    assert_eq!(
+        w.kinds(x).await,
+        ["no_place", "moved_up", "moved_down", "no_place"]
+    );
+    assert!(matches!(w.me(x).await, Some(MyEntry::Line { .. })));
+}
+
+#[tokio::test]
+async fn removing_every_taken_team_moves_nobody_up() {
+    let w = non_stop_world(10).await;
+    let users = w.teams("T", 7).await;
+    w.take(T0 + 500).await.unwrap();
+    for u in &users[..6] {
+        w.remove_taken(u, T0 + 600).await;
+    }
+    // Nobody was taken, so nobody is in: the one left out still waits, untold.
+    assert_eq!(w.kinds(&users[6]).await, ["no_place"]);
+    assert!(matches!(w.me(&users[6]).await, Some(MyEntry::Line { .. })));
+    for u in &users[..6] {
+        assert_eq!(w.kinds(u).await, ["moved_down"], "{u}");
+        assert!(matches!(w.me(u).await, Some(MyEntry::Line { .. })), "{u}");
+    }
+    let list = w.list().await;
+    assert_eq!((list.teams.len(), list.line.len()), (0, 7));
+}
