@@ -43,6 +43,7 @@
 	let editing = $state(false);
 	let editTitle = $state('');
 	let editPlace = $state('');
+	let editAllowGuests = $state(false);
 	let openGameId = $state<string | null>(null);
 	let askedForGame = false;
 
@@ -210,6 +211,7 @@
 		menuOpen = false;
 		editTitle = view.board.title;
 		editPlace = view.board.place ?? '';
+		editAllowGuests = view.board.allow_guests;
 		editing = true;
 		confirming = null;
 	}
@@ -219,7 +221,11 @@
 		const title = editTitle.trim();
 		if (title === '') return;
 		editing = false;
-		act(() => updateBoard(token, { title, place: editPlace.trim() === '' ? null : editPlace.trim() }));
+		act(() => updateBoard(token, {
+				title,
+				place: editPlace.trim() === '' ? null : editPlace.trim(),
+				allow_guests: editAllowGuests
+			}));
 	}
 
 	async function share() {
@@ -296,6 +302,11 @@
 					{t.place}
 					<input bind:value={editPlace} autocomplete="off" maxlength={MAX_PLACE_LENGTH} />
 				</label>
+				<label class="check">
+					<input type="checkbox" bind:checked={editAllowGuests} />
+					<span>{t.allowGuests}</span>
+				</label>
+				<p class="hint">{t.allowGuestsNote}</p>
 				<div class="actions">
 					<button type="submit" class="primary">{t.save}</button>
 					<button type="button" class="secondary" onclick={() => (editing = false)}>{t.cancel}</button>
@@ -451,6 +462,20 @@
 	}
 	.items .warn {
 		color: var(--warn);
+	}
+	.check {
+		flex-direction: row;
+		align-items: center;
+		gap: 10px;
+		min-height: var(--tap);
+		color: var(--ink);
+		font-size: 16px;
+	}
+	.check input {
+		width: 24px;
+		min-height: 24px;
+		height: 24px;
+		flex: none;
 	}
 	.confirm,
 	.edit,

@@ -1039,6 +1039,8 @@ export const strings = {
 		firstDayHint: 'The board covers this day and the six after it.',
 		create: 'Create board',
 		creating: 'Creating…',
+		allowGuests: 'Let people join without an account',
+		allowGuestsNote: "Guests type a name. Anyone in the group could pick a guest's name.",
 		weekHeader: (first: string, last: string, month: string) => `${first} – ${last} ${month}`,
 		loading: 'Loading the board…',
 		notFound: 'This board link does not work. Ask for a new one.',
