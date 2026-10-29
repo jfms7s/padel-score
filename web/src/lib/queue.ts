@@ -163,7 +163,7 @@ export function simulate(events: ViewEvent[], headSeq: number, intents: Intent[]
 	let skipped = 0;
 	for (const intent of intents) {
 		if (intent.kind === 'point') {
-			out.push({ seq: ++next, event: { point: intent.team } });
+			out.push({ seq: ++next, event: { point: intent.team }, at: Math.floor(Date.now() / 1000) });
 			commands.push({ kind: 'point', team: intent.team });
 			continue;
 		}

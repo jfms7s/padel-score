@@ -30,29 +30,34 @@
       "seq": 1,
       "event": {
         "point": "a"
-      }
+      },
+      "at": 1793000020
     },
     {
       "seq": 2,
       "event": {
         "point": "a"
-      }
+      },
+      "at": 1793000040
     },
     {
       "seq": 3,
       "event": {
         "point": "a"
-      }
+      },
+      "at": 1793000060
     },
     {
       "seq": 4,
       "event": {
         "point": "a"
-      }
+      },
+      "at": 1793000080
     },
     {
       "seq": 5,
-      "event": "time_up"
+      "event": "time_up",
+      "at": 1793000100
     }
   ],
   "score": {

@@ -64,6 +64,14 @@ describe('guards', () => {
 		expect(isFormat({ sets: { deuce: 'advantage', sets: 'best_of_5', deciding: 'full_set' } }, STRICT)).toBe(false);
 	});
 
+	it('view events require an integer at', () => {
+		const view = structuredClone(fixture('view-one-point')) as { events: Record<string, unknown>[] };
+		expect(isMatchView(view, STRICT)).toBe(true);
+		delete view.events[0]!.at;
+		expect(isMatchView(view, STRICT)).toBe(false);
+		expect(isMatchView({ ...view, events: [{ seq: 1, event: { point: 'a' }, at: 1.5 }] }, STRICT)).toBe(false);
+	});
+
 	it('reject an extra or mistyped field', () => {
 		const score = structuredClone((fixture('view-tiebreak') as { score: Record<string, unknown> }).score);
 		expect(isScore(score, STRICT)).toBe(true);

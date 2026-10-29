@@ -104,6 +104,8 @@ export interface Teams {
 export interface ViewEvent {
 	seq: number;
 	event: Event;
+	/** When the point was recorded, Unix seconds. */
+	at: number;
 }
 
 export interface MatchView {

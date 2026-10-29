@@ -10,6 +10,9 @@ import { createQueue, type Dropped, type QueueState } from '../queue';
 import type { CommandRequest, MatchView, ReplaceRequest, Team, ViewEvent } from '../types';
 import type { StorageLike } from '../setup';
 
+/** Tap time of the first point the harness adds, Unix seconds; later points are 20 s apart. */
+const T0 = 1793000000;
+
 // The real engine scores the views these tests build and this phone's side of a conflict.
 if (!engineReady()) {
 	initEngineSync(readFileSync(fileURLToPath(new URL('../wasm/padel_scoring_wasm_bg.wasm', import.meta.url))));
@@ -122,7 +125,10 @@ export const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms);
  */
 export function grow(view: MatchView, teams: Team[], revisions = teams.length): MatchView {
 	let seq = view.head_seq;
-	const events: ViewEvent[] = [...view.events, ...teams.map((t) => ({ seq: ++seq, event: { point: t } }))];
+	const events: ViewEvent[] = [
+		...view.events,
+		...teams.map((t) => ({ seq: ++seq, event: { point: t }, at: T0 + seq * 20 }))
+	];
 	return rescore({ ...view, events, head_seq: seq, revision: view.revision + revisions });
 }
 
