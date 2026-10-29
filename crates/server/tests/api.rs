@@ -341,7 +341,7 @@ async fn command_applies_and_returns_view() {
     assert_eq!(body["head_seq"], 1);
     assert_eq!(
         body["events"],
-        json!([{ "seq": 1, "event": { "point": "a" } }])
+        json!([{ "seq": 1, "event": { "point": "a" }, "at": body["events"][0]["at"] }])
     );
 }
 
@@ -887,4 +887,61 @@ async fn delete_by_spectator_token_is_404() {
     assert_eq!(delete(&app, &path).await.0, StatusCode::NOT_FOUND);
     let (status, _, _) = get(&app, &format!("/api/score/{}", m.scorer)).await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn view_events_carry_their_tap_time() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    let before = now();
+    for (i, team) in ["a", "b"].into_iter().enumerate() {
+        let body = json!({ "client_id": format!("t{i}"), "batch": false, "base_revision": i,
+            "commands": [{"kind":"point","team":team}] });
+        let (status, _) = command(&app, &m.scorer, &body).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let after = now();
+    let (_, _, view) = get(&app, &format!("/api/view/{}", m.spectator)).await;
+    let events = view["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2);
+    for e in events {
+        let at = e["at"].as_i64().expect("at is an integer");
+        assert!(
+            before <= at && at <= after,
+            "{at} not in {before}..={after}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn undo_keeps_the_other_points_times() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    for i in 0..2 {
+        let body = json!({ "client_id": format!("p{i}"), "batch": false, "base_revision": i,
+            "commands": [{"kind":"point","team":"a"}] });
+        assert_eq!(command(&app, &m.scorer, &body).await.0, StatusCode::OK);
+    }
+    let (_, _, view) = get(&app, &format!("/api/view/{}", m.spectator)).await;
+    let first_at = view["events"][0]["at"].clone();
+    let head = view["head_seq"].as_i64().unwrap();
+    let undo = json!({ "client_id": "u1", "batch": false, "base_revision": 2,
+        "commands": [{ "kind": "undo", "target_seq": head }] });
+    assert_eq!(command(&app, &m.scorer, &undo).await.0, StatusCode::OK);
+    let (_, _, view) = get(&app, &format!("/api/view/{}", m.spectator)).await;
+    let events = view["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(first_at.is_i64());
+    assert_eq!(events[0]["at"], first_at);
+}
+
+#[tokio::test]
+async fn state_stream_events_carry_at() {
+    let (app, _) = setup().await;
+    let m = create(&app).await;
+    let body = live("s1", json!([{"kind":"point","team":"a"}]));
+    assert_eq!(command(&app, &m.scorer, &body).await.0, StatusCode::OK);
+    let mut stream = Stream::open(&app, &format!("/api/view/{}/stream", m.spectator)).await;
+    let first = stream.state().await;
+    assert!(first["events"][0]["at"].is_i64(), "{first}");
 }
