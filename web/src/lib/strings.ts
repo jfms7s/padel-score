@@ -39,7 +39,6 @@ export const strings = {
 	advantageShort: 'AD',
 
 	// Home.
-	newMatch: 'New match',
 	noRecent: 'Matches you start here will show up in this list.',
 
 	// New match.
@@ -65,9 +64,7 @@ export const strings = {
 		gameGone: 'You are no longer in that game.',
 		matchGone: 'That match is no longer there.',
 		unlinked: 'This match will not be linked to the game.',
-		// Play later.
-		playLater: 'Play later',
-		playLaterHint: 'Pick a day and time. Anyone with the link can take an open place.',
+		// Plan a match.
 		open: 'Open',
 		openSlots: 'Pick the players you know. The other places stay open for others to join.',
 		saveMatch: 'Schedule match',
@@ -945,6 +942,18 @@ export const strings = {
 		back: (label: string) => `‹ ${label}`
 	},
 
+	// The New chooser: the four ways to start something.
+	create: {
+		title: 'New',
+		close: 'Close',
+		choices: {
+			match: ['Score a match now', 'On the court, four players, start tapping'],
+			later: ['Plan a match', 'Pick a date; share a link for the open places'],
+			board: ['Find a time', 'A board: everyone paints their week, games form on their own'],
+			event: ['Run an event', 'Tournament or non-stop, with sign-ups']
+		}
+	},
+
 	// Notifications on this device (Account page).
 	push: {
 		title: 'Notifications on this device',
@@ -1012,7 +1021,6 @@ export const strings = {
 		boardGames: (n: number) => (n === 0 ? 'No games yet' : n === 1 ? '1 game' : `${n} games`),
 		openToJoin: 'Open to join',
 		openNone: 'Nothing open to join right now.',
-		newBoard: 'New board',
 		match: 'Match',
 		role: { organiser: 'You organise', player: 'You play', line: 'In line' },
 		matchState: { open: 'Open', full: 'Full', started: 'Started', cancelled: 'Cancelled', past: 'Over' },
@@ -1483,7 +1491,6 @@ export const strings = {
 	// Organise: what you run, in three segments.
 	organise: {
 		title: 'Organise',
-		newEvent: 'New event',
 		empty: 'Nothing here.',
 		segments: { coming: 'Coming up', running: 'Running', past: 'Past' },
 		signups: 'Sign-ups',

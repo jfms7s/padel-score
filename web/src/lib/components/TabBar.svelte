@@ -1,36 +1,46 @@
 <script lang="ts">
 	import { ICONS } from '#lib/navIcons.ts';
-	import { navItems } from '#lib/nav.ts';
+	import { navItems, type NavItem } from '#lib/nav.ts';
 	import { strings } from '#lib/strings.ts';
 
-	let { pathname }: { pathname: string } = $props();
+	let { pathname, onnew }: { pathname: string; onnew?: () => void } = $props();
 
 	const items = $derived(navItems(pathname));
 </script>
 
+{#snippet face(item: NavItem)}
+	<svg
+		viewBox="0 0 24 24"
+		width="24"
+		height="24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.8"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+	>
+		<path d={ICONS[item.key]} />
+	</svg>
+	<span class:sr-only={item.key === 'new'}>{item.label}</span>
+{/snippet}
+
 <nav aria-label={strings.nav.label} class="tabbar">
 	{#each items as item (item.key)}
-		<a
-			href={item.href}
-			class:current={item.current}
-			class:plus={item.key === 'new'}
-			aria-current={item.current ? 'page' : undefined}
-		>
-			<svg
-				viewBox="0 0 24 24"
-				width="24"
-				height="24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1.8"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				aria-hidden="true"
+		{#if item.key === 'new' && onnew}
+			<button type="button" class="plus" aria-haspopup="dialog" onclick={onnew}>
+				{@render face(item)}
+			</button>
+		{:else}
+			<a
+				href={item.href}
+				class:current={item.current}
+				class:plus={item.key === 'new'}
+				aria-current={item.current ? 'page' : undefined}
 			>
-				<path d={ICONS[item.key]} />
-			</svg>
-			<span class:sr-only={item.key === 'new'}>{item.label}</span>
-		</a>
+				{@render face(item)}
+			</a>
+		{/if}
 	{/each}
 </nav>
 
@@ -47,17 +57,23 @@
 		background: var(--glass);
 		border-top: 1px solid var(--line);
 	}
-	a {
+	a,
+	button {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
 		gap: 2px;
 		min-height: var(--tap);
+		padding: 0;
+		border: 0;
+		background: none;
+		font: inherit;
 		color: var(--muted);
 		text-decoration: none;
 	}
-	a span {
+	a span,
+	button span {
 		font-size: 11px;
 		font-weight: 650;
 		line-height: 1.1;
@@ -68,7 +84,7 @@
 	a.current span {
 		font-weight: 750;
 	}
-	a.plus {
+	.plus {
 		justify-self: center;
 		width: 48px;
 		height: 48px;

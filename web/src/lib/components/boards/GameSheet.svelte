@@ -114,7 +114,7 @@
 		run(async () => {
 			const players = await startGame(token, id);
 			putStartHandoff(players);
-			await goto(`/new?from=${encodeURIComponent(fromParam(players.from))}`);
+			await goto(`/new/match?from=${encodeURIComponent(fromParam(players.from))}`);
 			return null;
 		});
 	}

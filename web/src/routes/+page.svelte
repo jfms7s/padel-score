@@ -225,7 +225,6 @@
 <main class="page-wide">
 	{#if shown}
 		<h1>{strings.home.title}</h1>
-		<a class="primary" href="/new">{strings.newMatch}</a>
 
 		<div class="cols">
 			<div class="live">
@@ -333,19 +332,6 @@
 	}
 	.error {
 		color: var(--warn);
-	}
-	.primary {
-		max-width: 28rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		min-height: var(--tap);
-		border-radius: 14px;
-		background: var(--ink);
-		color: var(--glass);
-		font-size: 17px;
-		font-weight: 650;
-		text-decoration: none;
 	}
 	h2 {
 		margin: 24px 0 8px;

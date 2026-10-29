@@ -59,7 +59,9 @@ describe('parentOf', () => {
 		expect(parentOf('/players/p1')).toEqual({ href: '/players', label: 'People' });
 		expect(parentOf('/account')).toEqual({ href: '/', label: 'Home' });
 		expect(parentOf('/admin')).toEqual({ href: '/account', label: 'Account' });
-		for (const p of ['/new', '/new/match', '/boards/new']) expect(parentOf(p)).toEqual({ href: '/', label: 'Home' });
+		expect(parentOf('/new')).toEqual({ href: '/', label: 'Home' });
+		for (const p of ['/new/match', '/new/later', '/new/board'])
+			expect(parentOf(p)).toEqual({ href: '/new', label: 'New' });
 	});
 });
 
