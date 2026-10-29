@@ -12,6 +12,7 @@ pub mod ranges;
 
 use actions::{GameRow, bump_version_in, leave_in, requests_in};
 pub(crate) use calendar::{calendar_games_in, queue_short_games_in, waiting_and_strips_in};
+pub(crate) use organised::organised_boards_in;
 
 use std::collections::HashMap;
 
@@ -194,6 +195,7 @@ macro_rules! select_board {
 }
 
 mod calendar;
+mod organised;
 
 impl BoardRow {
     fn from_tuple(t: BoardTuple) -> BoardRow {

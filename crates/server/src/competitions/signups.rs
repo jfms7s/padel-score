@@ -13,10 +13,12 @@
 //! pair that completes gets `team_complete`. The HTTP layer wakes the push sender afterwards.
 
 mod calendar;
+mod organised;
 
 pub(crate) use calendar::{
     calendar_events_in, open_events_in, queue_events_soon_in, waiting_partners_in,
 };
+pub(crate) use organised::organised_events_in;
 
 use std::collections::HashSet;
 
@@ -357,6 +359,16 @@ impl Layout {
             solos,
             pending,
         }
+    }
+
+    /// Solo sign-ups looking for a partner (a pending invitation is not one).
+    pub(crate) fn solo_count(&self) -> usize {
+        self.solos.len()
+    }
+
+    /// Complete teams past the maximum, waiting for a place.
+    pub(crate) fn line_count(&self) -> usize {
+        self.line.len()
     }
 
     /// Teams with a place: the hand-added and the complete sign-ups that fit.
