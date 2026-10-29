@@ -930,16 +930,16 @@ export const strings = {
 	networkError: "Can't reach the server.",
 	serverError: (status: number) => `The server answered ${status}.`,
 
-	// App navigation rail.
+	// App navigation: tab bar, rail and back links.
 	nav: {
 		label: 'Main',
 		home: 'Home',
-		calendar: 'Calendar',
-		events: 'Events',
-		players: 'Players',
-		history: 'History',
-		results: 'My results',
-		account: 'Account'
+		organise: 'Organise',
+		new: 'New',
+		results: 'Results',
+		people: 'People',
+		account: 'Account',
+		back: (label: string) => `‹ ${label}`
 	},
 
 	// Notifications on this device (Account page).

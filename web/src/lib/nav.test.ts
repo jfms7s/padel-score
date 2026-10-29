@@ -1,56 +1,66 @@
 import { describe, expect, it } from 'vitest';
-import { initials, isBare, railItems } from './nav';
+import { chromeOf, initials, navItems, parentOf } from './nav';
 
 const current = (path: string) =>
-	railItems(path)
+	navItems(path)
 		.filter((i) => i.current)
-		.map((i) => i.href);
+		.map((i) => i.key);
 
-describe('railItems', () => {
-	it('lists the six destinations in order', () => {
-		expect(railItems('/').map((i) => i.href)).toEqual([
-			'/',
-			'/calendar',
-			'/events',
-			'/players',
-			'/history',
-			'/profile'
+describe('navItems', () => {
+	it('lists the five places in order', () => {
+		expect(navItems('/').map((i) => [i.key, i.href])).toEqual([
+			['home', '/'],
+			['organise', '/events'],
+			['new', '/new'],
+			['results', '/profile'],
+			['people', '/players']
 		]);
 	});
-
-	it('marks Calendar on /calendar, second in the rail', () => {
-		expect(current('/calendar')).toEqual(['/calendar']);
-		expect(railItems('/calendar').findIndex((i) => i.current)).toBe(1);
+	it('marks only Home on /', () => expect(current('/')).toEqual(['home']));
+	it('marks Organise on the event desk and the event form', () => {
+		for (const p of ['/events', '/events/abc', '/organise', '/new/event']) expect(current(p)).toEqual(['organise']);
 	});
-
-	it('marks only Home on /', () => {
-		expect(current('/')).toEqual(['/']);
+	it('marks Results on history, profile and results', () => {
+		for (const p of ['/history', '/profile', '/results']) expect(current(p)).toEqual(['results']);
 	});
-
-	it('marks a section on a nested path', () => {
-		expect(current('/events/abc')).toEqual(['/events']);
+	it('marks People on a player', () => expect(current('/players/p1')).toEqual(['people']));
+	it('never marks New', () => {
+		for (const p of ['/new', '/new/match', '/new/board']) expect(current(p)).toEqual([]);
 	});
-
-	it('marks a section on its exact path', () => {
-		expect(current('/players')).toEqual(['/players']);
-	});
-
-	it('marks nothing on an unrelated page', () => {
-		expect(current('/account')).toEqual([]);
-	});
-
-	it('does not match a longer sibling name', () => {
-		expect(current('/eventsfoo')).toEqual([]);
+	it('marks nothing on a near miss or on account', () => {
+		for (const p of ['/eventsfoo', '/account', '/calendar']) expect(current(p)).toEqual([]);
 	});
 });
 
-describe('isBare', () => {
-	it('is true on the fence, viewer and court screens', () => {
-		for (const p of ['/s/x', '/v/x', '/c/x', '/cv/x']) expect(isBare(p)).toBe(true);
+describe('chromeOf', () => {
+	it('is bare on the fence, viewer and court screens', () => {
+		for (const p of ['/s/x', '/v/x', '/c/x', '/cv/x']) expect(chromeOf(p)).toBe('bare');
 	});
+	it('is standalone on board, sign-up, spectator and profile links', () => {
+		for (const p of ['/b/x', '/j/x', '/e/x', '/p/x']) expect(chromeOf(p)).toBe('standalone');
+	});
+	it('is auth on the sign-in pages', () => {
+		for (const p of ['/login', '/setup', '/invite', '/reset', '/link', '/link-player'])
+			expect(chromeOf(p)).toBe('auth');
+	});
+	it('is app everywhere else', () => {
+		for (const p of ['/', '/c', '/events', '/account', '/b', '/linked']) expect(chromeOf(p)).toBe('app');
+	});
+});
 
-	it('is false elsewhere', () => {
-		for (const p of ['/events', '/', '/c', '/account']) expect(isBare(p)).toBe(false);
+describe('parentOf', () => {
+	it('has no parent on a top-level page', () => {
+		for (const p of ['/', '/events', '/profile', '/players', '/organise', '/results', '/login', '/b/x'])
+			expect(parentOf(p)).toBeNull();
+	});
+	it('names the parent of nested pages', () => {
+		expect(parentOf('/events/e1')).toEqual({ href: '/events', label: 'Organise' });
+		expect(parentOf('/players/p1')).toEqual({ href: '/players', label: 'People' });
+		expect(parentOf('/history')).toEqual({ href: '/profile', label: 'Results' });
+		expect(parentOf('/account')).toEqual({ href: '/', label: 'Home' });
+		expect(parentOf('/admin')).toEqual({ href: '/account', label: 'Account' });
+		for (const p of ['/new', '/new/match', '/boards/new', '/calendar'])
+			expect(parentOf(p)).toEqual({ href: '/', label: 'Home' });
 	});
 });
 

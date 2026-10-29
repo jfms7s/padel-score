@@ -6,7 +6,7 @@
 	import { updatesHeld } from '#lib/holds.svelte.ts';
 	import { bootSession, session } from '#lib/session.ts';
 	import AppRail from '#lib/components/AppRail.svelte';
-	import { isBare } from '#lib/nav.ts';
+	import { chromeOf } from '#lib/nav.ts';
 	import { safeSessionStorage } from '#lib/storage.ts';
 	import { strings } from '#lib/strings.ts';
 	import { SHOWN_MS, markReload, mayReload, reloadNow, updateScreen } from '#lib/update.ts';
@@ -19,7 +19,7 @@
 	});
 
 	// The fence, court and spectator screens are full-screen and anonymous-friendly: no header there.
-	const bare = $derived(isBare(page.url.pathname));
+	const bare = $derived(chromeOf(page.url.pathname) === 'bare');
 	const railed = $derived(!bare && $session.status === 'signed_in');
 	const onLogin = $derived(page.url.pathname === '/login');
 

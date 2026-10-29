@@ -133,7 +133,7 @@
 
 	{#if signedIn}
 		<nav class="links" aria-label={strings.yourPages}>
-			<a href="/calendar">{strings.nav.calendar}</a>
+			<a href="/calendar">{strings.calendar.title}</a>
 			<a href="/players"
 				>{strings.players.title}{#if claimCount > 0}<span class="badge">{strings.linking.claimBadge(claimCount)}</span>{/if}</a
 			>
@@ -173,11 +173,11 @@
 	<div class="col">
 	{#if signedIn}
 		<section class="events">
-			<h2>{strings.nav.events}</h2>
+			<h2>{strings.events.title}</h2>
 			{#if events.length === 0}
 				<p class="hint">{strings.events.none}</p>
 			{:else}
-				<ul aria-label={strings.nav.events}>
+				<ul aria-label={strings.events.title}>
 					{#each events as ev (ev.id)}
 						<li>
 							<a href="/events/{encodeURIComponent(ev.id)}">
