@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from './api';
+import { ApiError, setUnauthorizedHandler } from './api';
 import {
 	addRange,
+	answerBoardRequest,
 	answerRequest,
 	askSwap,
 	askTime,
@@ -19,6 +20,7 @@ import {
 	takeGame,
 	updateBoard
 } from './boards';
+import { rememberGuest } from './guests';
 import { strings } from './strings';
 
 type Call = { url: string; init: RequestInit | undefined };
@@ -205,5 +207,74 @@ describe('boards client', () => {
 	it('raises game_changed as a code the sheet can tell apart', async () => {
 		serve(409, { error: 'game_changed' });
 		await expect(giveGame('t', 'g1', 1)).rejects.toMatchObject({ code: 'game_changed' });
+	});
+});
+
+describe('board calls as a guest', () => {
+	const store = () => {
+		const data = new Map<string, string>();
+		return {
+			getItem: (k: string) => data.get(k) ?? null,
+			setItem: (k: string, v: string) => void data.set(k, v),
+			removeItem: (k: string) => void data.delete(k)
+		};
+	};
+
+	it('sends the guest key and does not treat a 401 as a sign-out', async () => {
+		const s = store();
+		vi.stubGlobal('localStorage', s);
+		rememberGuest('t', 'secret', 'guest_1', s);
+		const calls = serve(401, { error: 'unauthorized' });
+		const handler = vi.fn();
+		const restore = setUnauthorizedHandler(handler);
+		try {
+			await expect(addRange('t', 1, 2)).rejects.toBeInstanceOf(ApiError);
+		} finally {
+			restore();
+		}
+		const headers = calls[0]?.init?.headers as Record<string, string>;
+		expect(headers['x-board-guest']).toBe('secret');
+		expect(handler).not.toHaveBeenCalled();
+	});
+
+	it('sends no key without one and still bounces to sign-in on a 401', async () => {
+		vi.stubGlobal('localStorage', store());
+		const calls = serve(401, { error: 'unauthorized' });
+		const handler = vi.fn();
+		const restore = setUnauthorizedHandler(handler);
+		try {
+			await expect(addRange('t', 1, 2)).rejects.toBeInstanceOf(ApiError);
+		} finally {
+			restore();
+		}
+		const headers = (calls[0]?.init?.headers ?? {}) as Record<string, string>;
+		expect(headers['x-board-guest']).toBeUndefined();
+		expect(handler).toHaveBeenCalledTimes(1);
+	});
+
+	it('forgets the key after leaving the board', async () => {
+		const s = store();
+		vi.stubGlobal('localStorage', s);
+		rememberGuest('t', 'secret', 'guest_1', s);
+		serve(204, null);
+		await leaveBoard('t');
+		expect(s.getItem('padel.boardGuest.t')).toBeNull();
+	});
+
+	it('answers a request under the board link', async () => {
+		vi.stubGlobal('localStorage', store());
+		const calls = serve(200, {});
+		await answerBoardRequest('t', 'r 1', true);
+		expect(calls[0]?.url).toBe('/api/boards/t/requests/r%201/accept');
+		expect(calls[0]?.init?.method).toBe('POST');
+		await answerBoardRequest('t', 'r1', false);
+		expect(calls[1]?.url).toBe('/api/boards/t/requests/r1/decline');
+	});
+
+	it('has copy for the guest codes', () => {
+		const e = strings.boards.errors;
+		expect(boardMessage(err('guests_off'))).toBe(e.guests_off);
+		expect(boardMessage(err('guest_name_taken'))).toBe(e.guest_name_taken);
+		expect(e.guests_off).not.toBe('');
 	});
 });

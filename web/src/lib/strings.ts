@@ -1113,14 +1113,17 @@ export const strings = {
 			game_started: 'This game has already started.',
 			already_in_game: 'You are already in this game.',
 			game_full: 'This game is full.',
-			busy: 'You are in another game at that time.'
+			busy: 'You are in another game at that time.',
+			guests_off: "This board doesn't take guests.",
+			guest_name_taken: 'Someone here already has that name.'
 		},
 		fields: {
 			range: 'Pick times on the half-hour grid inside the week.',
 			title: 'Give the board a title of 1 to 40 characters.',
 			place: 'The place can be at most 80 characters.',
 			time_zone: "The time zone isn't one the server knows.",
-			week: 'A board covers one week, starting from a day that is not over.'
+			week: 'A board covers one week, starting from a day that is not over.',
+			name: 'Give a name of 1 to 40 characters.'
 		}
 	},
 
