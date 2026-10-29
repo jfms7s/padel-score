@@ -545,6 +545,7 @@ export const strings = {
 		change: 'Change',
 		placings: 'Placings',
 		columns: { date: 'Date', teamA: 'Team A', teamB: 'Team B', score: 'Score', result: 'Result' },
+		retry: 'Try again',
 		empty: 'No results yet.'
 	},
 

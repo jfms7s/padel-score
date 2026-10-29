@@ -25,8 +25,8 @@
 	let privacy = $state.raw<Privacy | null>(null);
 
 	let ready = $state(false);
-	// A failed first fetch of the recorded list is not retried by the effect; Load more is.
-	let recordedFailed = $state(false);
+	// The recorded list's first page failed; the Retry button fetches it again.
+	let recordedError = $state<string | null>(null);
 	let loadFailure = $state<string | null>(null);
 	let busy = $state(false);
 	let moreFailure = $state<string | null>(null);
@@ -40,6 +40,15 @@
 		recorded = first.items;
 		recordedNext = first.next;
 		recordedLoaded = true;
+	}
+
+	async function retryRecorded() {
+		recordedError = null;
+		try {
+			await loadRecorded();
+		} catch (e) {
+			recordedError = playerMessage(e);
+		}
 	}
 
 	$effect(() => {
@@ -66,7 +75,7 @@
 				try {
 					await loadRecorded();
 				} catch (e) {
-					if (live) moreFailure = playerMessage(e);
+					if (live) recordedError = playerMessage(e);
 				}
 			}
 			if (live) ready = true;
@@ -79,11 +88,8 @@
 	// Switching to Recorded for the first time loads its first page.
 	$effect(() => {
 		if (!ready || view !== 'recorded' || recordedLoaded) return;
-		if (recordedFailed) return;
-		void loadRecorded().catch((e) => {
-			recordedFailed = true;
-			moreFailure = playerMessage(e);
-		});
+		if (recordedError) return;
+		void retryRecorded();
 	});
 
 	function choose(v: ResultsView) {
@@ -125,40 +131,39 @@
 	{/if}
 	{#if $session.status === 'signed_in' && ready && mine}
 		<div class="cols">
-			<div class="left">
-				<div class="rec"><RecordPlacings record={mine.record} placings={mine.placings} /></div>
-				{#if privacy}
-					<p class="privacy">
-						<span class="hint">{t.privacyRow}</span>
-						<span>{t.privacy[privacy.visibility]}</span>
-						<a href="/account#privacy">{t.change}</a>
-					</p>
+			<div class="rec"><RecordPlacings record={mine.record} placings={mine.placings} /></div>
+			<div class="switch" role="group" aria-label={t.title}>
+				{#each VIEWS as v (v)}
+					<button type="button" aria-pressed={view === v} onclick={() => choose(v)}>{t[v]}</button>
+				{/each}
+			</div>
+			<div class="list">
+				{#if view === 'recorded' && recordedError && !recordedLoaded}
+					<p class="error" role="alert">{recordedError}</p>
+					<button class="secondary more" type="button" onclick={retryRecorded}>{t.retry}</button>
+				{:else if rows.length === 0}
+					<p class="hint">{t.empty}</p>
+				{:else}
+					<ResultsList {rows} />
+				{/if}
+				{#if moreFailure}<p class="error more-error" role="alert">{moreFailure}</p>{/if}
+				{#if hasMore}
+					<button class="secondary more" type="button" disabled={busy} onclick={more}>{strings.history.loadMore}</button>
 				{/if}
 			</div>
-			<div class="right">
-				<div class="switch" role="group" aria-label={t.title}>
-					{#each VIEWS as v (v)}
-						<button type="button" aria-pressed={view === v} onclick={() => choose(v)}>{t[v]}</button>
-					{/each}
-				</div>
-				<div class="list">
-					{#if rows.length === 0}
-						<p class="hint">{t.empty}</p>
-					{:else}
-						<ResultsList {rows} />
-					{/if}
-					{#if moreFailure}<p class="error more-error" role="alert">{moreFailure}</p>{/if}
-					{#if hasMore}
-						<button class="secondary more" type="button" disabled={busy} onclick={more}>{strings.history.loadMore}</button>
-					{/if}
-				</div>
-				{#if findYourself}
-					<p class="hint find">
-						{t.findYourself}
-						<a href="/players">{t.findYourselfLink}</a>
-					</p>
-				{/if}
-			</div>
+			{#if findYourself}
+				<p class="hint find">
+					{t.findYourself}
+					<a href="/players">{t.findYourselfLink}</a>
+				</p>
+			{/if}
+			{#if privacy}
+				<p class="privacy">
+					<span class="hint">{t.privacyRow}</span>
+					<span>{t.privacy[privacy.visibility]}</span>
+					<a href="/account#privacy">{t.change}</a>
+				</p>
+			{/if}
 		</div>
 	{:else if !loadFailure}
 		<p class="hint">{strings.auth.loading}</p>
@@ -166,33 +171,8 @@
 </main>
 
 <style>
-	/* A phone reads record, switch, list, hint, then the privacy row, so the two columns dissolve
-	   into one flow and the pieces are ordered; from 700px they are real columns again. */
-	.cols {
-		display: flex;
-		flex-direction: column;
-	}
-	.left,
-	.right {
-		display: contents;
-	}
-	.rec {
-		order: 1;
-	}
-	.switch {
-		order: 2;
-	}
+	.rec,
 	.list {
-		order: 3;
-	}
-	.find {
-		order: 4;
-	}
-	.privacy {
-		order: 5;
-	}
-	.list,
-	.rec {
 		min-width: 0;
 	}
 	.privacy {
@@ -247,16 +227,32 @@
 		margin-top: 12px;
 	}
 	@media (min-width: 700px) {
-		.left,
-		.right {
-			display: block;
-			min-width: 0;
-		}
 		.cols {
 			display: grid;
 			grid-template-columns: 300px minmax(0, 1fr);
+			grid-template-rows: auto 1fr auto auto;
+			grid-template-areas:
+				'rec switch'
+				'rec list'
+				'privacy list'
+				'. find';
 			column-gap: 32px;
 			align-items: start;
+		}
+		.rec {
+			grid-area: rec;
+		}
+		.switch {
+			grid-area: switch;
+		}
+		.list {
+			grid-area: list;
+		}
+		.find {
+			grid-area: find;
+		}
+		.privacy {
+			grid-area: privacy;
 		}
 		.switch {
 			display: inline-grid;
