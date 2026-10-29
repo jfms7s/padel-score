@@ -124,7 +124,8 @@ export function gameActions(
 			!busy(view, me, game.start, game.end),
 			reasons.take
 		),
-		start: state(inGame && now >= game.start - START_WINDOW_SECS)
+		// A guest has no account to keep a match under, so they cannot start one.
+		start: state(inGame && view.me?.guest !== true && now >= game.start - START_WINDOW_SECS)
 	};
 }
 

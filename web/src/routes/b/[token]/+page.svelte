@@ -9,6 +9,7 @@
 	import { ApiError, redirectToSignIn } from '#lib/api.ts';
 	import {
 		addRange,
+		answerBoardRequest,
 		answerRequest,
 		boardMessage,
 		deleteBoard,
@@ -19,10 +20,12 @@
 		updateBoard
 	} from '#lib/boards.ts';
 	import GameSheet from '#lib/components/boards/GameSheet.svelte';
+	import GuestJoin from '#lib/components/boards/GuestJoin.svelte';
 	import RequestCard from '#lib/components/boards/RequestCard.svelte';
 	import WeekGrid from '#lib/components/boards/WeekGrid.svelte';
 	import { browserTimeZone, dayLabel, monthYear, timeRange } from '#lib/dates.ts';
 	import { requestCards } from '#lib/gamesheet.ts';
+	import { forgetGuest, guestKey } from '#lib/guests.ts';
 	import { shareLink } from '#lib/share.ts';
 	import { MAX_NAME_LENGTH } from '#lib/setup.ts';
 	import { strings } from '#lib/strings.ts';
@@ -49,6 +52,8 @@
 
 	const me = $derived(view?.me ?? null);
 	const signedIn = $derived(me !== null);
+	const guest = $derived(me?.guest === true);
+	const nameWithMark = (p: { name: string; guest: boolean }) => (p.guest ? `${p.name} (${t.guestMark})` : p.name);
 	const member = $derived(me?.member === true);
 	const creator = $derived(me?.creator === true);
 	const over = $derived(view?.board.over === true);
@@ -84,6 +89,8 @@
 			view = next;
 			now = Math.floor(Date.now() / 1000);
 			loadFailure = null;
+			// A kept guest key the board no longer honours: the guest was removed.
+			if (next.me === null && guestKey(forToken) !== null) forgetGuest(forToken);
 			if (!askedForGame) {
 				askedForGame = true;
 				const wanted = page.url.searchParams.get('game');
@@ -144,7 +151,14 @@
 			});
 	}
 
-	const answer = (id: string, accept: boolean) => act(() => answerRequest(id, accept));
+	const answer = (id: string, accept: boolean) =>
+		act(() => (guest ? answerBoardRequest(token, id, accept) : answerRequest(id, accept)));
+	const requestFromGuest = (id: string) => view?.requests.find((r) => r.id === id)?.from.guest === true;
+	const joinedAsGuest = (next: BoardView) => {
+		latest += 1;
+		view = next;
+		now = Math.floor(Date.now() / 1000);
+	};
 	const add = (start: number, end: number) => act(() => addRange(token, start, end));
 	const remove = (start: number, end: number) => act(() => removeRange(token, start, end));
 	const join = () => act(() => joinBoard(token));
@@ -153,6 +167,7 @@
 		confirming = null;
 		act(async () => {
 			await leaveBoard(token);
+			if (guest) forgetGuest(token);
 			await goto('/');
 			return null;
 		});
@@ -320,6 +335,9 @@
 		{#if !signedIn && !over}
 			<div class="join">
 				<button type="button" class="primary" onclick={redirectToSignIn}>{t.signInToAdd}</button>
+				{#if view.board.allow_guests}
+					<GuestJoin {view} {token} onjoined={joinedAsGuest} />
+				{/if}
 			</div>
 		{:else if signedIn && !member && !over}
 			<div class="join">
@@ -344,6 +362,7 @@
 								<RequestCard
 									kind={r.kind}
 									from={r.from}
+									guest={requestFromGuest(r.id)}
 									current={r.current}
 									proposed={r.proposed}
 									busy={working > 0}
@@ -379,7 +398,7 @@
 									<button type="button" class="row game-row" onclick={() => (openGameId = g.id)}>
 										<span class="what">
 											<strong>{gameWhen(g)}</strong>
-											<span class="hint">{g.players.map((p) => p.name).join(', ')}</span>
+											<span class="hint">{g.players.map(nameWithMark).join(', ')}</span>
 										</span>
 										<span class="badge" class:off={g.state === 'short'}>{t.gameState[g.state]}</span>
 									</button>
