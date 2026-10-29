@@ -25,6 +25,8 @@
 	let privacy = $state.raw<Privacy | null>(null);
 
 	let ready = $state(false);
+	// A failed first fetch of the recorded list is not retried by the effect; Load more is.
+	let recordedFailed = $state(false);
 	let loadFailure = $state<string | null>(null);
 	let busy = $state(false);
 	let moreFailure = $state<string | null>(null);
@@ -55,10 +57,17 @@
 				mine = r.value;
 				played = r.value.items;
 				playedNext = r.value.next;
-				if (viewFromQuery(new URLSearchParams(page.url.search)) === 'recorded' || r.value.items.length === 0) await loadRecorded();
 			} catch (e) {
 				if (live) loadFailure = linkMessage(e);
 				return;
+			}
+			// The recorded list failing leaves the record and the played list usable.
+			if (viewFromQuery(new URLSearchParams(page.url.search)) === 'recorded' || played.length === 0) {
+				try {
+					await loadRecorded();
+				} catch (e) {
+					if (live) moreFailure = playerMessage(e);
+				}
 			}
 			if (live) ready = true;
 		})();
@@ -70,7 +79,11 @@
 	// Switching to Recorded for the first time loads its first page.
 	$effect(() => {
 		if (!ready || view !== 'recorded' || recordedLoaded) return;
-		void loadRecorded().catch((e) => (moreFailure = playerMessage(e)));
+		if (recordedFailed) return;
+		void loadRecorded().catch((e) => {
+			recordedFailed = true;
+			moreFailure = playerMessage(e);
+		});
 	});
 
 	function choose(v: ResultsView) {
@@ -113,7 +126,7 @@
 	{#if $session.status === 'signed_in' && ready && mine}
 		<div class="cols">
 			<div class="left">
-				<RecordPlacings record={mine.record} placings={mine.placings} />
+				<div class="rec"><RecordPlacings record={mine.record} placings={mine.placings} /></div>
 				{#if privacy}
 					<p class="privacy">
 						<span class="hint">{t.privacyRow}</span>
@@ -128,20 +141,22 @@
 						<button type="button" aria-pressed={view === v} onclick={() => choose(v)}>{t[v]}</button>
 					{/each}
 				</div>
+				<div class="list">
+					{#if rows.length === 0}
+						<p class="hint">{t.empty}</p>
+					{:else}
+						<ResultsList {rows} />
+					{/if}
+					{#if moreFailure}<p class="error more-error" role="alert">{moreFailure}</p>{/if}
+					{#if hasMore}
+						<button class="secondary more" type="button" disabled={busy} onclick={more}>{strings.history.loadMore}</button>
+					{/if}
+				</div>
 				{#if findYourself}
 					<p class="hint find">
 						{t.findYourself}
 						<a href="/players">{t.findYourselfLink}</a>
 					</p>
-				{/if}
-				{#if rows.length === 0}
-					<p class="hint">{t.empty}</p>
-				{:else}
-					<ResultsList {rows} />
-				{/if}
-				{#if moreFailure}<p class="error more-error" role="alert">{moreFailure}</p>{/if}
-				{#if hasMore}
-					<button class="secondary more" type="button" disabled={busy} onclick={more}>{strings.history.loadMore}</button>
 				{/if}
 			</div>
 		</div>
@@ -151,12 +166,34 @@
 </main>
 
 <style>
+	/* A phone reads record, switch, list, hint, then the privacy row, so the two columns dissolve
+	   into one flow and the pieces are ordered; from 700px they are real columns again. */
+	.cols {
+		display: flex;
+		flex-direction: column;
+	}
 	.left,
 	.right {
-		min-width: 0;
+		display: contents;
 	}
-	.right {
-		margin-top: 16px;
+	.rec {
+		order: 1;
+	}
+	.switch {
+		order: 2;
+	}
+	.list {
+		order: 3;
+	}
+	.find {
+		order: 4;
+	}
+	.privacy {
+		order: 5;
+	}
+	.list,
+	.rec {
+		min-width: 0;
 	}
 	.privacy {
 		display: flex;
@@ -167,10 +204,14 @@
 	}
 	.privacy a,
 	.find a {
-		display: inline-flex;
+		display: flex;
 		align-items: center;
+		width: fit-content;
 		min-height: var(--tap);
 		color: var(--ink);
+	}
+	.find {
+		margin-top: 12px;
 	}
 	.switch {
 		display: grid;
@@ -206,14 +247,16 @@
 		margin-top: 12px;
 	}
 	@media (min-width: 700px) {
+		.left,
+		.right {
+			display: block;
+			min-width: 0;
+		}
 		.cols {
 			display: grid;
 			grid-template-columns: 300px minmax(0, 1fr);
 			column-gap: 32px;
 			align-items: start;
-		}
-		.right {
-			margin-top: 0;
 		}
 		.switch {
 			display: inline-grid;

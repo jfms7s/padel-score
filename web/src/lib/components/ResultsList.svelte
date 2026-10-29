@@ -127,6 +127,8 @@
 		font-size: 24px;
 		line-height: 1;
 		white-space: nowrap;
+		/* The condensed numerals' space is too narrow to separate sets. */
+		word-spacing: 0.35em;
 	}
 	time {
 		color: var(--muted);
@@ -187,6 +189,9 @@
 		}
 		.right {
 			text-align: right;
+		}
+		td {
+			overflow-wrap: anywhere;
 		}
 		.date {
 			color: var(--muted);
