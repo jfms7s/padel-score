@@ -303,10 +303,10 @@
 					<input bind:value={editPlace} autocomplete="off" maxlength={MAX_PLACE_LENGTH} />
 				</label>
 				<label class="check">
-					<input type="checkbox" bind:checked={editAllowGuests} />
+					<input type="checkbox" bind:checked={editAllowGuests} aria-describedby="edit-allow-guests-note" />
 					<span>{t.allowGuests}</span>
 				</label>
-				<p class="hint">{t.allowGuestsNote}</p>
+				<p class="hint" id="edit-allow-guests-note">{t.allowGuestsNote}</p>
 				<div class="actions">
 					<button type="submit" class="primary">{t.save}</button>
 					<button type="button" class="secondary" onclick={() => (editing = false)}>{t.cancel}</button>
@@ -462,20 +462,6 @@
 	}
 	.items .warn {
 		color: var(--warn);
-	}
-	.check {
-		flex-direction: row;
-		align-items: center;
-		gap: 10px;
-		min-height: var(--tap);
-		color: var(--ink);
-		font-size: 16px;
-	}
-	.check input {
-		width: 24px;
-		min-height: 24px;
-		height: 24px;
-		flex: none;
 	}
 	.confirm,
 	.edit,

@@ -305,20 +305,6 @@
 		color: var(--warn);
 		font-size: 13px;
 	}
-	.check {
-		flex-direction: row;
-		align-items: center;
-		gap: 10px;
-		min-height: var(--tap);
-		color: var(--ink);
-		font-size: 16px;
-	}
-	.check input {
-		width: 24px;
-		min-height: 24px;
-		height: 24px;
-		flex: none;
-	}
 	.close {
 		margin-top: 14px;
 	}

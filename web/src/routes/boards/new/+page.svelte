@@ -67,10 +67,10 @@
 				<span class="hint">{t.firstDayHint}</span>
 			</label>
 			<label class="check">
-				<input type="checkbox" bind:checked={allowGuests} />
+				<input type="checkbox" bind:checked={allowGuests} aria-describedby="allow-guests-note" />
 				<span>{t.allowGuests}</span>
 			</label>
-			<p class="hint">{t.allowGuestsNote}</p>
+			<p class="hint" id="allow-guests-note">{t.allowGuestsNote}</p>
 			{#if failure}<p class="error" role="alert">{failure}</p>{/if}
 			<button class="primary" type="submit" disabled={busy}>{busy ? t.creating : t.create}</button>
 		</form>
@@ -82,20 +82,6 @@
 </main>
 
 <style>
-	.check {
-		flex-direction: row;
-		align-items: center;
-		gap: 10px;
-		min-height: var(--tap);
-		color: var(--ink);
-		font-size: 16px;
-	}
-	.check input {
-		width: 24px;
-		min-height: 24px;
-		height: 24px;
-		flex: none;
-	}
 	.back {
 		display: inline-flex;
 		align-items: center;
