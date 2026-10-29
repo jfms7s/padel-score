@@ -560,14 +560,8 @@ export const strings = {
 		noPhone: 'No phone yet',
 		waitingForMatch: 'Waiting for a match',
 
-		title: 'Events',
-		intro: 'Run a tournament or a non-stop: teams, courts with their own phones, and the results.',
-		none: "You haven't made any events yet.",
 		kinds: { tournament: 'Tournament', non_stop: 'Non-stop' },
 		status: { setup: 'Setting up', running: 'Running', finished: 'Finished', cancelled: 'Cancelled' },
-		counts: (teams: number, courts: number) =>
-			`${teams === 1 ? '1 team' : `${teams} teams`} · ${courts === 1 ? '1 court' : `${courts} courts`}`,
-		openLabel: (name: string) => `Open ${name}`,
 
 		// The new-event form.
 		newEvent: 'New event',
@@ -1484,6 +1478,39 @@ export const strings = {
 		spectatorLink: 'Spectator link',
 		freeCourt: (name: string) => `${name} is free`,
 		upNext: 'Up next'
+	},
+
+	// Organise: what you run, in three segments.
+	organise: {
+		title: 'Organise',
+		newEvent: 'New event',
+		empty: 'Nothing here.',
+		segments: { coming: 'Coming up', running: 'Running', past: 'Past' },
+		signups: 'Sign-ups',
+		board: 'Board',
+		match: 'Match',
+		noDate: 'No date yet',
+		startOverdue: 'Start overdue',
+		solo: (n: number) => (n === 1 ? '1 solo waiting to pair' : `${n} solo waiting to pair`),
+		signupsClose: (d: string) => `Sign-ups close ${d}`,
+		inLine: (n: number) => `${n} in line`,
+		moreNeeded: (n: number) => `${n} more needed`,
+		noGames: 'No games yet',
+		gamesFormed: (n: number) => (n === 1 ? '1 game formed' : `${n} games formed`),
+		openDesk: 'Open desk',
+		open: 'Open',
+		share: 'Share sign-up link',
+		shareLink: 'Share link',
+		placeOpen: 'Open',
+		segment: (label: string, n: number) => `${label} · ${n}`,
+		segmentsLabel: 'Show',
+		listLabel: 'Your events, matches and boards',
+		summaryLabel: 'Summary',
+		needsYou: 'Needs you',
+		signupsText: (teams: number, solo: number, line: number) =>
+			`${teams === 1 ? '1 team' : `${teams} teams`} · ${solo} solo · ${line} in line`,
+		boardStats: (people: number, games: number) =>
+			`${people === 1 ? '1 person' : `${people} people`} · ${games === 1 ? '1 game' : `${games} games`}`
 	}
 } as const;
 

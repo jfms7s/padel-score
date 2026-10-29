@@ -20,6 +20,8 @@ pub mod linked_history;
 pub mod linking;
 pub mod linking_api;
 pub mod non_stop_api;
+pub mod organised;
+pub mod organised_api;
 pub mod owned;
 pub mod players;
 pub mod players_api;

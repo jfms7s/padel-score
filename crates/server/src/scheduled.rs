@@ -8,8 +8,10 @@
 //! wakes the push sender. No notice goes to the user whose request caused it.
 
 mod calendar;
+mod organised;
 
 pub(crate) use calendar::{calendar_matches_in, open_matches_in, queue_short_matches_in};
+pub(crate) use organised::organised_matches_in;
 
 use padel_scoring::Format;
 use serde::{Deserialize, Serialize};

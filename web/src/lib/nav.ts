@@ -10,7 +10,7 @@ export type Parent = { href: string; label: string };
 /** Where each place leads; later phases repoint these. */
 export const NAV_TARGETS: Record<NavKey, string> = {
 	home: '/',
-	organise: '/events',
+	organise: '/organise',
 	new: '/new',
 	results: '/results',
 	people: '/players'
@@ -55,7 +55,8 @@ export function chromeOf(pathname: string): Chrome {
 /** The page a back link leads to, or null on a top-level page. */
 export function parentOf(pathname: string): Parent | null {
 	const { nav } = strings;
-	if (pathname.startsWith('/events/')) return { href: NAV_TARGETS.organise, label: nav.organise };
+	if (pathname.startsWith('/events/') || pathname === '/new/event')
+		return { href: NAV_TARGETS.organise, label: nav.organise };
 	if (pathname.startsWith('/players/')) return { href: '/players', label: nav.people };
 	if (pathname === '/admin') return { href: '/account', label: nav.account };
 	if (pathname === '/account' || pathname === '/new' || pathname.startsWith('/new/') || pathname === '/boards/new')

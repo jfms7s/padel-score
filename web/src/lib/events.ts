@@ -15,7 +15,6 @@ import type {
 	EventDetail,
 	EventMatch,
 	EventResultRequest,
-	EventSummary,
 	EventTeam,
 	EventView,
 	Format,
@@ -38,12 +37,6 @@ const event = (id: string, rest = '') => `/api/events/${enc(id)}${rest}`;
 const signedIn = { signedIn: true } as const;
 
 // ---- coordinator -------------------------------------------------------------------------
-
-/** The coordinator's events, newest first. */
-export async function listEvents(): Promise<EventSummary[]> {
-	const page = await accountRequest<{ items: EventSummary[] }>('/api/events', signedIn);
-	return page.items;
-}
 
 export function createEvent(req: NewEvent): Promise<EventDetail> {
 	return accountRequest('/api/events', { ...signedIn, method: 'POST', body: req, ok: 201 });
