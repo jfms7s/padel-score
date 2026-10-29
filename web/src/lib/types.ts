@@ -831,7 +831,14 @@ export type ReplayResult = { ok: Score } | { err: EngineError };
 
 /** The board routes' 409 codes (the 422 fields are `range`, `title`, `place`, `time_zone`, `week`). */
 export type BoardErrorCode =
-	'board_over' | 'board_full' | 'too_many_boards' | 'creator_only' | 'too_many_ranges' | GameErrorCode;
+	| 'board_over'
+	| 'board_full'
+	| 'too_many_boards'
+	| 'creator_only'
+	| 'too_many_ranges'
+	| 'guests_off'
+	| 'guest_name_taken'
+	| GameErrorCode;
 
 /** The game actions' 409 codes (crates/server/src/boards/actions.rs, starting.rs). */
 export type GameErrorCode =
@@ -860,12 +867,14 @@ export interface NewBoard {
 	time_zone: string;
 	starts_at: number;
 	ends_at: number;
+	allow_guests?: boolean;
 }
 
 /** `place: null` clears it; leave a field out to keep it. */
 export interface BoardChange {
 	title?: string;
 	place?: string | null;
+	allow_guests?: boolean;
 }
 
 export type GameState = 'full' | 'short' | 'played' | 'past';
@@ -881,11 +890,13 @@ export interface BoardOut {
 	creator_user_id: string;
 	creator_name: string;
 	over: boolean;
+	allow_guests: boolean;
 }
 
 export interface MemberOut {
 	user_id: string;
 	name: string;
+	guest: boolean;
 	joined_at: number;
 }
 
@@ -900,6 +911,7 @@ export interface PieceOut {
 export interface MemberRef {
 	user_id: string;
 	name: string;
+	guest: boolean;
 }
 
 export interface GameOut {
@@ -932,6 +944,7 @@ export interface MeOut {
 	user_id: string;
 	member: boolean;
 	creator: boolean;
+	guest: boolean;
 }
 
 export interface BoardView {
@@ -941,6 +954,12 @@ export interface BoardView {
 	pieces: PieceOut[];
 	games: GameOut[];
 	requests: RequestOut[];
+}
+
+/** The answer to a guest joining or picking a name: the key to keep, and the board as it now is. */
+export interface GuestJoined {
+	guest_key: string;
+	view: BoardView;
 }
 
 // ---- event sign-ups (crates/server/src/competitions/signups.rs, signups_api.rs) -----------

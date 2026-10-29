@@ -332,4 +332,19 @@ describe('typed results and the serve choice', () => {
 		vi.stubGlobal('fetch', async () => new Response('', { status: 202 }));
 		expect(await accountRequest('/api/me/push/test', { method: 'POST', ok: 202 })).toBeNull();
 	});
+
+	it('accountRequest sends extra headers', async () => {
+		const calls: Call[] = [];
+		vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+			calls.push({ url, init });
+			return new Response('{}', { status: 200 });
+		});
+		await accountRequest('/x', { headers: { 'x-board-guest': 'k' } });
+		await accountRequest('/x', { method: 'POST', body: {}, headers: { 'x-board-guest': 'k' } });
+		expect(calls[0]?.init?.headers).toEqual({ 'x-board-guest': 'k' });
+		expect(calls[1]?.init?.headers).toEqual({
+			'x-board-guest': 'k',
+			'content-type': 'application/json'
+		});
+	});
 });

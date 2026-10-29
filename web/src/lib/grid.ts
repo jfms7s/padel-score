@@ -119,7 +119,7 @@ export function freeAt(view: BoardView, t: number): MemberRef[] {
 				a.joined_at - b.joined_at ||
 				(a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0)
 		)
-		.map(({ user_id, name }) => ({ user_id, name }));
+		.map(({ user_id, name, guest }) => ({ user_id, name, guest }));
 }
 
 /** One member's pieces with touching or overlapping ones joined, in time order. */

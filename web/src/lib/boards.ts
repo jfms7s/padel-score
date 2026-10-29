@@ -4,12 +4,22 @@
 
 import { accountRequest, ApiError } from './api';
 import { authMessage } from './auth';
+import { forgetGuest, guestKey } from './guests';
 import { strings } from './strings';
 import type { BoardChange, BoardOut, BoardView, NewBoard, StartPlayers } from './types';
 
 const enc = encodeURIComponent;
 const board = (token: string, rest = '') => `/api/boards/${enc(token)}${rest}`;
 const signedIn = { signedIn: true } as const;
+
+/**
+ * What a guest-capable call sends: the guest key when this browser holds one for the board (and
+ * then no `signedIn`, so a 401 doesn't send a guest to sign-in), else the signed-in session.
+ */
+function asMember(token: string): { signedIn: true } | { headers: Record<string, string> } {
+	const key = guestKey(token);
+	return key === null ? signedIn : { headers: { 'x-board-guest': key } };
+}
 
 /** 409 `too_many_boards` (20 open ones), 422 `title`, `place`, `time_zone`, `week`. */
 export function createBoard(req: NewBoard): Promise<BoardView> {
@@ -18,7 +28,8 @@ export function createBoard(req: NewBoard): Promise<BoardView> {
 
 /** Anyone with the link; signed out, `me` is null. */
 export function getBoard(token: string): Promise<BoardView> {
-	return accountRequest(board(token));
+	const key = guestKey(token);
+	return accountRequest(board(token), key === null ? {} : { headers: { 'x-board-guest': key } });
 }
 
 /** The creator only (409 `creator_only`). */
@@ -37,16 +48,18 @@ export function joinBoard(token: string): Promise<BoardView> {
 }
 
 export async function leaveBoard(token: string): Promise<void> {
-	await accountRequest(board(token, '/leave'), { ...signedIn, method: 'POST', ok: 204 });
+	const wasGuest = guestKey(token) !== null;
+	await accountRequest(board(token, '/leave'), { ...asMember(token), method: 'POST', ok: 204 });
+	if (wasGuest) forgetGuest(token);
 }
 
 /** Adding free time joins the board too. 409 `too_many_ranges`, 422 `range`. */
 export function addRange(token: string, start: number, end: number): Promise<BoardView> {
-	return accountRequest(board(token, '/ranges'), { ...signedIn, method: 'POST', body: { start, end } });
+	return accountRequest(board(token, '/ranges'), { ...asMember(token), method: 'POST', body: { start, end } });
 }
 
 export function removeRange(token: string, start: number, end: number): Promise<BoardView> {
-	return accountRequest(board(token, '/ranges/remove'), { ...signedIn, method: 'POST', body: { start, end } });
+	return accountRequest(board(token, '/ranges/remove'), { ...asMember(token), method: 'POST', body: { start, end } });
 }
 
 // ---- game actions ------------------------------------------------------------------------
@@ -57,17 +70,17 @@ const game = (token: string, gameId: string, action: string) => board(token, `/g
 
 /** 409 `game_changed`, `game_played`, `game_started`, `board_over`. Removes my free time for it too. */
 export function leaveGame(token: string, gameId: string, version: number): Promise<BoardView> {
-	return accountRequest(game(token, gameId, 'leave'), { ...signedIn, method: 'POST', body: { version } });
+	return accountRequest(game(token, gameId, 'leave'), { ...asMember(token), method: 'POST', body: { version } });
 }
 
 /** 409 `nobody_can_take`, `too_late`. */
 export function giveGame(token: string, gameId: string, version: number): Promise<BoardView> {
-	return accountRequest(game(token, gameId, 'give'), { ...signedIn, method: 'POST', body: { version } });
+	return accountRequest(game(token, gameId, 'give'), { ...asMember(token), method: 'POST', body: { version } });
 }
 
 /** Take an open place in a short game: 409 `busy`, `game_full`, `already_in_game`. */
 export function takeGame(token: string, gameId: string, version: number): Promise<BoardView> {
-	return accountRequest(game(token, gameId, 'take'), { ...signedIn, method: 'POST', body: { version } });
+	return accountRequest(game(token, gameId, 'take'), { ...asMember(token), method: 'POST', body: { version } });
 }
 
 /** Ask a player of an overlapping game to trade places: 409 `cannot_swap`, `request_pending`. */
@@ -79,7 +92,7 @@ export function askSwap(
 	otherUserId: string
 ): Promise<BoardView> {
 	const body = { version, other_game_id: otherGameId, other_user_id: otherUserId };
-	return accountRequest(game(token, gameId, 'swap'), { ...signedIn, method: 'POST', body });
+	return accountRequest(game(token, gameId, 'swap'), { ...asMember(token), method: 'POST', body });
 }
 
 /**
@@ -95,7 +108,7 @@ export function askTime(
 	agreed: boolean
 ): Promise<BoardView> {
 	return accountRequest(game(token, gameId, 'time'), {
-		...signedIn,
+		...asMember(token),
 		method: 'POST',
 		body: { version, start, end, agreed }
 	});
@@ -105,6 +118,14 @@ export function askTime(
 export function answerRequest(requestId: string, accept: boolean): Promise<BoardView> {
 	return accountRequest(`/api/board-requests/${enc(requestId)}/${accept ? 'accept' : 'decline'}`, {
 		...signedIn,
+		method: 'POST'
+	});
+}
+
+/** Accept or decline a request addressed to me, as a member or a guest of the board. */
+export function answerBoardRequest(token: string, requestId: string, accept: boolean): Promise<BoardView> {
+	return accountRequest(board(token, `/requests/${enc(requestId)}/${accept ? 'accept' : 'decline'}`), {
+		...asMember(token),
 		method: 'POST'
 	});
 }
