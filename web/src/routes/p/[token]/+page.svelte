@@ -68,7 +68,7 @@
 
 <main class="acct">
 	{#if failure}
-		<h1>{strings.appName}</h1>
+		<h1>{t.unavailable}</h1>
 		<p class="error" role="alert">{failure}</p>
 	{:else if profile}
 		<h1>{t.title(profile.display_name)}</h1>

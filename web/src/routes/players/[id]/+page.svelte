@@ -1,7 +1,7 @@
 <script lang="ts">
-	import BackLink from '#lib/components/BackLink.svelte';
 	// One player: their record, any placings, then their matches, a page at a time.
 	import { page } from '$app/state';
+	import BackLink from '#lib/components/BackLink.svelte';
 	import LinkCode from '#lib/components/LinkCode.svelte';
 	import LinkedResultRow from '#lib/components/LinkedResultRow.svelte';
 	import ResultRow from '#lib/components/ResultRow.svelte';

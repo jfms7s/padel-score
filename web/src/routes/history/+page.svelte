@@ -1,7 +1,7 @@
 <script lang="ts">
-	import BackLink from '#lib/components/BackLink.svelte';
 	// Past matches: finished matches the signed-in user started, newest first, a page at a time.
 	import { onMount } from 'svelte';
+	import BackLink from '#lib/components/BackLink.svelte';
 	import ResultRow from '#lib/components/ResultRow.svelte';
 	import { getHistory, playerMessage } from '#lib/players.ts';
 	import { requireSignedIn, session } from '#lib/session.ts';

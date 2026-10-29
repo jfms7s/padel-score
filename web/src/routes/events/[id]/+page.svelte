@@ -1,11 +1,11 @@
 <script lang="ts">
-	import BackLink from '#lib/components/BackLink.svelte';
 	// The coordinator's event desk: a header, a tab bar and the open tab (see desk.ts). The page
 	// loads the event, follows its stream (offering a reload when it is lost) and runs every
 	// call; the tabs only show and ask.
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import BackLink from '#lib/components/BackLink.svelte';
 	import KindPanel from '#lib/components/events/KindPanel.svelte';
 	import CourtsTab from '#lib/components/events/desk/CourtsTab.svelte';
 	import DeskHeader from '#lib/components/events/desk/DeskHeader.svelte';

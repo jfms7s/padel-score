@@ -482,6 +482,7 @@ export const strings = {
 		// The public profile (/p/{token}).
 		publicProfile: {
 			title: (name: string) => `${name}’s results`,
+			unavailable: 'Results unavailable',
 			notPublic: 'This profile isn’t public.',
 			note: 'Only dates, outcomes and scores are shown. No names.'
 		},

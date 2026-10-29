@@ -1,8 +1,8 @@
 <script lang="ts">
-	import BackLink from '#lib/components/BackLink.svelte';
 	// My results: the combined record across every coordinator, the entries linked to this account,
 	// my claims, and who may see my history.
 	import { ApiError } from '#lib/api.ts';
+	import BackLink from '#lib/components/BackLink.svelte';
 	import LinkCode from '#lib/components/LinkCode.svelte';
 	import LinkedResultRow from '#lib/components/LinkedResultRow.svelte';
 	import RecordPlacings from '#lib/components/RecordPlacings.svelte';
@@ -163,11 +163,11 @@
 <main class="acct page-wide-desk">
 	<BackLink />
 	<h1>{t.title}</h1>
-	<a class="recorded" href="/history">{strings.results.recordedLink}</a>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
 	{/if}
 	{#if $session.status === 'signed_in' && ready}
+		<a class="recorded" href="/history">{strings.results.recordedLink}</a>
 		{#if empty}
 			<p class="hint">{t.empty}</p>
 		{/if}

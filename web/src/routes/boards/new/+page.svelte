@@ -1,6 +1,6 @@
 <script lang="ts">
-	import BackLink from '#lib/components/BackLink.svelte';
 	// A new game board: a title, an optional place and the first of its seven days.
+	import BackLink from '#lib/components/BackLink.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { boardMessage, createBoard } from '#lib/boards.ts';
