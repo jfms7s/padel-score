@@ -335,7 +335,7 @@ async fn view_ignores_undone_and_replaced_rows() {
         event: Event::Point(team),
         client_id: "x".into(),
         state,
-        created_at: 0,
+        created_at: seq * 100,
     };
     let events = vec![
         row(1, Team::A, EventState::Effective),
@@ -346,6 +346,9 @@ async fn view_ignores_undone_and_replaced_rows() {
     ];
     let v = view_of(&m, &events).unwrap();
     assert_eq!(seqs(&v), vec![1, 4]);
+    // Each kept point carries its own row's time, not a neighbour's.
+    let times: Vec<i64> = v.events.iter().map(|e| e.at).collect();
+    assert_eq!(times, vec![100, 400]);
     assert_eq!(v.head_seq, 5);
     assert_eq!(game(&v), (PointCall::Thirty, PointCall::Love));
     assert_eq!(v.id, m.id);
