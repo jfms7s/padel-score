@@ -66,7 +66,7 @@ Environment variables:
 | --- | --- | --- |
 | `SECURE_COOKIES` | on | The session cookie is `__Host-padel_session` with `Secure`. Set `false` or `0` for plain-HTTP development, e.g. `docker run -e SECURE_COOKIES=false`. |
 | `TRUSTED_PROXIES` | empty | Comma-separated CIDRs or IPs of reverse proxies whose `X-Forwarded-For` is believed. Empty: the TCP peer is the client, which behind a proxy puts every user in one rate-limit bucket. A bad entry stops startup. |
-| `PUBLIC_ORIGIN` | unset | The public URL, e.g. `https://padel.example.com`, no trailing slash. The CSRF check compares a request's `Origin` with it. Unset: it compares the `Origin` host with `Host`. Also the contact web push sends to push services (VAPID `sub`); unset, a placeholder `mailto:` is used. |
+| `PUBLIC_ORIGIN` | unset | The public URL, e.g. `https://padel.example.com`, no trailing slash. The CSRF check compares a request's `Origin` with it. Unset: it compares the `Origin` host with `Host`. Also the contact web push sends to push services (VAPID `sub`); unset, a placeholder `mailto:push@localhost` is used, which Apple's push service may reject, so set it if you use web push. The server logs a warning at startup when it is unset. |
 | `SETUP_TOKEN` | unset | The setup code for the first admin. Unset: a random one-time code is logged. |
 
 ## Push notifications

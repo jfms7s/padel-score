@@ -1,8 +1,8 @@
 //! Starting a match from something that was planned: the hand-off between "Start match" on a
 //! board game and the New match page.
 //!
-//! [`Store::start_game`] answers the page: the game's players (four, or two or three when short) as the starter's own player
-//! entries, in seat order. [`create_match_from`] then makes the match and marks the source
+//! [`Store::start_game`] answers the page: the game's two to four players (a short game has fewer
+//! than four) as the starter's own player entries, in seat order. [`create_match_from`] then makes the match and marks the source
 //! played in the same transaction, so a source starts at most one match.
 
 use padel_scoring::Format;
@@ -17,14 +17,14 @@ use crate::store::{NewMatch, Store, StoreError, StoredMatch, Tx, create_match_in
 /// How long before its start a game can be started.
 pub const START_WINDOW_SECS: i64 = 1800;
 
-/// One of the four players of the match to start, as the starter's player entry.
+/// One of the two to four players of the match to start, as the starter's player entry.
 #[derive(Debug, Clone, Serialize)]
 pub struct StartPlayer {
     pub player_id: String,
     pub name: String,
 }
 
-/// What New match needs to fill in: four players in seat order (the first two are side A) and
+/// What New match needs to fill in: the game's two to four players in seat order (the first two are side A) and
 /// the format when the source has one. A board game has none, so New match keeps its last
 /// setup (`null`).
 #[derive(Debug, Clone, Serialize)]
@@ -121,6 +121,8 @@ pub async fn create_match_from(
                 return Err(StoreError::Conflict("already_started"));
             }
             check_window(game.start, game.end, now)?;
+            // No `board_over` check, unlike `start_game`: a game never ends after its board does, so
+            // `check_window` already refuses (`game_over`) everything `board_over` would.
             let stored = create_match_in(&mut tx, new, now).await?;
             mark_played_in(&mut tx, &game.id, &stored.id, now).await?;
             stored

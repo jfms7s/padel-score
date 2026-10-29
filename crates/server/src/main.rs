@@ -48,6 +48,11 @@ async fn main() -> Result<(), BoxError> {
     } else {
         tracing::info!(trusted_proxies, "trusted proxies configured");
     }
+    if config.public_origin.is_none() {
+        tracing::warn!(
+            "no PUBLIC_ORIGIN: web push falls back to a placeholder mailto: contact that Apple's push service may reject, and the CSRF check compares the Origin host with Host"
+        );
+    }
     let port = config.port;
     if let Some(dir) = config
         .database_url
