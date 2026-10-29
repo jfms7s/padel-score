@@ -1133,7 +1133,7 @@ async fn hand_added_teams_count_toward_the_minimum() {
 
 #[tokio::test]
 async fn deadline_job_leaves_other_events_alone() {
-    // Not due yet, sign-ups off, already closed, and already running are all skipped.
+    // Not due yet and already closed are skipped (sign-ups off and running events: next tests).
     let w = world(16).await;
     let s = &w.state.store;
     assert_eq!(s.close_due_signups(DEADLINE - 1).await.unwrap().len(), 0);
@@ -1142,6 +1142,50 @@ async fn deadline_job_leaves_other_events_alone() {
     assert_eq!(s.close_due_signups(DEADLINE).await.unwrap().len(), 0);
     assert_eq!(w.event_now().await.signups_closed_at, Some(T0 + 5));
     assert_eq!(w.event_now().await.status, Status::Setup);
+}
+
+#[tokio::test]
+async fn deadline_job_skips_events_with_signups_off() {
+    let w = world(16).await;
+    w.teams("T", 4).await;
+    sqlx::query("UPDATE competitions SET signups = 'off' WHERE id = ?")
+        .bind(&w.event)
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        w.state
+            .store
+            .close_due_signups(DEADLINE)
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(w.event_now().await.signups_closed_at, None);
+}
+
+#[tokio::test]
+async fn deadline_job_skips_running_events() {
+    let w = world(16).await;
+    w.teams("T", 4).await;
+    sqlx::query("UPDATE competitions SET status = 'running' WHERE id = ?")
+        .bind(&w.event)
+        .execute(&w.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        w.state
+            .store
+            .close_due_signups(DEADLINE)
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
+    let ev = w.event_now().await;
+    assert_eq!(ev.status, Status::Running);
+    assert_eq!(ev.signups_closed_at, None);
 }
 
 #[tokio::test]

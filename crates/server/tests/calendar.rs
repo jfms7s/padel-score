@@ -450,6 +450,44 @@ async fn waiting_holds_swap_and_time_requests_and_my_partner_invite() {
 }
 
 #[tokio::test]
+async fn nobody_sees_another_users_partner_token() {
+    let (s, _pool) = setup().await;
+    let ana = user(&s, "Ana").await;
+    let rui = user(&s, "Rui").await;
+    let marta = user(&s, "Marta").await;
+    let (_, event_token) = event(&s, &ana, "Friday cup", START + 2 * HOUR, Signups::Public).await;
+    let mut tokens = Vec::new();
+    for who in [&rui, &marta] {
+        let entry = s
+            .join_event(
+                &event_token,
+                who,
+                JoinAs::Partner { partner_name: None },
+                T0 + 5,
+            )
+            .await
+            .unwrap();
+        match entry {
+            padel_score_server::competitions::signups::MyEntry::Pending { partner_token } => {
+                tokens.push(partner_token);
+            }
+            other => panic!("a link, not {other:?}"),
+        }
+    }
+    // Each sees only their own token, anywhere in their calendar; the organiser sees neither.
+    for (who, mine, theirs) in [
+        (&rui, &tokens[0], &tokens[1]),
+        (&marta, &tokens[1], &tokens[0]),
+    ] {
+        let text = cal(&s, who, T0, T0 + 60).await.to_string();
+        assert!(text.contains(mine.as_str()));
+        assert!(!text.contains(theirs.as_str()));
+    }
+    let text = cal(&s, &ana, T0, T0 + 60).await.to_string();
+    assert!(tokens.iter().all(|t| !text.contains(t.as_str())), "{text}");
+}
+
+#[tokio::test]
 async fn waiting_leaves_out_stale_requests() {
     let (s, _pool, token, [a0, ..], [b0, ..]) = two_games().await;
     let view = s

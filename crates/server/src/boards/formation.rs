@@ -684,6 +684,62 @@ mod tests {
     }
 
     #[test]
+    fn game_length_is_clamped_to_the_boards_end() {
+        // Everyone is free for hours, but the board ends an hour after the first slot: the game
+        // gets one hour, not the ninety minutes the cap would allow.
+        let mut state = same_range(&["ana", "bia", "cris", "duarte"], at(10, 0), at(14, 0));
+        state.starts_at = at(10, 0);
+        state.ends_at = at(11, 0);
+        assert_eq!(
+            settle(&state, at(9, 0)),
+            vec![form(
+                at(10, 0),
+                at(11, 0),
+                &["ana", "bia", "cris", "duarte"]
+            )]
+        );
+    }
+
+    #[test]
+    fn extension_stops_at_a_player_who_is_busy() {
+        // Ana plays elsewhere from 11:00, so the first game cannot grow past the hour.
+        let mut state = same_range(&["ana", "bia", "cris", "duarte"], at(10, 0), at(14, 0));
+        state
+            .games
+            .push(game("other", at(11, 0), at(12, 0), &["ana", "x", "y", "z"]));
+        let steps = settle(&state, T0);
+        assert_eq!(
+            steps.first(),
+            Some(&form(
+                at(10, 0),
+                at(11, 0),
+                &["ana", "bia", "cris", "duarte"]
+            ))
+        );
+    }
+
+    #[test]
+    fn priority_uses_the_oldest_of_overlapping_pieces() {
+        let state = board(
+            &[("ana", 1)],
+            vec![
+                piece("ana", at(10, 0), at(12, 0), 5),
+                piece("ana", at(11, 0), at(13, 0), 2),
+            ],
+            vec![],
+        );
+        // Only the first covers 10:30, both cover 11:30: the older one counts.
+        assert_eq!(
+            state.priority_at("ana", at(10, 30)),
+            Some(Priority(5, 1, "ana".to_owned()))
+        );
+        assert_eq!(
+            state.priority_at("ana", at(11, 30)),
+            Some(Priority(2, 1, "ana".to_owned()))
+        );
+    }
+
+    #[test]
     fn game_stays_short_when_line_empty() {
         let state = short_game_board(&[]);
         assert_eq!(settle(&state, T0), vec![]);
@@ -1018,6 +1074,29 @@ mod tests {
             extra("eva-2", "eva", at(10, 0), at(10, 30), 5),
         ]);
         assert_eq!(give_place(&state, "g1", "ana", T0), Ok(trade("g2", "eva")));
+    }
+
+    #[test]
+    fn give_does_not_trade_when_the_giver_is_busy_in_the_other_game_time() {
+        let covered = || {
+            vec![
+                extra("ana-2", "ana", at(11, 0), at(11, 30), 1),
+                extra("eva-2", "eva", at(10, 0), at(10, 30), 5),
+            ]
+        };
+        assert_eq!(
+            give_place(&two_games(covered()), "g1", "ana", T0),
+            Ok(trade("g2", "eva"))
+        );
+        // Ana already plays another game inside g2's time, so she cannot take g2's place.
+        let mut state = two_games(covered());
+        state
+            .games
+            .push(game("g3", at(11, 0), at(11, 30), &["ana", "x", "y", "z"]));
+        assert_eq!(
+            give_place(&state, "g1", "ana", T0),
+            Err(GiveRefusal::NobodyCanTake)
+        );
     }
 
     #[test]

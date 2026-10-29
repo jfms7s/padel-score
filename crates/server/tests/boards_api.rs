@@ -355,7 +355,7 @@ async fn my_boards_lists_joined_boards_only() {
     let (state, _) = state().await;
     let app = support::app_from(&state, 1);
     let (a, a_raw) = fast_user(&state, "a@x.test", "Ana").await;
-    let (b, b_raw) = fast_user(&state, "b@x.test", "Bia").await;
+    let (b, _) = fast_user(&state, "b@x.test", "Bia").await;
     let mine = seed_board(&state, &a).await;
     seed_board(&state, &b).await;
     let res = send(
@@ -369,7 +369,6 @@ async fn my_boards_lists_joined_boards_only() {
     assert_eq!(items[0]["token"], mine.as_str());
     let anon = send(&app, req(Method::GET, "/api/me/boards", None, &[])).await;
     assert_eq!(anon.status, StatusCode::UNAUTHORIZED);
-    let _ = b_raw;
 }
 
 #[tokio::test]
