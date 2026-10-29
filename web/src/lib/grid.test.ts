@@ -36,13 +36,14 @@ function view(over: Partial<BoardView> = {}): BoardView {
 			ends_at: T0 + 7 * 86400,
 			creator_user_id: 'ana',
 			creator_name: 'Ana',
-			over: false
+			over: false,
+			allow_guests: false
 		},
 		me: null,
 		members: [
-			{ user_id: 'ana', name: 'Ana', joined_at: 10 },
-			{ user_id: 'rui', name: 'Rui', joined_at: 20 },
-			{ user_id: 'marta', name: 'Marta', joined_at: 30 }
+			{ user_id: 'ana', name: 'Ana', guest: false, joined_at: 10 },
+			{ user_id: 'rui', name: 'Rui', guest: false, joined_at: 20 },
+			{ user_id: 'marta', name: 'Marta', guest: false, joined_at: 30 }
 		],
 		pieces: [],
 		games: [],
@@ -192,7 +193,7 @@ describe('othersFreeCount and heatMap', () => {
 
 describe('free counts with games', () => {
 	const pieces = [piece('ana', T0, T0 + 4 * H, 1), piece('rui', T0, T0 + 4 * H, 2), piece('marta', T0, T0 + 4 * H, 3)];
-	const games = [{ start: T0 + H, end: T0 + 2 * H, players: [{ user_id: 'rui', name: 'Rui' }] }];
+	const games = [{ start: T0 + H, end: T0 + 2 * H, players: [{ user_id: 'rui', name: 'Rui', guest: false }] }];
 
 	it('does not count someone who is in a game then, and agrees with freeAt', () => {
 		expect(othersFreeCount(pieces, 'ana', T0 + H, games)).toBe(1);
@@ -238,7 +239,7 @@ describe('layoutGames', () => {
 		id,
 		start,
 		end,
-		players: who.map((user_id) => ({ user_id, name: user_id }))
+		players: who.map((user_id) => ({ user_id, name: user_id, guest: false }))
 	});
 	const lanes = (list: ReturnType<typeof layoutGames>) =>
 		Object.fromEntries(list.map((l) => [l.id, [l.lane, l.lanes]]));
@@ -324,7 +325,7 @@ describe('freeAt', () => {
 					version: 1,
 					moved: false,
 					state: 'short',
-					players: [{ user_id: 'ana', name: 'Ana' }],
+					players: [{ user_id: 'ana', name: 'Ana', guest: false }],
 					line: [],
 					match_spectator_token: null
 				}
