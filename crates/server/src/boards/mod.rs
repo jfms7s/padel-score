@@ -10,7 +10,7 @@ pub mod formation;
 pub mod guests;
 pub mod ranges;
 
-use actions::{GameRow, leave_in, requests_in};
+use actions::{GameRow, bump_version_in, leave_in, requests_in};
 pub(crate) use calendar::{calendar_games_in, queue_short_games_in, waiting_and_strips_in};
 
 use std::collections::HashMap;
