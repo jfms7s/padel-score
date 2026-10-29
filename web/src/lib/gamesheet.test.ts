@@ -15,7 +15,7 @@ const T0 = Date.UTC(2026, 10, 2) / 1000; // Monday 2026-11-02 00:00 UTC
 /** Wednesday 20:00 UTC, the game most tests look at. */
 const G = T0 + 2 * 86400 + 20 * H;
 
-const person = (id: string) => ({ user_id: id, name: id.toUpperCase() });
+const person = (id: string) => ({ user_id: id, name: id.toUpperCase(), guest: false });
 const piece = (user_id: string, start: number, end: number, created_at = 0): PieceOut => ({
 	user_id,
 	start,
@@ -51,10 +51,11 @@ function view(games: GameOut[], pieces: PieceOut[] = [], over: Partial<BoardView
 			ends_at: T0 + 7 * 86400,
 			creator_user_id: 'ana',
 			creator_name: 'Ana',
-			over: false
+			over: false,
+			allow_guests: false
 		},
-		me: { user_id: 'ana', member: true, creator: true },
-		members: [...ids].map((id, i) => ({ user_id: id, name: id.toUpperCase(), joined_at: i })),
+		me: { user_id: 'ana', member: true, creator: true, guest: false },
+		members: [...ids].map((id, i) => ({ user_id: id, name: id.toUpperCase(), guest: false, joined_at: i })),
 		pieces,
 		games,
 		requests: [],

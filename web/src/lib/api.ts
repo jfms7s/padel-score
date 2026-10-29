@@ -142,9 +142,11 @@ function retryAfterHeader(res: Response): number | undefined {
 async function exchange(path: string, init: RequestInit): Promise<Answer> {
 	let res: Response;
 	try {
+		const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
+		if (init.body) headers['content-type'] = 'application/json';
 		res = await fetch(path, {
 			...init,
-			headers: init.body ? { 'content-type': 'application/json' } : undefined
+			headers: Object.keys(headers).length > 0 ? headers : undefined
 		});
 	} catch {
 		throw unreachable(0);
@@ -224,6 +226,8 @@ export interface AccountCall {
 	 * the public code routes.
 	 */
 	signedIn?: boolean;
+	/** Extra request headers, sent next to `content-type`. */
+	headers?: Record<string, string>;
 	/** The answer's shape; one that fails it is a server error. */
 	guard?: (v: unknown) => boolean;
 }
@@ -232,6 +236,7 @@ export interface AccountCall {
 export async function accountRequest<T>(path: string, opts: AccountCall = {}): Promise<T> {
 	const init: RequestInit = { method: opts.method ?? 'GET' };
 	if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
+	if (opts.headers) init.headers = opts.headers;
 	const { status, body, retryAfter } = await call(path, init, ACCOUNT_TIMEOUT_MS);
 	const ok = opts.ok ?? 200;
 	if (typeof ok === 'number' ? status !== ok : !ok.includes(status)) {

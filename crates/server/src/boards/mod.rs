@@ -10,7 +10,7 @@ pub mod formation;
 pub mod guests;
 pub mod ranges;
 
-use actions::{GameRow, leave_in, requests_in};
+use actions::{GameRow, bump_version_in, leave_in, requests_in};
 pub(crate) use calendar::{calendar_games_in, queue_short_games_in, waiting_and_strips_in};
 
 use std::collections::HashMap;
@@ -749,6 +749,37 @@ fn mine(state: &BoardState, user: &str) -> Vec<Piece> {
         .collect()
 }
 
+/// [`Store::leave_board`] on an open board, in the caller's transaction.
+async fn leave_board_in(
+    tx: &mut Tx<'_>,
+    board: &BoardRow,
+    who: &str,
+    now: i64,
+) -> Result<(), StoreError> {
+    if !is_member_in(tx, &board.id, who).await? {
+        return Ok(());
+    }
+    sqlx::query("DELETE FROM board_ranges WHERE board_id = ? AND user_id = ?")
+        .bind(&board.id)
+        .bind(who)
+        .execute(&mut **tx)
+        .await?;
+    let state = load_state_in(tx, &board.id).await?;
+    for game in state
+        .games
+        .iter()
+        .filter(|g| !g.played && g.end > now && g.players.iter().any(|p| p == who))
+    {
+        leave_in(tx, &board.id, &game.id, who, now).await?;
+    }
+    sqlx::query("DELETE FROM board_members WHERE board_id = ? AND user_id = ?")
+        .bind(&board.id)
+        .bind(who)
+        .execute(&mut **tx)
+        .await?;
+    settle_in(tx, &board.id, Some(who), now).await
+}
+
 impl Store {
     pub async fn create_board(
         &self,
@@ -836,31 +867,14 @@ impl Store {
 
     /// Leave the board: free time goes, and so does the place in every game that has no match and has not ended,
     /// started or not (the line fills it). Played and ended games stay as history.
-    pub async fn leave_board(&self, token: &str, user: &str, now: i64) -> Result<(), StoreError> {
+    pub async fn leave_board(&self, token: &str, who: &str, now: i64) -> Result<(), StoreError> {
         let mut tx = self.begin().await?;
         let board = open_board_in(&mut tx, token, now).await?;
-        if !is_member_in(&mut tx, &board.id, user).await? {
-            return Ok(());
+        let guest = guests::is_guest_id(who) && is_member_in(&mut tx, &board.id, who).await?;
+        leave_board_in(&mut tx, &board, who, now).await?;
+        if guest {
+            guests::end_guest_in(&mut tx, who, now).await?;
         }
-        sqlx::query("DELETE FROM board_ranges WHERE board_id = ? AND user_id = ?")
-            .bind(&board.id)
-            .bind(user)
-            .execute(&mut *tx)
-            .await?;
-        let state = load_state_in(&mut tx, &board.id).await?;
-        for game in state
-            .games
-            .iter()
-            .filter(|g| !g.played && g.end > now && g.players.iter().any(|p| p == user))
-        {
-            leave_in(&mut tx, &board.id, &game.id, user, now).await?;
-        }
-        sqlx::query("DELETE FROM board_members WHERE board_id = ? AND user_id = ?")
-            .bind(&board.id)
-            .bind(user)
-            .execute(&mut *tx)
-            .await?;
-        settle_in(&mut tx, &board.id, Some(user), now).await?;
         tx.commit().await?;
         Ok(())
     }

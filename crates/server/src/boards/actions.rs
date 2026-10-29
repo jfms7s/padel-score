@@ -81,7 +81,7 @@ fn still_open(game: &GameRow, now: i64) -> Result<(), StoreError> {
     Ok(())
 }
 
-async fn bump_version_in(tx: &mut Tx<'_>, game_id: &str) -> Result<(), StoreError> {
+pub(super) async fn bump_version_in(tx: &mut Tx<'_>, game_id: &str) -> Result<(), StoreError> {
     sqlx::query("UPDATE board_games SET version = version + 1 WHERE id = ?")
         .bind(game_id)
         .execute(&mut **tx)
@@ -831,6 +831,31 @@ impl Store {
         accept: bool,
         now: i64,
     ) -> Result<BoardView, StoreError> {
+        self.answer_on(None, request_id, user, accept, now).await
+    }
+
+    /// [`Store::answer_request`] for a request that must be on the board with `token`
+    /// (`NotFound` otherwise): the board link, for users and guests alike.
+    pub async fn answer_board_request(
+        &self,
+        token: &str,
+        request_id: &str,
+        who: &str,
+        accept: bool,
+        now: i64,
+    ) -> Result<BoardView, StoreError> {
+        self.answer_on(Some(token), request_id, who, accept, now)
+            .await
+    }
+
+    async fn answer_on(
+        &self,
+        token: Option<&str>,
+        request_id: &str,
+        user: &str,
+        accept: bool,
+        now: i64,
+    ) -> Result<BoardView, StoreError> {
         let mut tx = self.begin().await?;
         let row: Option<RequestTuple> =
             sqlx::query_as(select_request!("WHERE id = ? AND status = 'pending'"))
@@ -839,6 +864,9 @@ impl Store {
                 .await?;
         let request = RequestRow::from_tuple(row.ok_or(StoreError::NotFound)?);
         let board = find_by_id_in(&mut tx, &request.board_id).await?;
+        if token.is_some_and(|t| t != board.token) {
+            return Err(StoreError::NotFound);
+        }
         let state = load_state_in(&mut tx, &board.id).await?;
         if !request.addressees(&state).iter().any(|u| u == user) {
             return Err(StoreError::NotFound);
