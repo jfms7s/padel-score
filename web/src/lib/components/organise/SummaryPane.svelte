@@ -74,7 +74,7 @@
 				<span style:width="{Math.min(100, (ev.signed_teams / barMax) * 100)}%"></span>
 			</div>
 			<p>{t.signupsText(ev.signed_teams, ev.solo_count, ev.line_count)}</p>
-			{#if ev.schedule.deadline_at !== null}
+			{#if ev.schedule.deadline_at !== null && ev.schedule.deadline_at > Date.now() / 1000}
 				<p class="hint">{t.signupsClose(longDate(ev.schedule.deadline_at))}</p>
 			{/if}
 		</div>

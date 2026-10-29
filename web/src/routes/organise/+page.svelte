@@ -215,10 +215,6 @@
 		font-weight: 650;
 	}
 	@media (min-width: 700px) {
-		.switch {
-			display: inline-grid;
-			grid-template-columns: repeat(3, 9rem);
-		}
 		.switch button {
 			min-height: 40px;
 		}

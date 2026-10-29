@@ -84,70 +84,70 @@
 		<p class="error" role="alert">{loadFailure}</p>
 	{/if}
 	{#if $session.status === 'signed_in'}
-	<form class="new" onsubmit={create}>
-		<label>
-			{t.name}
-			<input bind:value={name} placeholder={t.namePlaceholder} autocomplete="off" maxlength={MAX_NAME_LENGTH} required />
-		</label>
-	
-		<div role="group" aria-labelledby="l-kind">
-			<span class="label" id="l-kind">{t.kind}</span>
-			<div class="seg">
-				{#each KINDS as k (k)}
-					<button type="button" aria-pressed={kind === k} onclick={() => pickKind(k)}>{t.kinds[k]}</button>
-				{/each}
-			</div>
-		</div>
-	
-		<div role="group" aria-labelledby="l-deuce">
-			<span class="label" id="l-deuce">{strings.setup.deuce}</span>
-			<div class="seg">
-				{#each DEUCE_RULES as rule (rule)}
-					<button type="button" aria-pressed={deuce === rule} onclick={() => (deuce = rule)}>
-						{strings.setup.deuceOptions[rule]}
-					</button>
-				{/each}
-			</div>
-		</div>
-	
-		{#if kind === 'tournament'}
-			<div role="group" aria-labelledby="l-sets">
-				<span class="label" id="l-sets">{strings.setup.sets}</span>
+		<form class="new" onsubmit={create}>
+			<label>
+				{t.name}
+				<input bind:value={name} placeholder={t.namePlaceholder} autocomplete="off" maxlength={MAX_NAME_LENGTH} required />
+			</label>
+
+			<div role="group" aria-labelledby="l-kind">
+				<span class="label" id="l-kind">{t.kind}</span>
 				<div class="seg">
-					{#each SETS_FORMATS as s (s)}
-						<button type="button" aria-pressed={sets === s} onclick={() => (sets = s)}>{strings.setup.setsOptions[s]}</button>
+					{#each KINDS as k (k)}
+						<button type="button" aria-pressed={kind === k} onclick={() => pickKind(k)}>{t.kinds[k]}</button>
 					{/each}
 				</div>
 			</div>
-			<div role="group" aria-labelledby="l-deciding" aria-describedby={oneSet ? 'h-deciding' : undefined}>
-				<span class="label" id="l-deciding">{strings.setup.deciding}</span>
+
+			<div role="group" aria-labelledby="l-deuce">
+				<span class="label" id="l-deuce">{strings.setup.deuce}</span>
 				<div class="seg">
-					{#each DECIDING_SETS as d (d)}
-						<button type="button" disabled={oneSet} aria-pressed={!oneSet && deciding === d} onclick={() => (deciding = d)}>
-							{strings.setup.decidingOptions[d]}
+					{#each DEUCE_RULES as rule (rule)}
+						<button type="button" aria-pressed={deuce === rule} onclick={() => (deuce = rule)}>
+							{strings.setup.deuceOptions[rule]}
 						</button>
 					{/each}
 				</div>
-				{#if oneSet}<p class="hint" id="h-deciding">{strings.setup.decidingHint}</p>{/if}
 			</div>
-		{:else}
-			<div role="group" aria-labelledby="l-draws">
-				<span class="label" id="l-draws">{t.allowDraws}</span>
-				<div class="seg">
-					<button type="button" aria-pressed={!drawsAllowed} onclick={() => (drawsAllowed = false)}>{t.drawsOptions.no}</button>
-					<button type="button" aria-pressed={drawsAllowed} onclick={() => (drawsAllowed = true)}>{t.drawsOptions.yes}</button>
+
+			{#if kind === 'tournament'}
+				<div role="group" aria-labelledby="l-sets">
+					<span class="label" id="l-sets">{strings.setup.sets}</span>
+					<div class="seg">
+						{#each SETS_FORMATS as s (s)}
+							<button type="button" aria-pressed={sets === s} onclick={() => (sets = s)}>{strings.setup.setsOptions[s]}</button>
+						{/each}
+					</div>
 				</div>
-			</div>
-		{/if}
-		<p class="hint">{rulesText(format)}</p>
-	
-		<KindSettings {kind} {settings} onchange={(s) => (settings = s)} />
-	
-		<ScheduleFields bind:draft={schedule} {kind} {legs} prefix="new" />
-	
-		{#if failure}<p class="error" role="alert">{failure}</p>{/if}
-		<button class="primary" type="submit" disabled={busy}>{busy ? t.creating : t.create}</button>
-	</form>
+				<div role="group" aria-labelledby="l-deciding" aria-describedby={oneSet ? 'h-deciding' : undefined}>
+					<span class="label" id="l-deciding">{strings.setup.deciding}</span>
+					<div class="seg">
+						{#each DECIDING_SETS as d (d)}
+							<button type="button" disabled={oneSet} aria-pressed={!oneSet && deciding === d} onclick={() => (deciding = d)}>
+								{strings.setup.decidingOptions[d]}
+							</button>
+						{/each}
+					</div>
+					{#if oneSet}<p class="hint" id="h-deciding">{strings.setup.decidingHint}</p>{/if}
+				</div>
+			{:else}
+				<div role="group" aria-labelledby="l-draws">
+					<span class="label" id="l-draws">{t.allowDraws}</span>
+					<div class="seg">
+						<button type="button" aria-pressed={!drawsAllowed} onclick={() => (drawsAllowed = false)}>{t.drawsOptions.no}</button>
+						<button type="button" aria-pressed={drawsAllowed} onclick={() => (drawsAllowed = true)}>{t.drawsOptions.yes}</button>
+					</div>
+				</div>
+			{/if}
+			<p class="hint">{rulesText(format)}</p>
+
+			<KindSettings {kind} {settings} onchange={(s) => (settings = s)} />
+
+			<ScheduleFields bind:draft={schedule} {kind} {legs} prefix="new" />
+
+			{#if failure}<p class="error" role="alert">{failure}</p>{/if}
+			<button class="primary" type="submit" disabled={busy}>{busy ? t.creating : t.create}</button>
+		</form>
 	{:else if !loadFailure}
 		<p class="hint">{strings.auth.loading}</p>
 	{/if}
