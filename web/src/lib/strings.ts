@@ -1465,6 +1465,31 @@ export const strings = {
 		spectatorLink: 'Spectator link',
 		freeCourt: (name: string) => `${name} is free`,
 		upNext: 'Up next'
+	},
+
+	// Organise: what you run, in three segments.
+	organise: {
+		title: 'Organise',
+		newEvent: 'New event',
+		empty: 'Nothing here.',
+		segments: { coming: 'Coming up', running: 'Running', past: 'Past' },
+		signups: 'Sign-ups',
+		board: 'Board',
+		match: 'Match',
+		noDate: 'No date yet',
+		startOverdue: 'Start overdue',
+		solo: (n: number) => (n === 1 ? '1 solo waiting to pair' : `${n} solo waiting to pair`),
+		signupsClose: (d: string) => `Sign-ups close ${d}`,
+		inLine: (n: number) => `${n} in line`,
+		moreNeeded: (n: number) => `${n} more needed`,
+		noGames: 'No games yet',
+		gamesFormed: (n: number) => (n === 1 ? '1 game formed' : `${n} games formed`),
+		openDesk: 'Open desk',
+		open: 'Open',
+		share: 'Share sign-up link',
+		shareLink: 'Share link',
+		placeOpen: 'Open',
+		people: (n: number) => `${n} people`
 	}
 } as const;
 

@@ -1218,3 +1218,41 @@ export interface Calendar {
 	boards: BoardStrip[];
 	open: OpenItem[];
 }
+
+/** An event on the Organise page: the summary plus what needs the organiser. */
+export interface OrganisedEvent extends EventSummary {
+	join_token: string | null;
+	/** Teams with a place (`team_count` counts only hand-added and taken teams). */
+	signed_teams: number;
+	solo_count: number;
+	line_count: number;
+}
+
+/** A scheduled match you own. `places` holds the name in each place by slot; null is open. */
+export interface OrganisedMatch {
+	id: string;
+	join_token: string;
+	starts_at: number;
+	place: string | null;
+	state: ScheduledState;
+	places: [string | null, string | null, string | null, string | null];
+	line_count: number;
+}
+
+export interface OrganisedBoard {
+	token: string;
+	title: string;
+	place: string | null;
+	starts_at: number;
+	ends_at: number;
+	over: boolean;
+	member_count: number;
+	game_count: number;
+}
+
+/** `GET /api/me/organised`. */
+export interface Organised {
+	events: OrganisedEvent[];
+	matches: OrganisedMatch[];
+	boards: OrganisedBoard[];
+}
