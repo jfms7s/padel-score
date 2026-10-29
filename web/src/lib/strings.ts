@@ -560,14 +560,8 @@ export const strings = {
 		noPhone: 'No phone yet',
 		waitingForMatch: 'Waiting for a match',
 
-		title: 'Events',
-		intro: 'Run a tournament or a non-stop: teams, courts with their own phones, and the results.',
-		none: "You haven't made any events yet.",
 		kinds: { tournament: 'Tournament', non_stop: 'Non-stop' },
 		status: { setup: 'Setting up', running: 'Running', finished: 'Finished', cancelled: 'Cancelled' },
-		counts: (teams: number, courts: number) =>
-			`${teams === 1 ? '1 team' : `${teams} teams`} · ${courts === 1 ? '1 court' : `${courts} courts`}`,
-		openLabel: (name: string) => `Open ${name}`,
 
 		// The new-event form.
 		newEvent: 'New event',
@@ -1508,7 +1502,13 @@ export const strings = {
 		share: 'Share sign-up link',
 		shareLink: 'Share link',
 		placeOpen: 'Open',
-		people: (n: number) => `${n} people`
+		segment: (label: string, n: number) => `${label} · ${n}`,
+		segmentsLabel: 'Show',
+		listLabel: 'Your events, matches and boards',
+		summaryLabel: 'Summary',
+		needsYou: 'Needs you',
+		signupsText: (teams: number, solo: number, line: number) => `${teams} teams · ${solo} solo · ${line} in line`,
+		boardStats: (people: number, games: number) => `${people} people · ${games} games`
 	}
 } as const;
 

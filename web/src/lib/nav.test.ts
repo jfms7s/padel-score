@@ -10,7 +10,7 @@ describe('navItems', () => {
 	it('lists the five places in order', () => {
 		expect(navItems('/').map((i) => [i.key, i.href])).toEqual([
 			['home', '/'],
-			['organise', '/events'],
+			['organise', '/organise'],
 			['new', '/new'],
 			['results', '/results'],
 			['people', '/players']
@@ -54,7 +54,8 @@ describe('parentOf', () => {
 			expect(parentOf(p)).toBeNull();
 	});
 	it('names the parent of nested pages', () => {
-		expect(parentOf('/events/e1')).toEqual({ href: '/events', label: 'Organise' });
+		expect(parentOf('/events/e1')).toEqual({ href: '/organise', label: 'Organise' });
+		expect(parentOf('/new/event')).toEqual({ href: '/organise', label: 'Organise' });
 		expect(parentOf('/players/p1')).toEqual({ href: '/players', label: 'People' });
 		expect(parentOf('/account')).toEqual({ href: '/', label: 'Home' });
 		expect(parentOf('/admin')).toEqual({ href: '/account', label: 'Account' });

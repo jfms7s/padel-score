@@ -15,7 +15,6 @@ import {
 	invalidScoreKey,
 	invalidScoreText,
 	isEventDetail,
-	listEvents,
 	liveScoreText,
 	matchText,
 	matchViewPath,
@@ -212,11 +211,7 @@ describe('requests', () => {
 	});
 
 	it('coordinator calls use the event paths and redirect on 401', async () => {
-		let f = stubFetch(200, { items: [] });
-		await expect(listEvents()).resolves.toEqual([]);
-		expect(sent(f)).toMatchObject({ path: '/api/events', method: 'GET' });
-
-		f = stubFetch(201, team('t9', 'Ana', 'Rui'));
+		let f = stubFetch(201, team('t9', 'Ana', 'Rui'));
 		await addTeam('e1', { players: ['p1', 'p2'] });
 		expect(sent(f)).toEqual({ path: '/api/events/e1/teams', method: 'POST', body: { players: ['p1', 'p2'] } });
 
@@ -227,7 +222,7 @@ describe('requests', () => {
 		let redirected = 0;
 		const undo = setUnauthorizedHandler(() => redirected++);
 		stubFetch(401, { error: 'unauthorized' });
-		await expect(listEvents()).rejects.toBeInstanceOf(ApiError);
+		await expect(assignMatch('e1', 'm1', null)).rejects.toBeInstanceOf(ApiError);
 		undo();
 		expect(redirected).toBe(1);
 	});
