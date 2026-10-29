@@ -10,7 +10,8 @@ import {
 	othersFreeCount,
 	rangeFromCells,
 	shade,
-	slotsOfDay
+	slotsOfDay,
+	steppedRow
 } from './grid';
 import type { BoardView, PieceOut } from './types';
 
@@ -342,5 +343,29 @@ describe('orientation', () => {
 		expect(orientation(767)).toBe('columns');
 		expect(orientation(768)).toBe('rows');
 		expect(orientation(1280)).toBe('rows');
+	});
+});
+
+describe('steppedRow', () => {
+	// Lisbon springs forward on 2026-03-29: 01:00 to 02:00 does not exist, so rows 2 and 3 are gone.
+	const tz = 'Europe/Lisbon';
+	const days = weekDays(localMidnight('2026-03-23', tz), localMidnight('2026-03-30', tz), tz);
+	const rows = new Set(dayCells(days[6]!, tz).map((c) => c.row));
+
+	it('skips the rows a short day lacks, in the direction of travel', () => {
+		expect(rows.has(2)).toBe(false);
+		expect(rows.has(3)).toBe(false);
+		expect(steppedRow(rows, 1, 1)).toBe(4);
+		expect(steppedRow(rows, 4, -1)).toBe(1);
+	});
+
+	it('takes the adjacent row when it exists', () => {
+		expect(steppedRow(rows, 10, 1)).toBe(11);
+		expect(steppedRow(rows, 10, -1)).toBe(9);
+	});
+
+	it('stays put at either end of the day', () => {
+		expect(steppedRow(rows, 0, -1)).toBeNull();
+		expect(steppedRow(rows, Math.max(...rows), 1)).toBeNull();
 	});
 });

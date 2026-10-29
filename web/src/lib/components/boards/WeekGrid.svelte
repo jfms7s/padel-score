@@ -14,6 +14,7 @@
 		orientation,
 		rangeFromCells,
 		shade,
+		steppedRow,
 		type Range
 	} from '#lib/grid.ts';
 	import { strings } from '#lib/strings.ts';
@@ -61,7 +62,9 @@
 		const cells: GridCell[] = [];
 		const byKey = new Map<string, GridCell>();
 		const byTime = new Map<number, GridCell>();
+		const rowsOfDay: Set<number>[] = [];
 		days.forEach((day, di) => {
+			rowsOfDay[di] = new Set();
 			for (const c of dayCells(day, zone, view.board.starts_at)) {
 				const others = heat.get(c.t) ?? 0;
 				const when = `${dayLabel(c.t, zone)} ${timeText(c.t, zone)}${c.row >= 48 ? ` ${t.secondTime}` : ''}`;
@@ -75,6 +78,7 @@
 				};
 				cells.push(cell);
 				byKey.set(`${di}:${c.row}`, cell);
+				rowsOfDay[di]?.add(c.row);
 				byTime.set(c.t, cell);
 			}
 		});
@@ -88,7 +92,7 @@
 			if (c.row >= 48) rowLabels.set(c.row, clock);
 			else if (c.row % 2 === 0) rowLabels.set(c.row, clock.slice(0, 2));
 		}
-		return { days, cells, byKey, byTime, rowCount, rowLabels };
+		return { days, cells, byKey, byTime, rowsOfDay, rowCount, rowLabels };
 	});
 
 	const mine = $derived(me === null ? [] : mergedRanges(view.pieces, me));
@@ -273,9 +277,11 @@
 		const across = vertical ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
 		let di = cell.di;
 		let row = cell.row;
-		if (e.key === along[0]) row -= 1;
-		else if (e.key === along[1]) row += 1;
-		else if (e.key === across[0]) di -= 1;
+		if (e.key === along[0] || e.key === along[1]) {
+			const stepped = steppedRow(model.rowsOfDay[di] ?? new Set(), row, e.key === along[0] ? -1 : 1);
+			if (stepped === null) return void e.preventDefault();
+			row = stepped;
+		} else if (e.key === across[0]) di -= 1;
 		else if (e.key === across[1]) di += 1;
 		else return;
 		e.preventDefault();
@@ -675,9 +681,15 @@
 		inset: -10px;
 	}
 	/* The phone's ✕ is 22 px in a column about 46 px wide: its hit area grows down and to the
-	   left, inside its own column, so it never takes taps from the next column or the cell above. */
+	   left, inside its own column, so it never takes taps from the next column or the cell above.
+	   It stops at the block's own bottom edge (the block is a size container, as .game is): a
+	   one-slot block is 28 px, and a tap on the cell below it must not remove the range. */
+	.grid.cols .mine {
+		container-type: size;
+	}
 	.grid.cols .x::before {
-		inset: 0 0 -26px -18px;
+		inset: 0 0 auto -18px;
+		height: min(48px, 100cqh);
 	}
 	.grid.cols .x {
 		top: 0;
