@@ -173,7 +173,6 @@
 </script>
 
 <main class="acct page-narrow">
-	<a class="back" href="/">{strings.appName}</a>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
 	{:else if view === null}
@@ -217,12 +216,3 @@
 		/>
 	{/if}
 </main>
-
-<style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
-	}
-</style>

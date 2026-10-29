@@ -132,17 +132,11 @@
 	<a class="primary" href="/new">{strings.newMatch}</a>
 
 	{#if signedIn}
-		<nav class="links" aria-label={strings.yourPages}>
-			<a href="/calendar">{strings.calendar.title}</a>
-			<a href="/players"
-				>{strings.players.title}{#if claimCount > 0}<span class="badge">{strings.linking.claimBadge(claimCount)}</span>{/if}</a
-			>
-			<a href="/history">{strings.history.link}</a>
-			<a href="/events">{strings.events.link}</a>
-			<a href="/boards/new">{strings.boards.newBoard}</a>
-			<a class="wide" href="/profile">{strings.linking.profile.link}</a>
-		</nav>
 		{#if next}<NextUp item={next} />{/if}
+		<a class="more" href="/calendar">{strings.calendar.title} ›</a>
+		{#if claimCount > 0}
+			<a class="claims" href="/players">{strings.linking.claimBadge(claimCount)}</a>
+		{/if}
 		<h2>{strings.myMatches}</h2>
 		{#if mineFailure}
 			<p class="hint" role="alert">{mineFailure}</p>
@@ -255,27 +249,22 @@
 		font-weight: 650;
 		text-decoration: none;
 	}
-	.links {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 8px;
-		margin-top: 8px;
+	.more {
+		display: inline-flex;
+		align-items: center;
+		min-height: var(--tap);
+		color: var(--muted);
 	}
-	.links a {
+	.claims {
 		display: flex;
 		align-items: center;
-		justify-content: center;
 		min-height: var(--tap);
+		padding: 0 14px;
 		border: 1px solid var(--line);
-		border-radius: 14px;
+		border-radius: 12px;
 		background: var(--panel);
 		color: var(--ink);
-		font-size: 16px;
-		font-weight: 650;
 		text-decoration: none;
-	}
-	.links .wide {
-		grid-column: 1 / -1;
 	}
 	.chip {
 		flex: none;
@@ -299,24 +288,12 @@
 			gap: 0 48px;
 			align-items: start;
 		}
-		main.signed .links {
-			display: none;
-		}
 		main.signed .events {
 			display: block;
 		}
 		main.signed .events h2 {
 			margin-top: 0;
 		}
-	}
-	.badge {
-		margin-left: 8px;
-		padding: 0 8px;
-		border-radius: 999px;
-		background: var(--a-soft);
-		font-size: 12px;
-		font-weight: 650;
-		line-height: 22px;
 	}
 	ul {
 		list-style: none;

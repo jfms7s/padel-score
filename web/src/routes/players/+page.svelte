@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BackLink from '#lib/components/BackLink.svelte';
 	import { onMount } from 'svelte';
 	import { approveClaim, declineClaim, linkLabel, linkMessage, listClaims, previewText } from '#lib/linking.ts';
 	import { addPlayer, listPlayers, nameKey, playerMessage, recordText, updatePlayer } from '#lib/players.ts';
@@ -148,7 +149,7 @@
 {/snippet}
 
 <main class="acct page-wide">
-	<a class="back" href="/">{t.back}</a>
+	<BackLink />
 	<h1>{t.title}</h1>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
@@ -293,12 +294,6 @@
 </main>
 
 <style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
-	}
 	.add {
 		flex-direction: row;
 		flex-wrap: nowrap;

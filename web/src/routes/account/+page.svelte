@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BackLink from '#lib/components/BackLink.svelte';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
@@ -210,6 +211,7 @@
 </script>
 
 <main class="acct page-wide-desk">
+	<BackLink />
 	<h1>{a.title}</h1>
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>

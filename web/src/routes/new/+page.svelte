@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BackLink from '#lib/components/BackLink.svelte';
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -186,7 +187,7 @@
 </script>
 
 <main>
-	<a class="back" href="/">{t.back}</a>
+	<BackLink />
 	{#if unavailable}
 		<p class="error" role="alert">{strings.networkError}</p>
 	{/if}
@@ -332,12 +333,6 @@
 			gap: 32px;
 			align-items: start;
 		}
-	}
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
 	}
 	form {
 		display: flex;

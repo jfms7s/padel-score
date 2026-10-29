@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BackLink from '#lib/components/BackLink.svelte';
 	// The coordinator's event desk: a header, a tab bar and the open tab (see desk.ts). The page
 	// loads the event, follows its stream (offering a reload when it is lost) and runs every
 	// call; the tabs only show and ask.
@@ -353,7 +354,7 @@
 </script>
 
 <main class="acct page-wide">
-	<a class="back" href="/events">{t.allEvents}</a>
+	<BackLink />
 	{#if loadFailure}
 		<p class="error" role="alert">{loadFailure}</p>
 	{:else if $session.status === 'signed_in' && detail && ev}
@@ -450,12 +451,6 @@
 </main>
 
 <style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		min-height: var(--tap);
-		color: var(--muted);
-	}
 	.lost {
 		display: flex;
 		flex-wrap: wrap;
