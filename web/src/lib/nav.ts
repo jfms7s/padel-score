@@ -59,13 +59,7 @@ export function parentOf(pathname: string): Parent | null {
 	if (pathname.startsWith('/players/')) return { href: '/players', label: nav.people };
 	if (pathname === '/history') return { href: NAV_TARGETS.results, label: nav.results };
 	if (pathname === '/admin') return { href: '/account', label: nav.account };
-	if (
-		pathname === '/account' ||
-		pathname === '/new' ||
-		pathname.startsWith('/new/') ||
-		pathname === '/boards/new' ||
-		pathname === '/calendar'
-	)
+	if (pathname === '/account' || pathname === '/new' || pathname.startsWith('/new/') || pathname === '/boards/new')
 		return { href: '/', label: nav.home };
 	return null;
 }

@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { longDate } from './dates';
-import { STALE_SECS, agendaNote, agendaTitle, itemEnd, liveNow, offlineRows, shownHours, weekPips } from './home';
+import {
+	STALE_SECS,
+	agendaNote,
+	agendaTitle,
+	itemEnd,
+	itemKey,
+	laneLayout,
+	liveNow,
+	openEnd,
+	offlineRows,
+	shownHours,
+	weekPips
+} from './home';
 import type { RecentMatch } from './setup';
-import type { CalendarItem, MatchView, MyMatch, Score } from './types';
+import type { CalendarItem, MatchView, MyMatch, OpenItem, Score } from './types';
 
 type Game = Extract<CalendarItem, { kind: 'game' }>;
 type Event = Extract<CalendarItem, { kind: 'event' }>;
@@ -47,6 +59,25 @@ const match = (starts_at: number, over: Partial<Match> = {}): CalendarItem => ({
 	state: 'open',
 	owner_name: 'Pedro',
 	...over
+});
+
+const openMatch = (starts_at: number): OpenItem => ({
+	kind: 'match',
+	join_token: 'om',
+	owner_name: 'Pedro',
+	starts_at,
+	place: null,
+	open_places: 2
+});
+const openEvent = (starts_at: number): OpenItem => ({
+	kind: 'event',
+	join_token: 'oe',
+	name: 'Cup',
+	event_kind: 'tournament',
+	starts_at,
+	place: null,
+	teams: 1,
+	max_teams: 8
 });
 
 const SCORE = { sets: [{ a: 6, b: 4 }], games: [2, 1], current: 'none' } as unknown as Score;
@@ -204,6 +235,48 @@ describe('agendaNote', () => {
 	});
 });
 
+describe('itemKey', () => {
+	it('keys a game by its id', () => expect(itemKey(game(1000, { game_id: 'g7' }))).toBe('game:g7'));
+	it('keys an event by its id, else its join token', () => {
+		expect(itemKey(event(1000, { event_id: 'e1' }))).toBe('event:e1');
+		expect(itemKey(event(1000))).toBe('event:jt');
+	});
+	it('keys a match by its join token', () => expect(itemKey(match(1000))).toBe('match:mt'));
+});
+
+describe('openEnd', () => {
+	it('draws an open match and an open event for their usual length', () => {
+		expect(openEnd(openMatch(1000))).toBe(1000 + 5400);
+		expect(openEnd(openEvent(1000))).toBe(1000 + 7200);
+	});
+});
+
+describe('laneLayout', () => {
+	it('gives a lone block the whole width', () => {
+		expect(laneLayout([{ start: 0, end: 10 }])).toEqual([{ lane: 0, lanes: 1 }]);
+	});
+	it('splits overlapping blocks side by side, in order', () => {
+		const out = laneLayout([
+			{ start: 0, end: 10 },
+			{ start: 5, end: 15 },
+			{ start: 20, end: 30 }
+		]);
+		expect(out).toEqual([
+			{ lane: 0, lanes: 2 },
+			{ lane: 1, lanes: 2 },
+			{ lane: 0, lanes: 1 }
+		]);
+	});
+	it('reuses a lane that has ended', () => {
+		const out = laneLayout([
+			{ start: 0, end: 10 },
+			{ start: 5, end: 8 },
+			{ start: 9, end: 12 }
+		]);
+		expect(out.map((o) => o.lane)).toEqual([0, 1, 1]);
+	});
+});
+
 describe('itemEnd', () => {
 	it('uses the game end and guesses the others', () => {
 		expect(itemEnd(game(1000, { end: 4000 }))).toBe(4000);
@@ -230,5 +303,10 @@ describe('shownHours', () => {
 	it('reads hours in the viewer zone', () => {
 		// 10:00 UTC is 19:00 in Tokyo (UTC+9), and an event runs two hours.
 		expect(shownHours([event(THU(10))], '2026-10-26', 'Asia/Tokyo')).toEqual([19, 20]);
+	});
+
+	it('counts open items too', () => {
+		expect(shownHours([], '2026-10-26', 'UTC', [openMatch(SAT(9))])).toEqual([9, 10]);
+		expect(shownHours([game(THU(19))], '2026-10-26', 'UTC', [openEvent(SAT(9))])).toEqual([9, 10, 19, 20]);
 	});
 });

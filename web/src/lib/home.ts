@@ -6,7 +6,7 @@ import { itemStart } from './calendar';
 import { liveScoreText } from './events';
 import { scorerPath, type RecentMatch } from './setup';
 import { strings } from './strings';
-import type { CalendarItem, MyMatch } from './types';
+import type { CalendarItem, MyMatch, OpenItem } from './types';
 
 /** A live match with no point for this long is "older": offered for tidying, not for resuming. */
 export const STALE_SECS = 86_400;
@@ -119,17 +119,72 @@ export function itemEnd(item: CalendarItem): number {
 	}
 }
 
-/** The hours (0-23, in the zone) the week grid needs: every hour an item starting that week touches. */
-export function shownHours(items: CalendarItem[], first: string, timeZone: string): number[] {
+/** When an open-to-join item ends: drawn for a usual length, as nothing plans its end. */
+export function openEnd(item: OpenItem): number {
+	return item.starts_at + (item.kind === 'match' ? MATCH_SECS : EVENT_SECS);
+}
+
+/** What selects an item on the week grid (and sits in `?item=`). */
+export function itemKey(item: CalendarItem): string {
+	switch (item.kind) {
+		case 'game':
+			return `game:${item.game_id}`;
+		case 'event':
+			return `event:${item.event_id ?? item.join_token}`;
+		case 'match':
+			return `match:${item.join_token}`;
+	}
+}
+
+/** Side-by-side lanes for blocks that overlap in time, in the order given. */
+export function laneLayout(blocks: { start: number; end: number }[]): { lane: number; lanes: number }[] {
+	const out: { lane: number; lanes: number }[] = blocks.map(() => ({ lane: 0, lanes: 1 }));
+	const order = blocks.map((_, i) => i).sort((a, b) => (blocks[a]?.start ?? 0) - (blocks[b]?.start ?? 0));
+	// A cluster is a run of blocks that chain together by overlap; its lanes share the width.
+	let cluster: number[] = [];
+	let clusterEnd = -Infinity;
+	let laneEnds: number[] = [];
+	const close = () => {
+		for (const i of cluster) {
+			const o = out[i];
+			if (o) o.lanes = laneEnds.length;
+		}
+		cluster = [];
+		laneEnds = [];
+	};
+	for (const i of order) {
+		const b = blocks[i];
+		const o = out[i];
+		if (!b || !o) continue;
+		if (b.start >= clusterEnd) close();
+		let lane = laneEnds.findIndex((end) => end <= b.start);
+		if (lane === -1) lane = laneEnds.length;
+		laneEnds[lane] = b.end;
+		o.lane = lane;
+		cluster.push(i);
+		clusterEnd = cluster.length === 1 ? b.end : Math.max(clusterEnd, b.end);
+	}
+	close();
+	return out;
+}
+
+/**
+ * The hours (0-23, in the zone) the week grid needs: every hour an item or an open-to-join item
+ * starting that week touches.
+ */
+export function shownHours(items: CalendarItem[], first: string, timeZone: string, open: OpenItem[] = []): number[] {
 	const last = addDays(first, 6);
 	const hours = new Set<number>();
-	for (const item of items) {
-		const start = itemStart(item);
+	const spans = [
+		...items.map((it) => ({ start: itemStart(it), end: itemEnd(it) })),
+		...open.map((o) => ({ start: o.starts_at, end: openEnd(o) }))
+	];
+	for (const { start, end } of spans) {
 		const date = localDate(start, timeZone);
 		if (date < first || date > last) continue;
 		// Back to the top of the hour it starts in, then an hour at a time until it ends.
 		const minutes = Number(timeText(start, timeZone).slice(3, 5));
-		for (let t = start - minutes * 60; t < itemEnd(item); t += 3600) {
+		for (let t = start - minutes * 60; t < end; t += 3600) {
 			hours.add(Number(timeText(t, timeZone).slice(0, 2)));
 		}
 	}

@@ -1,5 +1,7 @@
 <script lang="ts">
 	// Home: the matches being scored, what waits for an answer, and the week ahead.
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { authMessage, listMyMatches } from '#lib/auth.ts';
 	import { answerRequest, boardMessage } from '#lib/boards.ts';
@@ -11,14 +13,16 @@
 		weekStart
 	} from '#lib/calendar.ts';
 	import Agenda from '#lib/components/home/Agenda.svelte';
+	import AgendaWeek from '#lib/components/home/AgendaWeek.svelte';
 	import BoardsStrip from '#lib/components/home/BoardsStrip.svelte';
+	import DetailPane from '#lib/components/home/DetailPane.svelte';
 	import LiveNow from '#lib/components/home/LiveNow.svelte';
 	import OpenToJoin from '#lib/components/home/OpenToJoin.svelte';
 	import Waiting from '#lib/components/home/Waiting.svelte';
 	import WeekStrip from '#lib/components/home/WeekStrip.svelte';
 	import DeleteMatchSheet from '#lib/components/DeleteMatchSheet.svelte';
 	import { browserTimeZone, localDate } from '#lib/dates.ts';
-	import { liveNow, offlineRows, type LiveRow } from '#lib/home.ts';
+	import { itemEnd, itemKey, liveNow, offlineRows, type LiveRow } from '#lib/home.ts';
 	import { claimBadgeCount } from '#lib/linking.ts';
 	import { listPlayers } from '#lib/players.ts';
 	import { currentPushEnv, devicePushOn, enablePush, pushSupport } from '#lib/push.ts';
@@ -179,6 +183,24 @@
 			result === 'copied' ? strings.calendar.linkCopied : result === 'failed' ? strings.calendar.linkFailed : null;
 	}
 
+	// The week grid's selection lives in ?item=. With none (or a stale one) the first item that
+	// ends after now is selected.
+	const chosen = $derived.by(() => {
+		const items = cal?.items ?? [];
+		const wanted = page.url.searchParams.get('item');
+		return (
+			items.find((it) => itemKey(it) === wanted) ?? items.find((it) => itemEnd(it) > now) ?? null
+		);
+	});
+	const chosenKey = $derived(chosen ? itemKey(chosen) : null);
+
+	/** Select in place: no new history entry, and scroll and focus stay put. */
+	function select(key: string): Promise<void> {
+		const params = new URLSearchParams(page.url.searchParams.toString());
+		params.set('item', key);
+		return goto(`?${params}`, { replace: true, reset: false });
+	}
+
 	function toDay(date: string) {
 		document.getElementById(`day-${date}`)?.scrollIntoView({ block: 'start' });
 	}
@@ -239,22 +261,42 @@
 						<p class="hint">{strings.calendar.loading}</p>
 					{/if}
 					{#if cal}
-						<WeekStrip
-							items={cal.items}
-							first={weekFirst}
-							{today}
-							timeZone={zone}
-							onweek={(first) => (weekFirst = first)}
-							onday={toDay}
-						/>
-						<Agenda items={cal.items} timeZone={zone} />
+						<div class="below">
+							<WeekStrip
+								items={cal.items}
+								first={weekFirst}
+								{today}
+								timeZone={zone}
+								onweek={(first) => (weekFirst = first)}
+								onday={toDay}
+							/>
+							<Agenda items={cal.items} timeZone={zone} />
+						</div>
+						<div class="above">
+							<AgendaWeek
+								items={cal.items}
+								open={cal.open}
+								first={weekFirst}
+								{today}
+								timeZone={zone}
+								selected={chosenKey}
+								onselect={select}
+								onweek={(first) => (weekFirst = first)}
+							/>
+						</div>
 					{/if}
+				{/if}
+			</div>
+			<div class="detail above">
+				{#if signedIn && cal}
+					<h2>{strings.home.selected}</h2>
+					<DetailPane item={chosen} timeZone={zone} />
 				{/if}
 			</div>
 			<div class="boards">
 				{#if signedIn && cal}<BoardsStrip boards={cal.boards} />{/if}
 			</div>
-			<div class="open">
+			<div class="open below">
 				{#if signedIn && cal}<OpenToJoin open={cal.open} />{/if}
 			</div>
 		</div>
@@ -295,6 +337,16 @@
 		font-weight: 650;
 		text-decoration: none;
 	}
+	h2 {
+		margin: 24px 0 8px;
+		font-size: 18px;
+		font-weight: 750;
+		font-variation-settings: 'wdth' 85;
+	}
+	/* The week grid and its detail are for 1100 and up. */
+	.above {
+		display: none;
+	}
 	/* Below 700 one column in reading order: live, waiting, week, agenda, boards, open. */
 	.cols {
 		display: flex;
@@ -320,6 +372,15 @@
 		.cols > .week {
 			grid-column: 1;
 			grid-row: 1 / span 5;
+		}
+	}
+	/* From 1100 the week is a grid with a detail pane; the strip, agenda and open list give way. */
+	@media (min-width: 1100px) {
+		.above {
+			display: block;
+		}
+		.below {
+			display: none;
 		}
 	}
 </style>
