@@ -356,7 +356,7 @@
 				{@render finishedAction()}
 			{:else}
 				<div class="finished-actions">
-					<a class="new" href="/new">{f.newMatch}</a>
+					<a class="new" href="/new/match">{f.newMatch}</a>
 					<a class="new secondary" href="/">{f.home}</a>
 				</div>
 			{/if}

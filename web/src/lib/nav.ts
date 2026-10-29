@@ -59,8 +59,8 @@ export function parentOf(pathname: string): Parent | null {
 		return { href: NAV_TARGETS.organise, label: nav.organise };
 	if (pathname.startsWith('/players/')) return { href: '/players', label: nav.people };
 	if (pathname === '/admin') return { href: '/account', label: nav.account };
-	if (pathname === '/account' || pathname === '/new' || pathname.startsWith('/new/') || pathname === '/boards/new')
-		return { href: '/', label: nav.home };
+	if (/^\/new\/(match|later|board)$/.test(pathname)) return { href: NAV_TARGETS.new, label: nav.new };
+	if (pathname === '/account' || pathname === '/new') return { href: '/', label: nav.home };
 	return null;
 }
 

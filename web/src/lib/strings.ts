@@ -65,9 +65,7 @@ export const strings = {
 		gameGone: 'You are no longer in that game.',
 		matchGone: 'That match is no longer there.',
 		unlinked: 'This match will not be linked to the game.',
-		// Play later.
-		playLater: 'Play later',
-		playLaterHint: 'Pick a day and time. Anyone with the link can take an open place.',
+		// Plan a match.
 		open: 'Open',
 		openSlots: 'Pick the players you know. The other places stay open for others to join.',
 		saveMatch: 'Schedule match',
@@ -943,6 +941,18 @@ export const strings = {
 		people: 'People',
 		account: 'Account',
 		back: (label: string) => `‹ ${label}`
+	},
+
+	// The New chooser: the four ways to start something.
+	create: {
+		title: 'New',
+		close: 'Close',
+		choices: {
+			match: ['Score a match now', 'On the court, four players, start tapping'],
+			later: ['Plan a match', 'Pick a date; share a link for the open places'],
+			board: ['Find a time', 'A board: everyone paints their week, games form on their own'],
+			event: ['Run an event', 'Tournament or non-stop, with sign-ups']
+		}
 	},
 
 	// Notifications on this device (Account page).

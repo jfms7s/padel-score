@@ -26,7 +26,7 @@
 			{/each}
 		</ul>
 	{/if}
-	<a class="new" href="/boards/new">{t.newBoard}</a>
+	<a class="new" href="/new/board">{t.newBoard}</a>
 </section>
 
 <style>

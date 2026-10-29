@@ -145,7 +145,7 @@
 		matchAct(async () => {
 			const started = await startScheduled(matchId);
 			putStartHandoff(started);
-			await goto(`/new?from=${encodeURIComponent(fromParam(started.from))}`);
+			await goto(`/new/match?from=${encodeURIComponent(fromParam(started.from))}`);
 		});
 
 	/** The invitation is spent either way: drop `?partner=` so a reload does not ask again. */
