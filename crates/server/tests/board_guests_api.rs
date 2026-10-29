@@ -559,3 +559,141 @@ async fn cross_site_cookie_with_guest_key_is_403() {
     .await;
     assert!(view.body["pieces"].as_array().unwrap().is_empty());
 }
+
+struct Swap {
+    request: String,
+    asker: String,
+    /// The start of the asker's game; the addressee's is half an hour later.
+    start: i64,
+}
+
+/// Four users play a game at `s`; `addressee` plays one at `s + HALF` with three more. Each
+/// side is also free for the other's game. The first user asks `addressee` for a swap.
+async fn asked_swap(state: &AppState, token: &str, tag: &str, addressee: &str) -> Swap {
+    let s = now() / HALF * HALF + 3 * HOUR;
+    let mut asker_side = Vec::new();
+    for i in 0..4 {
+        let (id, _) = fast_user(state, &format!("{tag}-a{i}@x.test"), &format!("Aa{i}")).await;
+        state
+            .store
+            .add_free(token, &id, s, s + HOUR, now())
+            .await
+            .unwrap();
+        asker_side.push(id);
+    }
+    let mut other_side = vec![addressee.to_owned()];
+    for i in 1..4 {
+        let (id, _) = fast_user(state, &format!("{tag}-b{i}@x.test"), &format!("Bb{i}")).await;
+        other_side.push(id);
+    }
+    for id in &other_side {
+        let from = s + HALF;
+        let add = state.store.add_free(token, id, from, from + HOUR, now());
+        add.await.unwrap();
+    }
+    let asker = asker_side[0].clone();
+    state
+        .store
+        .add_free(token, &asker, s + HOUR, s + HOUR + HALF, now())
+        .await
+        .unwrap();
+    state
+        .store
+        .add_free(token, addressee, s, s + HALF, now())
+        .await
+        .unwrap();
+    let view = state
+        .store
+        .board_view(token, Some(&asker), now())
+        .await
+        .unwrap()
+        .unwrap();
+    let view = serde_json::to_value(view).unwrap();
+    let (mine, theirs) = (game_at(&view, s), game_at(&view, s + HALF));
+    let asked = state
+        .store
+        .ask_swap(
+            token,
+            mine["id"].as_str().unwrap(),
+            &asker,
+            mine["version"].as_i64().unwrap(),
+            theirs["id"].as_str().unwrap(),
+            addressee,
+            now(),
+        )
+        .await
+        .unwrap();
+    Swap {
+        request: asked.requests[0].id.clone(),
+        asker,
+        start: s,
+    }
+}
+
+#[tokio::test]
+async fn guest_accepts_a_swap_under_the_board_link() {
+    let (state, app, token, ..) = setup().await;
+    let (gid, key) = guest(&state, &token, "Gus").await;
+    let swap = asked_swap(&state, &token, "g", &gid).await;
+    let res = send(
+        &app,
+        as_guest(
+            &key,
+            Method::POST,
+            &format!("/api/boards/{token}/requests/{}/accept", swap.request),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert!(
+        seated(&game_at(&res.body, swap.start), &gid),
+        "{}",
+        res.body
+    );
+    assert!(
+        seated(&game_at(&res.body, swap.start + HALF), &swap.asker),
+        "{}",
+        res.body
+    );
+}
+
+#[tokio::test]
+async fn request_of_another_board_is_404() {
+    let (state, app, token, creator, _) = setup().await;
+    let other = guest_board(&state, &creator).await;
+    let (addressee, raw) = fast_user(&state, "z@x.test", "Zed").await;
+    let swap = asked_swap(&state, &token, "x", &addressee).await;
+    let res = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::POST,
+            &format!("/api/boards/{other}/requests/{}/accept", swap.request),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::NOT_FOUND, "{}", res.body);
+}
+
+#[tokio::test]
+async fn users_can_use_the_new_route_too() {
+    let (state, app, token, ..) = setup().await;
+    let (addressee, raw) = fast_user(&state, "z@x.test", "Zed").await;
+    let swap = asked_swap(&state, &token, "u", &addressee).await;
+    let res = send(
+        &app,
+        as_session(
+            &state,
+            &raw,
+            Method::POST,
+            &format!("/api/boards/{token}/requests/{}/decline", swap.request),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    assert!(res.body["requests"].as_array().unwrap().is_empty());
+}

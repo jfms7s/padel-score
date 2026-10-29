@@ -30,6 +30,8 @@
 //! - `POST /api/board-requests/{id}/accept` and `.../decline`, with no body, answer a request
 //!   addressed to the caller: 200 [`BoardView`] of its board. A request that went stale or no
 //!   longer works is `409 request_expired` (or the failing code).
+//!   `POST /api/boards/{token}/requests/{id}/accept` and `.../decline` do the same under the
+//!   board link, for a user or a guest key; a request of another board is 404.
 //! - `GET /api/me/boards` is `{ "items": [BoardOut] }`.
 //!
 //! A guest acts with the `X-Board-Guest` header (the key from joining as a guest) on the routes
@@ -56,6 +58,7 @@ use crate::boards::guests::GuestJoined;
 use crate::boards::{BoardChange, BoardOut, BoardView, NewBoard};
 use crate::client_ip::{ClientIp, rate_key};
 use crate::starting::StartPlayers;
+use crate::store::StoreError;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -93,6 +96,14 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/api/boards/{token}/games/{game_id}/swap", post(ask_swap))
         .route("/api/boards/{token}/games/{game_id}/time", post(ask_time))
+        .route(
+            "/api/boards/{token}/requests/{id}/accept",
+            post(accept_board_request),
+        )
+        .route(
+            "/api/boards/{token}/requests/{id}/decline",
+            post(decline_board_request),
+        )
         .route("/api/board-requests/{id}/accept", post(accept_request))
         .route("/api/board-requests/{id}/decline", post(decline_request))
         .route("/api/me/boards", get(mine))
@@ -484,16 +495,54 @@ async fn decline_request(
     answer(&state, &user.user.id, &id, false).await
 }
 
+async fn accept_board_request(
+    State(state): State<AppState>,
+    caller: BoardCaller,
+    ApiPath((token, id)): ApiPath<(String, String)>,
+) -> Result<Json<BoardView>, ApiError> {
+    let who = participant(&state, &token, caller).await?;
+    answered(
+        &state,
+        state
+            .store
+            .answer_board_request(&token, &id, &who, true, now()),
+    )
+    .await
+}
+
+async fn decline_board_request(
+    State(state): State<AppState>,
+    caller: BoardCaller,
+    ApiPath((token, id)): ApiPath<(String, String)>,
+) -> Result<Json<BoardView>, ApiError> {
+    let who = participant(&state, &token, caller).await?;
+    answered(
+        &state,
+        state
+            .store
+            .answer_board_request(&token, &id, &who, false, now()),
+    )
+    .await
+}
+
 async fn answer(
     state: &AppState,
     user: &str,
     request_id: &str,
     accept: bool,
 ) -> Result<Json<BoardView>, ApiError> {
-    let result = state
-        .store
-        .answer_request(request_id, user, accept, now())
-        .await;
+    answered(
+        &state,
+        state.store.answer_request(request_id, user, accept, now()),
+    )
+    .await
+}
+
+async fn answered(
+    state: &AppState,
+    result: impl Future<Output = Result<BoardView, StoreError>>,
+) -> Result<Json<BoardView>, ApiError> {
+    let result = result.await;
     // An expired answer still commits (the request is closed), and may have queued nothing,
     // but waking costs nothing.
     state.push.wake();
