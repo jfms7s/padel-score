@@ -22,6 +22,7 @@
 	const guests = $derived(guestsToPick(view));
 
 	async function run(call: () => Promise<JoinResult>) {
+		if (busy) return;
 		error = null;
 		busy = true;
 		const result = await call();

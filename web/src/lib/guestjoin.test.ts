@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './api';
-import { guestsToPick, submitGuestName, submitPick } from './guestjoin';
+import { guestsToPick, rememberedGuest, submitGuestName, submitPick } from './guestjoin';
 import * as guests from './guests';
 import { strings } from './strings';
 import type { BoardView, GuestJoined } from './types';
@@ -41,6 +41,23 @@ describe('guestsToPick', () => {
 			{ id: 'bia', guest: true }
 		]);
 		expect(guestsToPick(v).map((m) => m.user_id)).toEqual(['ze', 'bia']);
+	});
+});
+
+describe('rememberedGuest', () => {
+	const v = board([
+		{ id: 'ana', guest: false },
+		{ id: 'ze', guest: true }
+	]);
+
+	it('names the remembered guest while the board still lists them', () => {
+		expect(rememberedGuest(v, 'ze')?.user_id).toBe('ze');
+	});
+
+	it('is null for no id, a removed guest, or a member who is not a guest', () => {
+		expect(rememberedGuest(v, null)).toBeNull();
+		expect(rememberedGuest(v, 'gone')).toBeNull();
+		expect(rememberedGuest(v, 'ana')).toBeNull();
 	});
 });
 

@@ -12,6 +12,11 @@ export function guestsToPick(view: BoardView): MemberOut[] {
 	return view.members.filter((m) => m.guest);
 }
 
+/** The guest this browser last was, if the board still lists them: who "Were you …?" asks about. */
+export function rememberedGuest(view: BoardView, guestId: string | null): MemberOut | null {
+	return guestId === null ? null : (guestsToPick(view).find((m) => m.user_id === guestId) ?? null);
+}
+
 async function settle(call: () => Promise<{ view: BoardView }>): Promise<JoinResult> {
 	try {
 		return { view: (await call()).view };

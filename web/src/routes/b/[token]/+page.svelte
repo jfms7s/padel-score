@@ -25,7 +25,8 @@
 	import WeekGrid from '#lib/components/boards/WeekGrid.svelte';
 	import { browserTimeZone, dayLabel, monthYear, timeRange } from '#lib/dates.ts';
 	import { requestCards } from '#lib/gamesheet.ts';
-	import { forgetGuest, guestKey } from '#lib/guests.ts';
+	import { claimGuest, forgetGuest, guestKey, removeGuest, rememberedGuestId } from '#lib/guests.ts';
+	import { guestsToPick, rememberedGuest } from '#lib/guestjoin.ts';
 	import { shareLink } from '#lib/share.ts';
 	import { MAX_NAME_LENGTH } from '#lib/setup.ts';
 	import { strings } from '#lib/strings.ts';
@@ -42,7 +43,10 @@
 	let actionError = $state<string | null>(null);
 	let working = $state(0);
 	let shareNote = $state<string | null>(null);
-	let confirming = $state<'leave' | 'delete' | null>(null);
+	type Confirming = 'leave' | 'delete' | { kind: 'removeGuest' | 'claimGuest'; id: string };
+	let confirming = $state<Confirming | null>(null);
+	// Whether the "Were you …?" banner was dismissed; the kept key is forgotten with it.
+	let dismissedWereYou = $state(false);
 	let editing = $state(false);
 	let editTitle = $state('');
 	let editPlace = $state('');
@@ -54,6 +58,11 @@
 	const signedIn = $derived(me !== null);
 	const guest = $derived(me?.guest === true);
 	const nameWithMark = (p: { name: string; guest: boolean }) => (p.guest ? `${p.name} (${t.guestMark})` : p.name);
+	const userSignedIn = $derived(me !== null && !guest);
+	const guestRows = $derived(view ? guestsToPick(view) : []);
+	const wasGuest = $derived(
+		userSignedIn && view && !dismissedWereYou ? rememberedGuest(view, rememberedGuestId(token)) : null
+	);
 	const member = $derived(me?.member === true);
 	const creator = $derived(me?.creator === true);
 	const over = $derived(view?.board.over === true);
@@ -109,6 +118,7 @@
 			loadFailure = null;
 			askedForGame = false;
 			openGameId = null;
+			dismissedWereYou = false;
 			void load(current);
 		});
 		const again = () => {
@@ -167,10 +177,19 @@
 		confirming = null;
 		act(async () => {
 			await leaveBoard(token);
-			if (guest) forgetGuest(token);
 			await goto('/');
 			return null;
 		});
+	}
+
+	function runGuestStep(step: { kind: 'removeGuest' | 'claimGuest'; id: string }) {
+		confirming = null;
+		act(() => (step.kind === 'removeGuest' ? removeGuest(token, step.id) : claimGuest(token, step.id)));
+	}
+
+	function dismissWereYou() {
+		forgetGuest(token);
+		dismissedWereYou = true;
 	}
 
 	async function destroy() {
@@ -210,7 +229,7 @@
 		queueMicrotask(() => menuButton?.focus());
 	}
 
-	function ask(what: 'leave' | 'delete') {
+	function ask(what: Confirming) {
 		menuOpen = false;
 		confirming = what;
 	}
@@ -296,11 +315,26 @@
 		<div aria-live="polite">{#if shareNote}<p class="ok">{shareNote}</p>{/if}</div>
 
 		{#if confirming}
-			<div class="confirm" role="alertdialog" tabindex="-1" bind:this={confirmEl} aria-label={confirming === 'delete' ? t.delete : t.leave}>
-				<p>{confirming === 'delete' ? t.deleteConfirm : t.leaveConfirm}</p>
+			{@const step = typeof confirming === 'string' ? null : confirming}
+			{@const guestName = step ? (guestRows.find((g) => g.user_id === step.id)?.name ?? '') : ''}
+			{@const label = step ? t[step.kind] : confirming === 'delete' ? t.delete : t.leave}
+			<div class="confirm" role="alertdialog" tabindex="-1" bind:this={confirmEl} aria-label={label}>
+				<p>
+					{step
+						? step.kind === 'removeGuest'
+							? t.removeGuestConfirm(guestName)
+							: t.claimGuestConfirm(guestName)
+						: confirming === 'delete'
+							? t.deleteConfirm
+							: t.leaveConfirm}
+				</p>
 				<div class="actions">
-					<button type="button" class="danger" onclick={confirming === 'delete' ? destroy : leave}>
-						{confirming === 'delete' ? t.delete : t.leave}
+					<button
+						type="button"
+						class={step?.kind === 'claimGuest' ? 'primary' : 'danger'}
+						onclick={step ? () => runGuestStep(step) : confirming === 'delete' ? destroy : leave}
+					>
+						{label}
 					</button>
 					<button type="button" class="secondary" onclick={closeConfirm}>{t.cancel}</button>
 				</div>
@@ -331,6 +365,18 @@
 
 		{#if over}<p class="hint">{t.over}</p>{/if}
 		{#if actionError && !openGame}<p class="error" role="alert">{actionError}</p>{/if}
+
+		{#if wasGuest}
+			<div class="confirm" role="group" aria-label={t.wereYou(wasGuest.name)}>
+				<p>{t.wereYou(wasGuest.name)}</p>
+				<div class="actions">
+					<button type="button" class="primary" disabled={working > 0} onclick={() => ask({ kind: 'claimGuest', id: wasGuest.user_id })}>
+						{t.claimGuest}
+					</button>
+					<button type="button" class="secondary" onclick={dismissWereYou}>{t.dismiss}</button>
+				</div>
+			</div>
+		{/if}
 
 		{#if !signedIn && !over}
 			<div class="join">
@@ -386,6 +432,28 @@
 							onclose={() => (openGameId = null)}
 						/>
 					</div>
+				{/if}
+				{#if guestRows.length > 0 && signedIn}
+					<h2>{t.guests}</h2>
+					<ul class="list">
+						{#each guestRows as g (g.user_id)}
+							<li class="row">
+								<span class="what"><strong>{g.name}</strong></span>
+								<span class="actions">
+									{#if userSignedIn && !over}
+										<button type="button" class="secondary" disabled={working > 0} onclick={() => ask({ kind: 'claimGuest', id: g.user_id })}>
+											{t.claimGuest}
+										</button>
+									{/if}
+									{#if creator && !over}
+										<button type="button" class="secondary" disabled={working > 0} onclick={() => ask({ kind: 'removeGuest', id: g.user_id })}>
+											{t.removeGuest}
+										</button>
+									{/if}
+								</span>
+							</li>
+						{/each}
+					</ul>
 				{/if}
 				{#if signedIn}
 					<h2>{t.yourGames}</h2>
