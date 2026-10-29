@@ -18,7 +18,7 @@ pub(crate) async fn organised_matches_in(
 ) -> Result<Vec<OrganisedMatch>, StoreError> {
     let rows: Vec<MatchRow> = sqlx::query_as(
         "SELECT id, join_token, starts_at, place, cancelled_at IS NOT NULL, \
-         started_at IS NOT NULL FROM scheduled_matches WHERE owner_user_id = ? \
+         match_id IS NOT NULL FROM scheduled_matches WHERE owner_user_id = ? \
          ORDER BY starts_at DESC, rowid DESC LIMIT ?",
     )
     .bind(user)
