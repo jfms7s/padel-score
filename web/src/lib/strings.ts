@@ -1421,6 +1421,8 @@ export const strings = {
 		pastBanner: 'The time to start this match has passed.',
 		watch: 'Watch the match',
 		placesTitle: 'Places',
+		placesListLabel: 'The four places',
+		joinCardLabel: 'Join this match',
 		openPlace: 'Open',
 		you: 'You',
 		short: (missing: number) => (missing === 1 ? 'One player missing' : `${missing} players missing`),
