@@ -110,4 +110,13 @@ describe('guest calls', () => {
 		expect(calls[0]?.init?.method).toBe('POST');
 		expect(guestKey('t', s)).toBeNull();
 	});
+
+	it('claimGuest keeps the key of a different guest', async () => {
+		const s = memory();
+		vi.stubGlobal('localStorage', s);
+		rememberGuest('t', 'k', 'guest_1', s);
+		serve(200, {});
+		await claimGuest('t', 'guest_2');
+		expect(guestKey('t', s)).toBe('k');
+	});
 });

@@ -4,8 +4,8 @@ use serde::Serialize;
 
 use super::ranges::{Piece, uncovered_parts};
 use super::{
-    BoardView, MAX_PIECES_PER_MEMBER, bump_version_in, insert_piece_in, join_in, leave_board_in,
-    leave_in, load_state_in, mine, open_board_in, settle_in, view_in,
+    BoardView, MAX_PIECES_PER_MEMBER, bump_version_in, drop_line_head_in, insert_piece_in, join_in,
+    leave_board_in, leave_in, load_state_in, mine, open_board_in, settle_in, view_in,
 };
 use crate::players::{name_key, normalize_name};
 use crate::store::{Store, StoreError, Tx};
@@ -25,10 +25,20 @@ pub(crate) fn new_guest_id() -> String {
 }
 
 /// A guest who just joined or was picked again: the secret to keep, and the board as they see it.
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct GuestJoined {
     pub guest_key: String,
     pub view: BoardView,
+}
+
+// The key is a secret: a stray `{:?}` must not print it.
+impl std::fmt::Debug for GuestJoined {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GuestJoined")
+            .field("guest_key", &"<redacted>")
+            .field("view", &self.view)
+            .finish()
+    }
 }
 
 fn is_unique_violation(e: &sqlx::Error) -> bool {
@@ -173,6 +183,7 @@ impl Store {
                 .execute(&mut *tx)
                 .await?;
                 bump_version_in(&mut tx, &game.id).await?;
+                drop_line_head_in(&mut tx, &game.id, user).await?;
             }
         }
         move_line_heads_in(&mut tx, guest_id, user).await?;

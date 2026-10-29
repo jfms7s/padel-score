@@ -14,11 +14,13 @@
 		current: [number, number];
 		/** [start, end] of the game I would trade into, or the proposed time. */
 		proposed: [number, number];
+		/** The asker is a guest on the board. */
+		guest?: boolean;
 		busy?: boolean;
 		onanswer: (accept: boolean) => void;
 	}
 
-	let { kind, from, current, proposed, busy = false, onanswer }: Props = $props();
+	let { kind, from, current, proposed, guest = false, busy = false, onanswer }: Props = $props();
 
 	const zone = browserTimeZone();
 	const when = (r: [number, number]) => `${dayLabel(r[0], zone)} · ${timeRange(r[0], r[1], zone)}`;
@@ -26,7 +28,10 @@
 </script>
 
 <section class="request" aria-label={kind === 'swap' ? t.requestSwap(from) : t.requestTime(from)}>
-	<h3>{kind === 'swap' ? t.requestSwap(from) : t.requestTime(from)}</h3>
+	<h3>
+		{kind === 'swap' ? t.requestSwap(from) : t.requestTime(from)}
+		{#if guest}<span class="hint">({strings.boards.guestMark})</span>{/if}
+	</h3>
 	<dl>
 		<div>
 			<dt>{labels[0]}</dt>

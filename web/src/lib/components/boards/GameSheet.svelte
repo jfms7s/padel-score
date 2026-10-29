@@ -36,6 +36,7 @@
 	const me = $derived(view.me?.user_id ?? null);
 	const actions = $derived(gameActions(view, gameId, me, now));
 	const names = $derived(new Map(view.members.map((m) => [m.user_id, m.name])));
+	const guestIds = $derived(new Set(view.members.filter((m) => m.guest).map((m) => m.user_id)));
 	const when = (start: number, end: number) => `${dayLabel(start, zone)} · ${timeRange(start, end, zone)}`;
 
 	let mode = $state<'swap' | 'time' | null>(null);
@@ -59,9 +60,10 @@
 		)
 	);
 	const picked = $derived(targets.find((x) => key(x) === keptTarget.value) ?? null);
-	const targetLabel = (x: { gameId: string; name: string }) => {
+	const targetLabel = (x: { gameId: string; userId: string; name: string }) => {
 		const g = view.games.find((o) => o.id === x.gameId);
-		return g ? t.swapPlayer(x.name, when(g.start, g.end)) : x.name;
+		const name = guestIds.has(x.userId) ? `${x.name} (${tb.guestMark})` : x.name;
+		return g ? t.swapPlayer(name, when(g.start, g.end)) : name;
 	};
 
 	function sendSwap(event: SubmitEvent) {
@@ -143,7 +145,9 @@
 		<h3>{t.playersLabel}</h3>
 		<ol class="people" aria-label={t.playersLabel}>
 			{#each game.players as p (p.user_id)}
-				<li>{p.name}{#if p.user_id === me}<span class="hint"> ({t.you})</span>{/if}</li>
+				<li>
+					{p.name}{#if p.guest}<span class="hint"> ({tb.guestMark})</span>{/if}{#if p.user_id === me}<span class="hint"> ({t.you})</span>{/if}
+				</li>
 			{/each}
 		</ol>
 
@@ -152,7 +156,9 @@
 			<p class="hint">{t.lineEmpty}</p>
 		{:else}
 			<ol class="people" aria-label={t.line}>
-				{#each game.line as id (id)}<li>{names.get(id) ?? ''}</li>{/each}
+				{#each game.line as id (id)}
+					<li>{names.get(id) ?? ''}{#if guestIds.has(id)}<span class="hint"> ({tb.guestMark})</span>{/if}</li>
+				{/each}
 			</ol>
 		{/if}
 
@@ -304,20 +310,6 @@
 	.gone {
 		color: var(--warn);
 		font-size: 13px;
-	}
-	.check {
-		flex-direction: row;
-		align-items: center;
-		gap: 10px;
-		min-height: var(--tap);
-		color: var(--ink);
-		font-size: 16px;
-	}
-	.check input {
-		width: 24px;
-		min-height: 24px;
-		height: 24px;
-		flex: none;
 	}
 	.close {
 		margin-top: 14px;

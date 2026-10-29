@@ -89,7 +89,11 @@ pub(super) async fn bump_version_in(tx: &mut Tx<'_>, game_id: &str) -> Result<()
     Ok(())
 }
 
-async fn drop_line_head_in(tx: &mut Tx<'_>, game_id: &str, user: &str) -> Result<(), StoreError> {
+pub(super) async fn drop_line_head_in(
+    tx: &mut Tx<'_>,
+    game_id: &str,
+    user: &str,
+) -> Result<(), StoreError> {
     sqlx::query("DELETE FROM board_line_heads WHERE game_id = ? AND user_id = ?")
         .bind(game_id)
         .bind(user)
