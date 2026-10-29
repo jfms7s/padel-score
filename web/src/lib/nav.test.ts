@@ -12,7 +12,7 @@ describe('navItems', () => {
 			['home', '/'],
 			['organise', '/events'],
 			['new', '/new'],
-			['results', '/profile'],
+			['results', '/results'],
 			['people', '/players']
 		]);
 	});
@@ -50,13 +50,12 @@ describe('chromeOf', () => {
 
 describe('parentOf', () => {
 	it('has no parent on a top-level page', () => {
-		for (const p of ['/', '/events', '/profile', '/players', '/organise', '/results', '/login', '/b/x'])
+		for (const p of ['/', '/events', '/profile', '/history', '/players', '/organise', '/results', '/login', '/b/x'])
 			expect(parentOf(p)).toBeNull();
 	});
 	it('names the parent of nested pages', () => {
 		expect(parentOf('/events/e1')).toEqual({ href: '/events', label: 'Organise' });
 		expect(parentOf('/players/p1')).toEqual({ href: '/players', label: 'People' });
-		expect(parentOf('/history')).toEqual({ href: '/profile', label: 'Results' });
 		expect(parentOf('/account')).toEqual({ href: '/', label: 'Home' });
 		expect(parentOf('/admin')).toEqual({ href: '/account', label: 'Account' });
 		for (const p of ['/new', '/new/match', '/boards/new']) expect(parentOf(p)).toEqual({ href: '/', label: 'Home' });

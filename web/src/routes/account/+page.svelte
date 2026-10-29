@@ -25,6 +25,7 @@
 		type PushSupport
 	} from '#lib/push.ts';
 	import LinkCode from '#lib/components/LinkCode.svelte';
+	import PrivacyLinks from '#lib/components/account/PrivacyLinks.svelte';
 	import { requireSignedIn, session, signedOut } from '#lib/session.ts';
 	import { strings } from '#lib/strings.ts';
 	import type { CreatedInvite, Device, Invite } from '#lib/types.ts';
@@ -220,12 +221,13 @@
 		{@const me = $session.me}
 		<p>{a.signedInAs(me.display_name, me.email)}</p>
 		<div class="actions">
-			<a class="secondary" href="/profile">{strings.linking.profile.link}</a>
 			<a class="secondary" href="/link">{a.link}</a>
 			{#if me.is_admin}<a class="secondary" href="/admin">{a.admin}</a>{/if}
 		</div>
 
 		<div class="secs">
+		<PrivacyLinks />
+
 		<section>
 		<h2>{a.invites}</h2>
 		<p class="hint">{a.invitesHint}</p>
