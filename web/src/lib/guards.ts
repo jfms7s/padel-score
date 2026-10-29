@@ -140,7 +140,7 @@ function build(exact: (shape: Shape, optional?: Shape) => Check) {
 			teams: exact({ a: tuple(str, str), b: tuple(str, str) }),
 			revision: int,
 			head_seq: int,
-			events: array(exact({ seq: int, event })),
+			events: array(exact({ seq: int, event, at: int })),
 			score
 		},
 		{ locked: bool }

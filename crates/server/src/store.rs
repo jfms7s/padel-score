@@ -204,6 +204,8 @@ pub struct StoredEvent {
     pub event: Event,
     pub client_id: String,
     pub state: EventState,
+    /// When the row was written, Unix seconds.
+    pub created_at: i64,
 }
 
 /// A command's stored outcome, replayed verbatim when its `client_id` is resent.
@@ -251,6 +253,7 @@ fn event_from_row(row: &SqliteRow) -> Result<StoredEvent, sqlx::Error> {
         event: decode(row.try_get::<&str, _>("event")?)?,
         client_id: row.try_get("client_id")?,
         state: EventState::parse(row.try_get::<&str, _>("state")?)?,
+        created_at: row.try_get("created_at")?,
     })
 }
 
@@ -284,7 +287,7 @@ pub async fn events_in(
     match_id: &str,
 ) -> Result<Vec<StoredEvent>, StoreError> {
     let rows = sqlx::query(
-        "SELECT seq, event, client_id, state FROM events WHERE match_id = ? ORDER BY seq",
+        "SELECT seq, event, client_id, state, created_at FROM events WHERE match_id = ? ORDER BY seq",
     )
     .bind(match_id)
     .fetch_all(conn)

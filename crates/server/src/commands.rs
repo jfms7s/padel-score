@@ -90,6 +90,9 @@ pub struct FinalRequest {
 pub struct ViewEvent {
     pub seq: i64,
     pub event: Event,
+    /// When the point was recorded, Unix seconds. An event rewritten by a replace carries the
+    /// time of the replace.
+    pub at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +179,7 @@ pub fn view_of(m: &StoredMatch, events: &[StoredEvent]) -> Result<MatchView, Rep
         .map(|e| ViewEvent {
             seq: e.seq,
             event: e.event,
+            at: e.created_at,
         })
         .collect();
     let played: Vec<Event> = effective.iter().map(|e| e.event).collect();

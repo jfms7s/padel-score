@@ -28,7 +28,8 @@
   "events": [
     {
       "seq": 1,
-      "event": "time_up"
+      "event": "time_up",
+      "at": 1793000020
     }
   ],
   "score": {
