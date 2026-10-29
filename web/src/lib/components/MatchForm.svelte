@@ -261,7 +261,7 @@
 										onadd={added}
 									/>
 								{:else}
-									<input bind:value={setup.teams[team][slot.index]} placeholder={t.player(slot.n)} aria-label={slot.label} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
+									<input bind:value={setup.teams[team][slot.index]} placeholder={later.on ? t.open : t.player(slot.n)} aria-label={slot.label} disabled={later.on && !playersFailed} autocomplete="off" maxlength={MAX_NAME_LENGTH} />
 								{/if}
 							</div>
 						{/each}

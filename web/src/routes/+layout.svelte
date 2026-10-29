@@ -1,7 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import type { Snippet } from 'svelte';
-	import { beforeNavigate } from '$app/navigation';
+	import { afterNavigate, beforeNavigate } from '$app/navigation';
 	import { page, updated } from '$app/state';
 	import { updatesHeld } from '#lib/holds.svelte.ts';
 	import { bootSession, session } from '#lib/session.ts';
@@ -55,6 +55,9 @@
 	});
 
 	// The app's next in-app navigation loads the new version instead.
+	// The sheet must not outlive a navigation (desktop Back while it is open).
+	afterNavigate(() => (choosing = false));
+
 	beforeNavigate(({ willUnload, to, cancel }) => {
 		if (!updated.current || willUnload || !to?.url || updatesHeld()) return;
 		cancel();

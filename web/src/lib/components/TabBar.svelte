@@ -9,26 +9,26 @@
 </script>
 
 {#snippet face(item: NavItem)}
-				<svg
-				viewBox="0 0 24 24"
-				width="24"
-				height="24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1.8"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				aria-hidden="true"
-			>
-				<path d={ICONS[item.key]} />
-			</svg>
-			<span class:sr-only={item.key === 'new'}>{item.label}</span>
+	<svg
+		viewBox="0 0 24 24"
+		width="24"
+		height="24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.8"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+	>
+		<path d={ICONS[item.key]} />
+	</svg>
+	<span class:sr-only={item.key === 'new'}>{item.label}</span>
 {/snippet}
 
 <nav aria-label={strings.nav.label} class="tabbar">
 	{#each items as item (item.key)}
 		{#if item.key === 'new' && onnew}
-			<button type="button" class="plus" onclick={onnew}>
+			<button type="button" class="plus" aria-haspopup="dialog" onclick={onnew}>
 				{@render face(item)}
 			</button>
 		{:else}
