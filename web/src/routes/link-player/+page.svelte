@@ -67,7 +67,7 @@
 		failure = null;
 		try {
 			await acceptLinkCode(code);
-			await goto('/profile');
+			await goto('/results');
 		} catch (e) {
 			failure = linkMessage(e);
 		} finally {

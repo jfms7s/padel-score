@@ -383,6 +383,7 @@ export const strings = {
 		thisIsMe: 'This is me',
 		linkedMe: 'This player is now linked to you.',
 		unlink: 'Unlink',
+		privacyTitle: 'Privacy and links',
 		unlinkConfirm: (name: string) => `Unlink ${name}? Their matches stay in your history.`,
 		unlinkYes: 'Yes, unlink',
 		keep: 'Keep the link',
@@ -441,11 +442,8 @@ export const strings = {
 			close: 'Close',
 			loading: 'Loading…'
 		},
-		// My results and the privacy setting (/profile).
+		// The privacy setting, linked entries and claims (/account).
 		profile: {
-			title: 'My results',
-			link: 'My results',
-			empty: 'Ask a coordinator to show you the link QR for your name, or tap ‘That’s me’ on a match you played in.',
 			linkedEntries: 'Linked entries',
 			linkedEntry: (name: string, coordinator: string) => `${name}, in ${coordinator}’s players`,
 			unlinkLabel: (name: string, coordinator: string) => `Unlink ${name} from ${coordinator}’s players`,
@@ -473,9 +471,7 @@ export const strings = {
 			newLinkConfirm: 'Make a new link? The old one stops working.',
 			newLinkYes: 'Yes, make a new link',
 			keepLink: 'Keep the old link',
-			privacySaved: 'Saved.',
-			loadMore: 'Load more',
-			loadFailed: 'Couldn’t load this part.'
+			privacySaved: 'Saved.'
 		},
 		// The public profile (/p/{token}).
 		publicProfile: {
@@ -498,10 +494,8 @@ export const strings = {
 		}
 	},
 
-	// The history page, a player's page, and the result row they share.
+	// A player's page, the results record, and the result row they share.
 	history: {
-		title: 'Past matches',
-		empty: 'Finished matches you started while signed in show up here.',
 		loadMore: 'Load more',
 		/** A timed match that went to overtime: the tied games, then this. */
 		overtimeScore: (games: string) => `${games}, overtime`,
@@ -531,7 +525,32 @@ export const strings = {
 	},
 
 	// The results area.
-	results: { recordedLink: 'Matches I recorded ›' },
+	results: {
+		title: 'Results',
+		show: 'Show',
+		/** Read after the winning team's names. */
+		winner: 'winner',
+		played: 'Played',
+		recorded: 'Recorded',
+		won: 'Won',
+		lost: 'Lost',
+		draw: 'Draw',
+		recordedChip: 'Recorded',
+		hidden: 'Hidden',
+		findYourself: 'Are you in these matches? Find yourself in People and tap This is me.',
+		findYourselfLink: 'Go to People',
+		privacy: {
+			private: 'Only you',
+			coordinators: 'Coordinators you’ve played for',
+			public: 'Anyone with your profile link'
+		},
+		privacyRow: 'Who can see this',
+		change: 'Change',
+		placings: 'Placings',
+		columns: { date: 'Date', teamA: 'Team A', teamB: 'Team B', score: 'Score', result: 'Result' },
+		retry: 'Try again',
+		empty: 'No results yet.'
+	},
 
 	// Events: the coordinator's screens, the court phone and the event's viewing page.
 	events: {
