@@ -74,6 +74,8 @@ pub(crate) async fn calendar_events_in(
                 team,
                 place_in_line,
                 status: ev.status,
+                teams: layout.team_count(),
+                max_teams: ev.schedule.max_teams,
             },
         ));
     }

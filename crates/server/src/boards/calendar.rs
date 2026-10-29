@@ -10,6 +10,9 @@ use crate::calendar::{BoardStrip, CalendarItem, MAX_ITEMS, WaitingItem};
 use crate::push::{Notice, NoticeKind, Payload, queue_in};
 use crate::store::{StoreError, Tx};
 
+/// `(id, starts at, ends at, played, board token, board title, board place)`.
+type GameRow = (String, i64, i64, bool, String, String, Option<String>);
+
 /// The user's games starting at or after `from`, on any board they have a seat in (a board they
 /// left has none). Each comes with its id for sorting.
 pub(crate) async fn calendar_games_in(
@@ -18,8 +21,8 @@ pub(crate) async fn calendar_games_in(
     from: i64,
     now: i64,
 ) -> Result<Vec<(String, CalendarItem)>, StoreError> {
-    let games: Vec<(String, i64, i64, bool, String, String)> = sqlx::query_as(
-        "SELECT g.id, g.starts_at, g.ends_at, g.match_id IS NOT NULL, b.token, b.title \
+    let games: Vec<GameRow> = sqlx::query_as(
+        "SELECT g.id, g.starts_at, g.ends_at, g.match_id IS NOT NULL, b.token, b.title, b.place \
          FROM board_game_players p JOIN board_games g ON g.id = p.game_id \
          JOIN boards b ON b.id = g.board_id \
          WHERE p.user_id = ? AND g.starts_at >= ? ORDER BY g.starts_at, g.id LIMIT ?",
@@ -30,14 +33,18 @@ pub(crate) async fn calendar_games_in(
     .fetch_all(&mut *conn)
     .await?;
     let mut out = Vec::new();
-    for (id, start, end, played, board_token, board_title) in games {
-        let players: Vec<String> = sqlx::query_scalar(
-            "SELECT u.name FROM board_game_players p JOIN board_people u ON u.id = p.user_id \
+    for (id, start, end, played, board_token, board_title, board_place) in games {
+        let seated: Vec<(String, String)> = sqlx::query_as(
+            "SELECT p.user_id, u.name FROM board_game_players p JOIN board_people u ON u.id = p.user_id \
              WHERE p.game_id = ? ORDER BY p.seat",
         )
         .bind(&id)
         .fetch_all(&mut *conn)
         .await?;
+        let Some(me) = seated.iter().position(|(id, _)| id == user) else {
+            continue;
+        };
+        let players: Vec<String> = seated.into_iter().map(|(_, name)| name).collect();
         let state = game_state(played, end, players.len(), now);
         out.push((
             id.clone(),
@@ -47,7 +54,9 @@ pub(crate) async fn calendar_games_in(
                 game_id: id,
                 start,
                 end,
+                board_place,
                 players,
+                me,
                 state,
             },
         ));

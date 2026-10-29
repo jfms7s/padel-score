@@ -359,6 +359,11 @@ impl Layout {
         }
     }
 
+    /// Teams with a place: the hand-added and the complete sign-ups that fit.
+    pub(crate) fn team_count(&self) -> usize {
+        self.hand_added + self.teams.len()
+    }
+
     fn list(&self, show_ids: bool) -> SignupList {
         let of = |entries: &[Entry]| entries.iter().map(|e| e.team(show_ids)).collect();
         SignupList {

@@ -221,6 +221,13 @@ async fn calendar_lists_my_games_events_and_matches_by_start() {
     assert_eq!(game["start"], START);
     assert_eq!(game["state"], "full");
     assert_eq!(game["players"].as_array().unwrap().len(), 4);
+    assert!(game["board_place"].is_null());
+    assert_eq!(
+        game["players"][game["me"].as_u64().unwrap() as usize],
+        "Ana"
+    );
+    assert_eq!(ev["teams"], 0);
+    assert_eq!(ev["max_teams"], 8);
     assert_eq!(ev["event_id"], event_id.as_str());
     assert_eq!(ev["join_token"], event_token.as_str());
     assert_eq!(ev["name"], "Friday cup");
@@ -230,6 +237,7 @@ async fn calendar_lists_my_games_events_and_matches_by_start() {
     assert_eq!(ev["role"], "organiser");
     assert_eq!(ev["status"], "setup");
     assert_eq!(m["join_token"], match_token.as_str());
+    assert_eq!(m["owner_name"], "Marta");
     assert_eq!(m["role"], "player");
     assert_eq!(m["state"], "open");
     assert_eq!(m["place"], "Court 2");
@@ -252,6 +260,86 @@ async fn calendar_lists_my_games_events_and_matches_by_start() {
     // Items before `from` are left out.
     let later = cal(&s, &ana, START + HOUR, T0 + 10).await;
     assert_eq!(kinds(&later["items"]), ["event", "match"]);
+}
+
+#[tokio::test]
+async fn game_item_has_board_place_and_me_for_each_player() {
+    let (s, _pool) = setup().await;
+    let names = ["Ana", "Rui", "Marta", "Joana"];
+    let mut ids = Vec::new();
+    for n in names {
+        ids.push(user(&s, n).await);
+    }
+    let token = s
+        .create_board(
+            &ids[0],
+            NewBoard {
+                allow_guests: false,
+                title: "Thursday padel".to_owned(),
+                place: Some("Clube Oeiras".into()),
+                time_zone: "Europe/Lisbon".to_owned(),
+                starts_at: START,
+                ends_at: START + WEEK_SECS,
+            },
+            T0,
+        )
+        .await
+        .unwrap()
+        .board
+        .token;
+    for (i, who) in ids.iter().enumerate() {
+        let now = T0 + i64::try_from(i).unwrap();
+        s.add_free(&token, who, START, START + HOUR, now)
+            .await
+            .unwrap();
+    }
+    for (who, name) in ids.iter().zip(names) {
+        let item = &cal(&s, who, T0, T0 + 10).await["items"][0];
+        assert_eq!(item["board_place"], "Clube Oeiras");
+        assert_eq!(item["players"][item["me"].as_u64().unwrap() as usize], name);
+    }
+}
+
+#[tokio::test]
+async fn event_item_counts_teams() {
+    let (s, _pool) = setup().await;
+    let ana = user(&s, "Ana").await;
+    let rui = user(&s, "Rui").await;
+    let marta = user(&s, "Marta").await;
+    let (_, token) = event(&s, &ana, "Friday cup", START + 2 * HOUR, Signups::Public).await;
+    for (who, partner) in [(&rui, "Pedro"), (&marta, "Sofia")] {
+        let as_ = JoinAs::Partner {
+            partner_name: Some(partner.to_owned()),
+        };
+        s.join_event(&token, who, as_, T0 + 5).await.unwrap();
+    }
+    let item = &cal(&s, &ana, T0, T0 + 10).await["items"][0];
+    assert_eq!(item["teams"], 2);
+    assert_eq!(item["max_teams"], 8);
+
+    // Sign-ups off need no maximum.
+    let ev = s
+        .create_competition(
+            &ana,
+            NewCompetition {
+                name: "Club day".into(),
+                kind: Kind::Tournament,
+                format: one_set(),
+                settings: None,
+                schedule: Some(ScheduleInput {
+                    starts_at: Some(Some(START + DAY)),
+                    signups: Some(Signups::Off),
+                    max_teams: Some(None),
+                    ..Default::default()
+                }),
+            },
+            T0,
+        )
+        .await
+        .unwrap();
+    let c = cal(&s, &ana, START + HOUR, T0 + 10).await;
+    assert_eq!(c["items"][1]["name"], ev.name);
+    assert!(c["items"][1]["max_teams"].is_null());
 }
 
 #[tokio::test]
