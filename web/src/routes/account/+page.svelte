@@ -170,6 +170,7 @@
 				const result = await enablePush();
 				pushOn = result === 'on';
 				if (result === 'failed') pushFailure = p.failed;
+				else if (result === 'dismissed') pushNote = p.dismissed;
 				// The prompt may have just been refused for good.
 				support = pushSupport(currentPushEnv());
 			} else {

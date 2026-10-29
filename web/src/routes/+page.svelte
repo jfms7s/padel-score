@@ -154,7 +154,12 @@
 	async function turnOn() {
 		const result = await enablePush();
 		if (result === 'on') pushCard = false;
-		else pushFailure = result === 'denied' ? strings.push.denied : strings.push.failed;
+		else pushFailure =
+				result === 'denied'
+					? strings.push.denied
+					: result === 'dismissed'
+						? strings.push.dismissed
+						: strings.push.failed;
 	}
 
 	function notNow() {

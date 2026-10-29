@@ -966,6 +966,7 @@ export const strings = {
 		unsupported: 'Not available in this browser',
 		denied: 'Notifications are blocked for this site in the browser settings',
 		iosNeedsHomeScreen: 'On iPhone, add padel-score to your home screen first; notifications only work from there.',
+		dismissed: 'Notifications weren’t turned on. Try again and choose Allow.',
 		failed: "Couldn't turn on notifications."
 	},
 
@@ -1243,7 +1244,6 @@ export const strings = {
 			already_signed_up: 'You are already signed up for this event.',
 			not_solo: 'Only people waiting for a partner can be paired.',
 			signup_taken: 'This sign-up is already a team of the event.',
-			not_public: 'This event is not public.',
 			not_auto_paired: 'Only an automatic pair can be split.',
 			nothing_to_take: 'There are not enough complete sign-ups to make teams yet.'
 		},
@@ -1371,10 +1371,7 @@ export const strings = {
 		inviteFailed: 'Couldn’t load the invitation. Check the connection and try again.',
 		retry: 'Try again',
 		inviteGone: 'This partner link does not work any more. Ask for a new one.',
-		declined: 'You declined. Your partner can send you a new link.',
-		share: 'Share',
-		you: 'You',
-		kindLine: (kind: string, rules: string) => `${kind} · ${rules}`
+		declined: 'You declined. Your partner can send you a new link.'
 	},
 
 	// Scheduled matches: Play later on New match and the match's join page.
