@@ -40,9 +40,7 @@ export const strings = {
 
 	// Home.
 	newMatch: 'New match',
-	recentMatches: 'Recent matches on this device',
 	noRecent: 'Matches you start here will show up in this list.',
-	homeIntro: 'Score a padel match from the fence.',
 
 	// New match.
 	setup: {
@@ -903,7 +901,6 @@ export const strings = {
 	},
 
 	// Home, signed in.
-	myMatches: 'My matches',
 	noMyMatches: 'Matches you start while signed in show up here, on any device.',
 
 	// Deleting a match started by mistake, from a home list.
