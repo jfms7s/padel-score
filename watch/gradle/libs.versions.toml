@@ -1,5 +1,5 @@
 [versions]
-agp = "9.4.1"
+agp = "9.5.1"
 kotlin = "2.4.21"
 wear-compose = "1.7.1"
 compose-bom = "2026.09.00"
