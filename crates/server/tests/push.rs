@@ -464,6 +464,7 @@ impl PushTransport for ByEndpoint {
         let status = match req.uri().path() {
             "/gone" => 404,
             "/broken" => 500,
+            "/refused" => 403,
             _ => 201,
         };
         Box::pin(async move { Ok(status) })
@@ -634,6 +635,85 @@ async fn a_subscription_refused_for_a_week_is_deleted() {
         }
     );
     assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 0);
+    // The notice had no device left, so it is closed rather than retried.
+    let unsent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM push_outbox WHERE sent_at IS NULL")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(unsent, 0);
+}
+
+#[tokio::test]
+async fn a_refusal_beside_a_success_closes_the_row_and_starts_the_run() {
+    let (mut state, pool, _app, admin, _raw) = with_admin().await;
+    let transport: Arc<dyn PushTransport> = Arc::new(ByEndpoint);
+    state.push = Arc::new(Pusher::new(transport));
+    for endpoint in ["ok", "refused"] {
+        state
+            .store
+            .save_push_subscription(
+                &admin,
+                &typed(&format!("https://push.example.test/{endpoint}")),
+                1_000,
+            )
+            .await
+            .unwrap();
+    }
+    state
+        .store
+        .queue(&[test_notice(&admin, None)], 1_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        send_pending(&state, 1_010).await,
+        SendReport {
+            sent: 1,
+            gone: 0,
+            failed: 1
+        }
+    );
+    let (sent_at, next): (Option<i64>, Option<i64>) =
+        sqlx::query_as("SELECT sent_at, next_attempt_at FROM push_outbox")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((sent_at, next), (Some(1_010), None));
+    let since: Option<i64> = sqlx::query_scalar(
+        "SELECT failed_since FROM push_subscriptions WHERE endpoint LIKE '%/refused'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(since, Some(1_010));
+    let ok_since: Option<i64> = sqlx::query_scalar(
+        "SELECT failed_since FROM push_subscriptions WHERE endpoint LIKE '%/ok'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ok_since, None);
+}
+
+#[tokio::test]
+async fn a_row_from_before_the_waits_is_due_and_gets_the_next_wait() {
+    // A row left by the old sender: two failed passes, no due time.
+    let (state, pool, admin, _fake) = one_device(&[500]).await;
+    state
+        .store
+        .queue(&[test_notice(&admin, None)], 1_000)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE push_outbox SET attempts = 2, next_attempt_at = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(send_pending(&state, 1_010).await, failed_once());
+    let (attempts, next): (i64, Option<i64>) =
+        sqlx::query_as("SELECT attempts, next_attempt_at FROM push_outbox")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((attempts, next), (3, Some(1_610)));
 }
 
 #[tokio::test]

@@ -709,35 +709,34 @@ fn retry_at(now: i64, attempts: i64) -> Option<i64> {
 /// for [`REFUSED_KEEP_SECS`] and returns `true`; otherwise starts or continues the run and
 /// returns `false`. A database error is logged and counts as a plain failure (`false`).
 async fn note_refusal(store: &Store, endpoint: &str, now: i64) -> bool {
-    let since: Result<Option<Option<i64>>, _> =
-        sqlx::query_scalar("SELECT failed_since FROM push_subscriptions WHERE endpoint = ?")
+    // One conditional DELETE, so a re-subscribe landing between a read and the delete (which
+    // clears `failed_since`) can never be wiped out.
+    let dropped =
+        sqlx::query("DELETE FROM push_subscriptions WHERE endpoint = ? AND failed_since <= ?")
             .bind(endpoint)
-            .fetch_optional(store.pool())
-            .await;
-    match since {
-        Ok(Some(Some(since))) if now - since >= REFUSED_KEEP_SECS => {
-            drop_endpoint(store, endpoint).await;
-            true
-        }
-        Ok(_) => {
-            let done = sqlx::query(
-                "UPDATE push_subscriptions SET failed_since = COALESCE(failed_since, ?) \
-                 WHERE endpoint = ?",
-            )
-            .bind(now)
-            .bind(endpoint)
+            .bind(now - REFUSED_KEEP_SECS)
             .execute(store.pool())
             .await;
-            if let Err(error) = done {
-                tracing::error!(%error, "push refusal bookkeeping failed");
-            }
-            false
-        }
+    match dropped {
+        Ok(done) if done.rows_affected() > 0 => return true,
+        Ok(_) => {}
         Err(error) => {
             tracing::error!(%error, "push refusal bookkeeping failed");
-            false
+            return false;
         }
     }
+    let started = sqlx::query(
+        "UPDATE push_subscriptions SET failed_since = COALESCE(failed_since, ?) \
+         WHERE endpoint = ?",
+    )
+    .bind(now)
+    .bind(endpoint)
+    .execute(store.pool())
+    .await;
+    if let Err(error) = started {
+        tracing::error!(%error, "push refusal bookkeeping failed");
+    }
+    false
 }
 
 async fn finish_row(
