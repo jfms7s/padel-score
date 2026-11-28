@@ -125,6 +125,14 @@ mod tests {
             bad,
             serde_json::json!({"error": {"impossible_set": {"index": 0}}})
         );
+        let bad = parse(&validate_final_json(
+            SETS,
+            r#"{"sets":[{"a":7,"b":6,"tiebreak":null}]}"#,
+        ));
+        assert_eq!(
+            bad,
+            serde_json::json!({"error": {"missing_tie_break": {"index": 0}}})
+        );
         let bad = parse(&validate_final_json(TIMED, r#"{"sets":[]}"#));
         assert_eq!(bad, serde_json::json!({"error": "wrong_format"}));
         let bad = parse(&validate_final_json("nope", "{"));
