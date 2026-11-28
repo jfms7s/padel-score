@@ -145,7 +145,8 @@ pub(crate) async fn waiting_and_strips_in(
 }
 
 /// `short_game` for games with three players that start within the next day, to every member of
-/// the board who is in no game overlapping it. Returns how many notices were queued.
+/// the board who is in no game overlapping it and holds no time of another unplayed game there
+/// (they could not take the seat). Returns how many notices were queued.
 pub(crate) async fn queue_short_games_in(tx: &mut Tx<'_>, now: i64) -> Result<usize, StoreError> {
     let games: Vec<(String, String, i64, i64, String, String)> = sqlx::query_as(
         "SELECT g.id, g.board_id, g.starts_at, g.ends_at, b.token, b.title \
@@ -164,11 +165,16 @@ pub(crate) async fn queue_short_games_in(tx: &mut Tx<'_>, now: i64) -> Result<us
             "SELECT m.user_id FROM board_members m WHERE m.board_id = ?1 AND NOT EXISTS ( \
                SELECT 1 FROM board_game_players p JOIN board_games o ON o.id = p.game_id \
                WHERE p.user_id = m.user_id AND o.starts_at < ?3 AND o.ends_at > ?2) \
+             AND NOT EXISTS ( \
+               SELECT 1 FROM board_game_holds h JOIN board_games hg ON hg.id = h.game_id \
+               WHERE h.user_id = m.user_id AND h.game_id <> ?4 AND hg.match_id IS NULL \
+               AND h.starts_at < ?3 AND h.ends_at > ?2) \
              ORDER BY m.user_id",
         )
         .bind(&board_id)
         .bind(start)
         .bind(end)
+        .bind(&game_id)
         .fetch_all(&mut **tx)
         .await?;
         let notices: Vec<Notice> = free

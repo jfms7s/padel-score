@@ -31,11 +31,22 @@ pub struct Game {
     pub players: Vec<String>,
     /// Users who head this game's line while they stay free, in order.
     pub line_heads: Vec<String>,
-    /// Moved by hand: no longer tied to its players' ranges.
+    /// Moved by hand: no longer tied to its players' ranges. The time it left stays blocked for
+    /// the players it had then, as a `Hold`, until a match is started from it.
     pub moved: bool,
     /// A match was started from it.
     pub played: bool,
     pub formed_at: i64,
+}
+
+/// A time a moved game left, still blocked for one of its players (see `BoardState::busy`). It
+/// stops counting once a match was started from the game (`Game::played`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hold {
+    pub game_id: String,
+    pub user_id: String,
+    pub start: i64,
+    pub end: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +56,7 @@ pub struct BoardState {
     pub members: Vec<Member>,
     pub pieces: Vec<Piece>,
     pub games: Vec<Game>,
+    pub holds: Vec<Hold>,
 }
 
 /// Who goes first: the piece's `created_at`, then `joined_at`, then `user_id`.
@@ -106,13 +118,19 @@ impl BoardState {
             .any(|&(s, e)| s <= start && end <= e)
     }
 
-    /// Whether the user plays in any game overlapping `[start, end)`. Moved and
-    /// played games count too.
+    /// Whether the user plays in any game overlapping `[start, end)`, or still has a hold from
+    /// another game there (the time a moved game left). Moved and played games count too, but a
+    /// hold of a game that was played (or is unknown) does not.
     pub fn busy(&self, user: &str, start: i64, end: i64, except_game: Option<&str>) -> bool {
         self.games.iter().any(|g| {
             Some(g.id.as_str()) != except_game
                 && overlaps(g.start, g.end, start, end)
                 && g.players.iter().any(|p| p == user)
+        }) || self.holds.iter().any(|h| {
+            Some(h.game_id.as_str()) != except_game
+                && h.user_id == user
+                && overlaps(h.start, h.end, start, end)
+                && self.games.iter().any(|g| g.id == h.game_id && !g.played)
         })
     }
 
@@ -478,6 +496,7 @@ mod tests {
             members: members.iter().map(|(n, j)| member(n, *j)).collect(),
             pieces,
             games,
+            holds: Vec::new(),
         }
     }
 
@@ -868,6 +887,49 @@ mod tests {
         assert!(!state.free_for("ana", at(10, 0), at(11, 0), None));
         assert!(state.free_for("ana", at(11, 0), at(12, 0), None));
         assert!(!state.free_for("ana", at(13, 30), at(14, 30), None));
+    }
+
+    #[test]
+    fn busy_counts_holds_of_other_games() {
+        let mut state = same_range(&["ana", "bia"], at(10, 0), at(14, 0));
+        state.games = vec![game("g1", at(12, 0), at(13, 0), &["ana"])];
+        state.holds = vec![Hold {
+            game_id: "g1".to_owned(),
+            user_id: "ana".to_owned(),
+            start: at(10, 0),
+            end: at(11, 0),
+        }];
+        assert!(state.busy("ana", at(10, 30), at(11, 30), None));
+        assert!(state.busy("ana", at(10, 30), at(11, 30), Some("other")));
+        assert!(!state.busy("ana", at(10, 30), at(11, 30), Some("g1")));
+        assert!(!state.busy("ana", at(11, 0), at(12, 0), None));
+        assert!(!state.busy("bia", at(10, 30), at(11, 30), None));
+        assert!(!state.free_for("ana", at(10, 0), at(11, 0), None));
+    }
+
+    #[test]
+    fn holds_of_a_played_game_do_not_block() {
+        let mut state = same_range(&["ana"], at(10, 0), at(14, 0));
+        state.games = vec![game("g1", at(12, 0), at(13, 0), &["ana"])];
+        state.holds = vec![
+            Hold {
+                game_id: "g1".to_owned(),
+                user_id: "ana".to_owned(),
+                start: at(10, 0),
+                end: at(11, 0),
+            },
+            Hold {
+                game_id: "gone".to_owned(),
+                user_id: "ana".to_owned(),
+                start: at(11, 0),
+                end: at(12, 0),
+            },
+        ];
+        if let Some(g) = state.games.first_mut() {
+            g.played = true;
+        }
+        assert!(!state.busy("ana", at(10, 0), at(11, 0), None));
+        assert!(!state.busy("ana", at(11, 0), at(12, 0), None));
     }
 
     #[test]
