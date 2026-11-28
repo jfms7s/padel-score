@@ -214,15 +214,15 @@ fn regular_set_winner(index: usize, set: &SetScore) -> Result<Team, InvalidScore
     let is_tiebreak_set = set.a.max(set.b) == 7 && set.a.min(set.b) == 6;
     match set.tiebreak {
         // A 7-6 set was decided by its tie-break, so its points are part of the score.
-        None if is_tiebreak_set => return Err(InvalidScore::MissingTieBreak { index }),
-        None => {}
-        Some((x, y)) => {
-            if !is_tiebreak_set || reachable_tiebreak_winner(x, y, TIEBREAK_TO) != Some(winner) {
-                return Err(impossible);
-            }
+        None if is_tiebreak_set => Err(InvalidScore::MissingTieBreak { index }),
+        None => Ok(winner),
+        Some((x, y))
+            if is_tiebreak_set && reachable_tiebreak_winner(x, y, TIEBREAK_TO) == Some(winner) =>
+        {
+            Ok(winner)
         }
+        Some(_) => Err(impossible),
     }
-    Ok(winner)
 }
 
 fn super_tiebreak_winner(index: usize, set: &SetScore) -> Result<Team, InvalidScore> {
