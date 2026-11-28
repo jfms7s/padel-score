@@ -35,7 +35,7 @@ use crate::AppState;
 use crate::accounts;
 use crate::api::{self, ApiError, ApiJson, ApiPath, internal, now};
 use crate::auth::SessionUser;
-use crate::commands::{Authority, FinalRequest, record_final};
+use crate::commands::{Authority, FinalRequest, record_final_executed};
 use crate::competitions::places::Place;
 use crate::competitions::view::{
     CourtOut, EventDetail, EventMatch, EventSummary, event_detail, event_id_of_match,
@@ -455,7 +455,7 @@ async fn match_result(
     let store = state.store.clone();
     let owner = m.owner_user_id.clone();
     api::run_detached(&state, m.id.clone(), owner, async move {
-        record_final(&store, &m, req, Authority::Owner, now()).await
+        record_final_executed(&store, &m, req, Authority::Owner, now()).await
     })
     .await
 }

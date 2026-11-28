@@ -39,8 +39,9 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::AppState;
 use crate::auth::CurrentUser;
 use crate::commands::{
-    Authority, CommandOutcome, CommandRequest, FinalRequest, MatchView, ReplaceRequest,
-    apply_command, delete_unfinished, record_final, replace_from, set_start, view_of,
+    Authority, CommandOutcome, CommandRequest, Executed, FinalRequest, MatchView, ReplaceRequest,
+    apply_command_executed, delete_unfinished, record_final_executed, replace_from_executed,
+    set_start, view_of,
 };
 use crate::competitions::view::event_id_of_match;
 use crate::hub::Subscription;
@@ -394,7 +395,7 @@ pub(crate) async fn run_command(
     let store = state.store.clone();
     let (match_id, owner) = (m.id.clone(), m.owner_user_id.clone());
     run_detached(state, match_id, owner, async move {
-        apply_command(&store, &m, req, now(), authority).await
+        apply_command_executed(&store, &m, req, now(), authority).await
     })
     .await
 }
@@ -408,7 +409,7 @@ async fn replace(
     let store = state.store.clone();
     let (match_id, owner) = (m.id.clone(), m.owner_user_id.clone());
     run_detached(&state, match_id, owner, async move {
-        replace_from(&store, &m, req, now(), Authority::Scorer).await
+        replace_from_executed(&store, &m, req, now(), Authority::Scorer).await
     })
     .await
 }
@@ -436,7 +437,7 @@ async fn final_score(
     let store = state.store.clone();
     let (match_id, owner) = (m.id.clone(), m.owner_user_id.clone());
     run_detached(&state, match_id, owner, async move {
-        record_final(&store, &m, req, Authority::Scorer, now()).await
+        record_final_executed(&store, &m, req, Authority::Scorer, now()).await
     })
     .await
 }
@@ -484,7 +485,9 @@ async fn start(
 /// `Replayed`. Spawning makes commit-then-publish run to completion whatever happens to the
 /// request; dropping the `JoinHandle` detaches the task, it does not cancel it.
 ///
-/// `owner` is the match's owner, whose list streams hear of the change too.
+/// `owner` is the match's owner, whose list streams hear of the change too. The streams of any
+/// match the command made an event withdraw ([`Executed::withdrawn`]) are closed first, on the
+/// same task, so a dropped request cannot leave them open either.
 pub(crate) async fn run_detached<F>(
     state: &AppState,
     match_id: String,
@@ -492,11 +495,16 @@ pub(crate) async fn run_detached<F>(
     work: F,
 ) -> Result<Response, ApiError>
 where
-    F: Future<Output = Result<CommandOutcome, StoreError>> + Send + 'static,
+    F: Future<Output = Result<Executed, StoreError>> + Send + 'static,
 {
     let task_state = state.clone();
     let outcome = tokio::spawn(async move {
-        let outcome = work.await?;
+        let Executed { outcome, withdrawn } = work.await?;
+        // A bracket correction withdrew these matches: end their streams, as redraw and
+        // decide do, so no fence or court phone keeps showing a match that is gone.
+        for id in &withdrawn {
+            task_state.hub.close(id);
+        }
         publish(&task_state, &match_id, owner.as_deref(), &outcome).await;
         Ok::<_, StoreError>(outcome)
     })
