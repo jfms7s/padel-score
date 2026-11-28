@@ -25,7 +25,12 @@ use crate::store::{Store, StoreError, Tx};
 /// A user keeps at most this many devices; a new one past it drops the oldest.
 pub const MAX_DEVICES_PER_USER: usize = 10;
 /// A notice no device took is dropped after this many failed passes.
-pub const MAX_ATTEMPTS: i64 = 3;
+pub const MAX_ATTEMPTS: i64 = 4;
+/// How long a failed notice waits before each retry: 30 s, 2 min, then 10 min.
+pub const RETRY_WAIT_SECS: [i64; 3] = [30, 120, 600];
+/// A subscription the push service has refused (401/403) without a success for this long (a
+/// week) is deleted when the next refusal arrives.
+pub const REFUSED_KEEP_SECS: i64 = 604_800;
 /// Outbox rows older than this (two days), sent or not, are pruned by the tick.
 pub const OUTBOX_KEEP_SECS: i64 = 172_800;
 
@@ -190,7 +195,7 @@ impl Store {
              VALUES (?, ?, ?, ?, ?) \
              ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, \
              p256dh = excluded.p256dh, auth = excluded.auth, created_at = excluded.created_at, \
-             last_ok_at = NULL",
+             last_ok_at = NULL, failed_since = NULL",
         )
         .bind(&sub.endpoint)
         .bind(user_id)
@@ -507,7 +512,32 @@ pub struct SendReport {
 enum Outcome {
     Sent,
     Gone,
+    /// The push service answered 401 or 403: see [`note_refusal`].
+    Refused,
     Failed,
+}
+
+/// How a device's outcome was counted once its subscription was dealt with.
+enum Settled {
+    Sent,
+    Gone,
+    Failed,
+}
+
+/// Act on one device's outcome (mark it working, delete it, or note a refusal) and count it.
+async fn settle(store: &Store, endpoint: &str, outcome: Outcome, now: i64) -> Settled {
+    match outcome {
+        Outcome::Sent => {
+            mark_ok(store, endpoint, now).await;
+            Settled::Sent
+        }
+        Outcome::Gone => {
+            drop_endpoint(store, endpoint).await;
+            Settled::Gone
+        }
+        Outcome::Refused if note_refusal(store, endpoint, now).await => Settled::Gone,
+        Outcome::Refused | Outcome::Failed => Settled::Failed,
+    }
 }
 
 /// One pass: send up to 100 unsent rows, oldest first, to every device of their user.
@@ -520,8 +550,9 @@ async fn send_batch(state: &AppState, now: i64) -> (SendReport, i64) {
     let mut report = SendReport::default();
     let rows: Vec<(i64, String, String, i64)> = match sqlx::query_as(
         "SELECT id, user_id, payload, attempts FROM push_outbox WHERE sent_at IS NULL \
-         ORDER BY created_at, id LIMIT ?",
+         AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY created_at, id LIMIT ?",
     )
+    .bind(now)
     .bind(BATCH)
     .fetch_all(state.store.pool())
     .await
@@ -560,16 +591,10 @@ async fn send_batch(state: &AppState, now: i64) -> (SendReport, i64) {
         }))
         .await;
         for ((endpoint, _), outcome) in subs.iter().zip(outcomes) {
-            match outcome {
-                Outcome::Sent => {
-                    sent += 1;
-                    mark_ok(&state.store, endpoint, now).await;
-                }
-                Outcome::Gone => {
-                    gone += 1;
-                    drop_endpoint(&state.store, endpoint).await;
-                }
-                Outcome::Failed => failed += 1,
+            match settle(&state.store, endpoint, outcome, now).await {
+                Settled::Sent => sent += 1,
+                Settled::Gone => gone += 1,
+                Settled::Failed => failed += 1,
             }
         }
         report.sent += sent;
@@ -581,7 +606,8 @@ async fn send_batch(state: &AppState, now: i64) -> (SendReport, i64) {
         let retry = sent == 0 && remaining > 0;
         let attempts = if retry { attempts + 1 } else { attempts };
         let done = !retry || attempts >= MAX_ATTEMPTS;
-        finish_row(&state.store, id, done.then_some(now), attempts).await;
+        let next = if done { None } else { retry_at(now, attempts) };
+        finish_row(&state.store, id, done.then_some(now), attempts, next).await;
     }
     (report, taken)
 }
@@ -634,6 +660,10 @@ async fn push_one(
     match state.push.transport.send(request).await {
         Ok(200..=299) => Outcome::Sent,
         Ok(404 | 410) => Outcome::Gone,
+        Ok(status @ (401 | 403)) => {
+            tracing::warn!(status, "push service refused a notice");
+            Outcome::Refused
+        }
         Ok(status) => {
             tracing::warn!(status, "push service refused a notice");
             Outcome::Failed
@@ -646,11 +676,14 @@ async fn push_one(
 }
 
 async fn mark_ok(store: &Store, endpoint: &str, now: i64) {
-    let done = sqlx::query("UPDATE push_subscriptions SET last_ok_at = ? WHERE endpoint = ?")
-        .bind(now)
-        .bind(endpoint)
-        .execute(store.pool())
-        .await;
+    let done = sqlx::query(
+        "UPDATE push_subscriptions SET last_ok_at = ?, failed_since = NULL \
+         WHERE endpoint = ?",
+    )
+    .bind(now)
+    .bind(endpoint)
+    .execute(store.pool())
+    .await;
     if let Err(error) = done {
         tracing::error!(%error, "push subscription update failed");
     }
@@ -666,19 +699,69 @@ async fn drop_endpoint(store: &Store, endpoint: &str) {
     }
 }
 
-async fn finish_row(store: &Store, id: i64, sent_at: Option<i64>, attempts: i64) {
-    let done = sqlx::query("UPDATE push_outbox SET sent_at = ?, attempts = ? WHERE id = ?")
-        .bind(sent_at)
-        .bind(attempts)
-        .bind(id)
-        .execute(store.pool())
-        .await;
+/// When a notice that has failed `attempts` times is tried again, or `None` past the last wait.
+fn retry_at(now: i64, attempts: i64) -> Option<i64> {
+    let step = usize::try_from(attempts.checked_sub(1)?).ok()?;
+    RETRY_WAIT_SECS.get(step).map(|wait| now + wait)
+}
+
+/// A device was refused (401/403). Deletes its subscription when the refusals have run unbroken
+/// for [`REFUSED_KEEP_SECS`] and returns `true`; otherwise starts or continues the run and
+/// returns `false`. A database error is logged and counts as a plain failure (`false`).
+async fn note_refusal(store: &Store, endpoint: &str, now: i64) -> bool {
+    // One conditional DELETE, so a re-subscribe landing between a read and the delete (which
+    // clears `failed_since`) can never be wiped out.
+    let dropped =
+        sqlx::query("DELETE FROM push_subscriptions WHERE endpoint = ? AND failed_since <= ?")
+            .bind(endpoint)
+            .bind(now - REFUSED_KEEP_SECS)
+            .execute(store.pool())
+            .await;
+    match dropped {
+        Ok(done) if done.rows_affected() > 0 => return true,
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(%error, "push refusal bookkeeping failed");
+            return false;
+        }
+    }
+    let started = sqlx::query(
+        "UPDATE push_subscriptions SET failed_since = COALESCE(failed_since, ?) \
+         WHERE endpoint = ?",
+    )
+    .bind(now)
+    .bind(endpoint)
+    .execute(store.pool())
+    .await;
+    if let Err(error) = started {
+        tracing::error!(%error, "push refusal bookkeeping failed");
+    }
+    false
+}
+
+async fn finish_row(
+    store: &Store,
+    id: i64,
+    sent_at: Option<i64>,
+    attempts: i64,
+    next_attempt_at: Option<i64>,
+) {
+    let done = sqlx::query(
+        "UPDATE push_outbox SET sent_at = ?, attempts = ?, next_attempt_at = ? WHERE id = ?",
+    )
+    .bind(sent_at)
+    .bind(attempts)
+    .bind(next_attempt_at)
+    .bind(id)
+    .execute(store.pool())
+    .await;
     if let Err(error) = done {
         tracing::error!(%error, "push outbox update failed");
     }
 }
 
-/// Whether the sender runs another batch straight away: only after a full batch that made
+/// Whether the sender runs another batch straight away (rows still waiting out a retry delay are
+/// not taken, so they do not count as work): only after a full batch that made
 /// progress (a device took a notice or was dropped), and not once shutdown has begun. A full
 /// batch that all failed waits for the next wake or interval instead of spinning on a dead push
 /// service.
