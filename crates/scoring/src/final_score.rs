@@ -8,7 +8,7 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FinalScore {
-    /// The sets in order, shaped like the engine's `Score.sets`: a 7-6 set may omit its tie-break
+    /// The sets in order, shaped like the engine's `Score.sets`: a 7-6 set carries its tie-break
     /// points, and a deciding super tie-break is `1-0` or `0-1` with the points in `tiebreak`.
     Sets(Vec<SetScore>),
     /// `a` and `b` are the regulation games, counted before any overtime game.
@@ -66,8 +66,8 @@ pub fn validate_final(format: &Format, score: &FinalScore) -> Result<Option<Team
 /// game is four straight points, which wins it under every deuce rule. A timed score is `a` games
 /// to A, `b` games to B, `TimeUp`, then one overtime game if there is an overtime winner.
 ///
-/// Validates first, so anything `validate_final` rejects is rejected here. A finished 7-6 set
-/// without tie-break points is `MissingTieBreak`: the points cannot be made up.
+/// Validates first, so anything `validate_final` rejects is rejected here, including a 7-6 set
+/// without tie-break points (`MissingTieBreak`: the points cannot be made up).
 pub fn events_for_final(format: &Format, score: &FinalScore) -> Result<Vec<Event>, InvalidScore> {
     validate_final(format, score)?;
     let mut events = Vec::new();
@@ -211,10 +211,15 @@ fn regular_set_winner(index: usize, set: &SetScore) -> Result<Team, InvalidScore
     if already_won.is_some() {
         return Err(impossible);
     }
-    if let Some((x, y)) = set.tiebreak {
-        let is_tiebreak_set = set.a.max(set.b) == 7 && set.a.min(set.b) == 6;
-        if !is_tiebreak_set || reachable_tiebreak_winner(x, y, TIEBREAK_TO) != Some(winner) {
-            return Err(impossible);
+    let is_tiebreak_set = set.a.max(set.b) == 7 && set.a.min(set.b) == 6;
+    match set.tiebreak {
+        // A 7-6 set was decided by its tie-break, so its points are part of the score.
+        None if is_tiebreak_set => return Err(InvalidScore::MissingTieBreak { index }),
+        None => {}
+        Some((x, y)) => {
+            if !is_tiebreak_set || reachable_tiebreak_winner(x, y, TIEBREAK_TO) != Some(winner) {
+                return Err(impossible);
+            }
         }
     }
     Ok(winner)
