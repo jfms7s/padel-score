@@ -6,6 +6,7 @@ import {
 	bestOffset,
 	clockButtons,
 	clockText,
+	createHornTracker,
 	countInMs,
 	createServerClock,
 	isLow,
@@ -108,14 +109,64 @@ describe('server time', () => {
 		expect(c.synced()).toBe(true);
 		expect(c.now()).toBe(2000);
 		c.stop();
-		// A sync that got no sample still resolves: the phone's own time is all there is.
+		// A sync that got no sample resolves but is not synced: the phone's own time may be off.
 		const down = createServerClock(
 			async () => Promise.reject(new Error('down')),
 			() => 5
 		);
 		await down.sync();
-		expect(down.synced()).toBe(true);
+		expect(down.synced()).toBe(false);
 		down.stop();
+	});
+
+	it('server_clock_is_not_synced_until_a_sample_succeeds', async () => {
+		vi.useFakeTimers();
+		try {
+			let up = false;
+			let calls = 0;
+			const c = createServerClock(
+				async () => (calls++, up ? 7000 : Promise.reject(new Error('down'))),
+				() => 0
+			);
+			await c.sync();
+			expect(c.synced()).toBe(false);
+			// The retry comes on its own after 15 s, not 10 minutes.
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(calls).toBe(10);
+			expect(c.synced()).toBe(false);
+			up = true;
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(c.synced()).toBe(true);
+			expect(c.now()).toBe(7000);
+			// Once synced, back to the 10-minute re-sync.
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(calls).toBe(15);
+			await vi.advanceTimersByTimeAsync(10 * 60_000);
+			expect(calls).toBe(20);
+			c.stop();
+			// stop() leaves no timer running.
+			expect(vi.getTimerCount()).toBe(0);
+			await vi.advanceTimersByTimeAsync(10 * 60_000);
+			expect(calls).toBe(20);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('server_clock_stop_clears_the_retry_timer', async () => {
+		vi.useFakeTimers();
+		try {
+			const c = createServerClock(
+				async () => Promise.reject(new Error('down')),
+				() => 0
+			);
+			await c.sync();
+			expect(vi.getTimerCount()).toBe(1);
+			c.stop();
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('server_clock_survives_a_failed_sync', async () => {
@@ -207,24 +258,109 @@ describe('beeps and horn', () => {
 		expect(shouldHorn(c, 0, played, 'e1')).toBe(false);
 		// A reload 10 s past zero.
 		expect(shouldHorn(c, -10_000, new Set(), 'e1')).toBe(false);
-		// Done early with time left.
+		// A done slot uses the same window: from the moment time was up to 3 s after.
 		const done = clock({ state: 'done' });
-		expect(shouldHorn(done, 200_000, new Set(), 'e1')).toBe(true);
+		expect(shouldHorn(done, 0, new Set(), 'e1')).toBe(true);
+		expect(shouldHorn(done, -2_999, new Set(), 'e1')).toBe(true);
+		expect(shouldHorn(done, -3_000, new Set(), 'e1')).toBe(false);
+		expect(shouldHorn(done, 200_000, new Set(), 'e1')).toBe(false);
+		expect(shouldHorn(clock({ state: 'paused' }), 0, new Set(), 'e1')).toBe(false);
 	});
 
 	it('no_sound_and_nothing_marked_until_synced', () => {
 		const c = clock();
 		const played = { beeps: new Set<string>(), horns: new Set<string>() };
 		// 2.5 s of count-in left, and a horn due on a slot that ended just now.
-		expect(soundsDue(c, 97_500, 900_000, false, played, 'e1')).toEqual({ beeps: [], horn: false });
-		expect(soundsDue(c, 1_000_000, 0, false, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 97_500, 900_000, false, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 1_000_000, 0, false, true, played, 'e1')).toEqual({ beeps: [], horn: false });
 		expect(played.beeps.size).toBe(0);
 		expect(played.horns.size).toBe(0);
 		// Synced: each plays, once.
-		expect(soundsDue(c, 97_500, 900_000, true, played, 'e1')).toEqual({ beeps: ['beep'], horn: false });
-		expect(soundsDue(c, 97_500, 900_000, true, played, 'e1')).toEqual({ beeps: [], horn: false });
-		expect(soundsDue(c, 1_000_000, 0, true, played, 'e1')).toEqual({ beeps: [], horn: true });
-		expect(soundsDue(c, 1_000_000, 0, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 97_500, 900_000, true, true, played, 'e1')).toEqual({ beeps: ['beep'], horn: false });
+		expect(soundsDue(c, 97_500, 900_000, true, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 1_000_000, 0, true, true, played, 'e1')).toEqual({ beeps: [], horn: true });
+		expect(soundsDue(c, 1_000_000, 0, true, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+	});
+
+	it('horn_is_not_marked_played_while_audio_is_locked', () => {
+		const c = clock();
+		const played = { beeps: new Set<string>(), horns: new Set<string>() };
+		// Synced but locked: at zero, and in the count-in, nothing plays and nothing is used up.
+		expect(soundsDue(c, 1_000_000, 0, true, false, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 97_500, 900_000, true, false, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(played.beeps.size).toBe(0);
+		expect(played.horns.size).toBe(0);
+		// A tap 2 s after zero (inside LATE_MS): the horn still sounds, once.
+		expect(soundsDue(c, 1_002_000, -2000, true, true, played, 'e1')).toEqual({ beeps: [], horn: true });
+		expect(soundsDue(c, 1_002_250, -2250, true, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+	});
+
+	it('horn_tracker_counts_from_the_deadline_once_done', () => {
+		const run = clock(); // ends at 1 000 000
+		const done = clock({ state: 'done', starts_at_ms: null, ends_at_ms: null, remaining_ms: 0 });
+		const h = createHornTracker();
+		expect(h.toEnd(run, 999_900, true)).toBe(100);
+		expect(h.toEnd(run, 1_000_100, true)).toBe(-100);
+		// The done frame lands after a tick saw zero pass: still counting from the deadline.
+		expect(h.toEnd(done, 1_001_000, true)).toBe(-1000);
+		expect(h.toEnd(done, 1_010_000, true)).toBe(-10_000);
+	});
+
+	it('horn_tracker_counts_from_the_done_frame_when_time_was_left', () => {
+		const run = clock();
+		const done = clock({ state: 'done', starts_at_ms: null, ends_at_ms: null, remaining_ms: 0 });
+		const h = createHornTracker();
+		// End now (or the done frame beating the local zero) with 200 s left.
+		expect(h.toEnd(run, 800_000, true)).toBe(200_000);
+		expect(h.toEnd(done, 800_100, true)).toBe(0);
+		expect(h.toEnd(done, 802_100, true)).toBe(-2000);
+		// Paused, then ended: the time left before the pause still counts as time left.
+		const p = createHornTracker();
+		p.toEnd(run, 800_000, true);
+		p.toEnd(clock({ state: 'paused', starts_at_ms: null, ends_at_ms: null }), 900_000, true);
+		expect(p.toEnd(done, 2_000_000, true)).toBe(0);
+	});
+
+	it('horn_tracker_gives_no_horn_for_a_slot_never_seen_running_synced', () => {
+		const run = clock();
+		const done = clock({ state: 'done', starts_at_ms: null, ends_at_ms: null, remaining_ms: 0 });
+		const reload = createHornTracker();
+		expect(shouldHorn(done, reload.toEnd(done, 1_000_000, true), new Set(), 'e1')).toBe(false);
+		const unsynced = createHornTracker();
+		unsynced.toEnd(run, 999_000, false);
+		expect(shouldHorn(done, unsynced.toEnd(done, 1_000_000, true), new Set(), 'e1')).toBe(false);
+		// A new slot starts afresh.
+		const h = createHornTracker();
+		h.toEnd(run, 800_000, true);
+		expect(h.toEnd({ ...done, slot: 2 }, 800_100, true)).toBe(Number.NEGATIVE_INFINITY);
+	});
+
+	it('locked_sound_gets_the_horn_after_done_only_within_3_s', () => {
+		const run = clock();
+		const done = clock({ state: 'done', starts_at_ms: null, ends_at_ms: null, remaining_ms: 0 });
+		const tick = (h: ReturnType<typeof createHornTracker>, c: typeof run, at: number, audible: boolean, p: Played) =>
+			soundsDue(c, at, h.toEnd(c, at, true), true, audible, p, 'e1').horn;
+		type Played = { beeps: Set<string>; horns: Set<string> };
+		const fresh = (): Played => ({ beeps: new Set(), horns: new Set() });
+		// Locked through zero and the done frame, tapped 2 s after zero: the horn, once.
+		let h = createHornTracker();
+		let p = fresh();
+		expect(tick(h, run, 999_900, false, p)).toBe(false);
+		expect(tick(h, done, 1_000_200, false, p)).toBe(false);
+		expect(tick(h, done, 1_002_000, true, p)).toBe(true);
+		expect(tick(h, done, 1_002_250, true, p)).toBe(false);
+		// Tapped 10 s after zero: too late, no horn at all.
+		h = createHornTracker();
+		p = fresh();
+		tick(h, run, 999_900, false, p);
+		tick(h, done, 1_000_200, false, p);
+		expect(tick(h, done, 1_010_000, true, p)).toBe(false);
+		expect(p.horns.size).toBe(0);
+		// Locked when zero passed on a running tick, the done frame later: a tap in time still works.
+		h = createHornTracker();
+		p = fresh();
+		tick(h, run, 1_000_100, false, p);
+		expect(tick(h, done, 1_002_900, true, p)).toBe(true);
 	});
 
 	it('playHorn_null_is_noop', () => {

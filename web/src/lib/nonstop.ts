@@ -166,17 +166,22 @@ export function bestOffset(samples: readonly TimeSample[]): number | null {
 
 const SAMPLES = 5;
 const RESYNC_MS = 10 * 60_000;
+/** How often to try again while no sample has ever succeeded. */
+const RETRY_MS = 15_000;
 const SAMPLE_TIMEOUT_MS = 3000;
 
 export interface ServerClock {
 	/** Server time in unix ms; the local time until the first sync lands. */
 	now(): number;
 	/**
-	 * Whether a sync has finished (with or without a sample). Until then `now()` is the phone's
-	 * own time, which may be off, so no beep or horn is played.
+	 * Whether at least one time sample has succeeded. Until then `now()` is the phone's own time,
+	 * which may be off, so no beep or horn is played.
 	 */
 	synced(): boolean;
-	/** Take samples and update the offset; starts the 10-minute re-sync. Never throws. */
+	/**
+	 * Take samples and update the offset; starts the re-sync (every 15 s until a sample has
+	 * succeeded, then every 10 minutes). Never throws.
+	 */
 	sync(): Promise<void>;
 	stop(): void;
 }
@@ -187,9 +192,11 @@ export function createServerClock(
 ): ServerClock {
 	let offset = 0;
 	let timer: ReturnType<typeof setInterval> | null = null;
+	/** The interval `timer` runs at, so the first success can slow it down. */
+	let every = 0;
 	let syncing: Promise<void> | null = null;
 	let again = false;
-	let done = false;
+	let sampled = false;
 
 	/** One sample, given up on after SAMPLE_TIMEOUT_MS so a hung fetch can't block later syncs. */
 	function sample(): Promise<number> {
@@ -214,11 +221,23 @@ export function createServerClock(
 			}
 		}
 		const best = bestOffset(samples);
-		if (best !== null) offset = best;
+		if (best !== null) {
+			offset = best;
+			sampled = true;
+		}
+	}
+
+	/** Run the re-sync timer at the pace for the current state (fast until the first sample). */
+	function schedule(): void {
+		const want = sampled ? RESYNC_MS : RETRY_MS;
+		if (timer !== null && every === want) return;
+		if (timer !== null) clearInterval(timer);
+		every = want;
+		timer = setInterval(() => void sync(), want);
 	}
 
 	function sync(): Promise<void> {
-		timer ??= setInterval(() => void sync(), RESYNC_MS);
+		schedule();
 		if (syncing !== null) {
 			// A sync asked for while one runs (a reconnect) measures once more afterwards.
 			again = true;
@@ -230,9 +249,10 @@ export function createServerClock(
 					again = false;
 					await measure();
 				} while (again);
-				done = true;
 			} finally {
 				syncing = null;
+				// Not after stop(): a stopped clock stays stopped.
+				if (timer !== null) schedule();
 			}
 		})();
 		return syncing;
@@ -240,7 +260,7 @@ export function createServerClock(
 
 	return {
 		now: () => now() + offset,
-		synced: () => done,
+		synced: () => sampled,
 		sync,
 		stop() {
 			if (timer !== null) clearInterval(timer);
@@ -337,15 +357,55 @@ export function markBeeps(clock: Clock, serverNow: number, played: Set<string>, 
 const hornKey = (clock: Clock, eventId: string) => `${eventId}:${clock.slot}`;
 
 /**
- * Whether to sound the horn: once per `eventId:slot`, when the clock has just reached zero
- * (`remaining` is `msToEnd(clock, serverNow)`, not the clamped `remainingMs`: 0 down to −3 s counts, a reload later
- * stays quiet), or when a frame turns the slot `done` while `remaining` (the last local value)
- * still had time on it (End now).
+ * Whether to sound the horn: once per `eventId:slot`, from the moment time is up until 3 s after
+ * (a reload later stays quiet). `remaining` is the time to that moment, negative once past it:
+ * `msToEnd(clock, serverNow)` while running, and for a slot that turned `done` what
+ * `createHornTracker` gives (it keeps counting from zero, or from an End now).
  */
 export function shouldHorn(clock: Clock, remaining: number, played: ReadonlySet<string>, eventId: string): boolean {
 	if (played.has(hornKey(clock, eventId))) return false;
-	if (clock.state === 'done') return remaining > 0;
-	return clock.state === 'running' && remaining <= 0 && remaining > -LATE_MS;
+	if (clock.state !== 'running' && clock.state !== 'done') return false;
+	return remaining <= 0 && remaining > -LATE_MS;
+}
+
+export interface HornTracker {
+	/** The `remaining` for `shouldHorn` and `soundsDue` this tick. Call it on every tick. */
+	toEnd(clock: Clock, serverNow: number, synced: boolean): number;
+}
+
+/**
+ * Follows one court's slot so the horn window survives the frame that turns it `done`. While it
+ * runs, the time to zero is `msToEnd`. Once done, it counts from the moment time was up: the
+ * deadline if a synced tick already saw it pass, or the done frame itself if time was left (the
+ * frame beat the local zero, or End now). A slot never seen running on a synced clock gives no
+ * horn (a reload after time-up).
+ */
+export function createHornTracker(): HornTracker {
+	let slot: number | null = null;
+	let endsAt: number | null = null;
+	let leftAtLastTick = 0;
+	let upAt: number | null = null;
+	return {
+		toEnd(clock, serverNow, synced) {
+			if (clock.slot !== slot) {
+				slot = clock.slot;
+				endsAt = null;
+				upAt = null;
+			}
+			if (clock.state === 'running') {
+				const toEnd = msToEnd(clock, serverNow);
+				// Only a synced time to zero counts for a slot that turns done.
+				if (synced && clock.ends_at_ms !== null) {
+					endsAt = clock.ends_at_ms;
+					leftAtLastTick = toEnd;
+				}
+				return toEnd;
+			}
+			if (clock.state !== 'done') return 0;
+			if (upAt === null && endsAt !== null) upAt = leftAtLastTick > 0 ? serverNow : endsAt;
+			return upAt === null ? Number.NEGATIVE_INFINITY : upAt - serverNow;
+		}
+	};
 }
 
 export function markHorn(clock: Clock, played: Set<string>, eventId: string): void {
@@ -355,18 +415,21 @@ export function markHorn(clock: Clock, played: Set<string>, eventId: string): vo
 /**
  * The beeps and horn the court phone plays now, each marked played. Nothing, and nothing
  * marked, until the server clock has `synced`: before that `serverNow` is the phone's own time,
- * and a skewed phone would sound (and so use up) a beep or the horn early. `toEnd` is as for
- * `shouldHorn`.
+ * and a skewed phone would sound (and so use up) a beep or the horn early. Likewise nothing
+ * while sound is not `audible` (no tap has unlocked it since the page loaded): a sound played
+ * then is never heard, so it stays due, and a tap within 3 s of zero still gets the horn.
+ * `toEnd` is as for `shouldHorn`.
  */
 export function soundsDue(
 	clock: Clock,
 	serverNow: number,
 	toEnd: number,
 	synced: boolean,
+	audible: boolean,
 	played: { beeps: Set<string>; horns: Set<string> },
 	eventId: string
 ): { beeps: Beep[]; horn: boolean } {
-	if (!synced) return { beeps: [], horn: false };
+	if (!synced || !audible) return { beeps: [], horn: false };
 	const beeps = beepsDue(clock, serverNow, played.beeps, eventId);
 	markBeeps(clock, serverNow, played.beeps, eventId);
 	const horn = shouldHorn(clock, toEnd, played.horns, eventId);

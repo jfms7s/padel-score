@@ -7,6 +7,10 @@ import { strings } from '#lib/strings.ts';
 import type { CourtState } from '#lib/types.ts';
 import NonStopCourtBanner from './NonStopCourtBanner.svelte';
 
+// Sound is locked unless a test says otherwise (the server render has no AudioContext anyway).
+const audio = vi.hoisted(() => ({ ready: false }));
+vi.mock('#lib/audio.ts', () => ({ audioReady: () => audio.ready, audioContext: () => null }));
+
 const t = strings.nonStop;
 const NOW = 1_800_000_000_000;
 
@@ -42,7 +46,10 @@ describe('NonStopCourtBanner', () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(NOW);
 	});
-	afterEach(() => vi.useRealTimers());
+	afterEach(() => {
+		vi.useRealTimers();
+		audio.ready = false;
+	});
 
 	it('renders nothing without a clock or court data', () => {
 		expect(html(court(null)).trim()).toBe('');
@@ -104,6 +111,27 @@ describe('NonStopCourtBanner', () => {
 		}).body;
 		expect(low).toMatch(/class="[^"]*\blow\b/);
 		expect(long).not.toMatch(/class="[^"]*\blow\b/);
+	});
+
+	it('shows the tap for sound line on the court phone while sound is locked', () => {
+		for (const c of [
+			clock('ready'),
+			clock('paused', { went: true }),
+			clock('running', { starts_at_ms: NOW + 3000, ends_at_ms: NOW + 603_000 })
+		])
+			expect(html(court(c))).toContain(t.tapForSound);
+		// Once the slot is done there is nothing left to hear.
+		expect(html(court(clock('done', { went: true, remaining_ms: 0 })))).not.toContain(t.tapForSound);
+	});
+
+	it('shows no sound line once sound is unlocked', () => {
+		audio.ready = true;
+		expect(html(court(clock('ready')))).not.toContain(t.tapForSound);
+	});
+
+	it('shows no sound line to viewers', () => {
+		for (const c of [clock('ready'), clock('running', { starts_at_ms: NOW + 3000, ends_at_ms: NOW + 603_000 })])
+			expect(html(court(c), true)).not.toContain(t.tapForSound);
 	});
 
 	it('done: time is up, no countdown', () => {
