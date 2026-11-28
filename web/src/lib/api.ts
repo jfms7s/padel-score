@@ -1,6 +1,7 @@
 // The match API (crates/server/src/api.rs). Paths are relative: in production the same binary
 // serves the app and the API, and in dev vite proxies /api to it.
 
+import { isMatchView, isObj } from './guards';
 import { loginPath } from './next';
 import { strings } from './strings';
 import type {
@@ -193,11 +194,36 @@ function failure(status: number, body: unknown, retryAfter?: number): ApiError {
 	return new ApiError(status, code, message, false, detail);
 }
 
-async function request<T>(path: string, ok: number, init?: RequestInit, timeoutMs?: number): Promise<T> {
+async function request<T>(
+	path: string,
+	ok: number,
+	init?: RequestInit,
+	timeoutMs?: number,
+	guard?: (v: unknown) => v is T
+): Promise<T> {
 	const { status, body, retryAfter } = await call(path, init, timeoutMs);
 	if (status !== ok) throw failure(status, body, retryAfter);
+	if (guard && !guard(body)) throw malformed(status);
 	return body as T;
 }
+
+/**
+ * An answer whose body is not the shape its status promises (an old cached app against a newer
+ * server, a proxy rewriting the body). It is a server error and not retryable: a resend with the
+ * same client_id gets the same saved answer back, so retrying it would never end.
+ */
+function malformed(status: number): ApiError {
+	return new ApiError(status, 'internal', strings.serverError(status));
+}
+
+/** `v` when it passes the (lenient) view guard, so newer servers may add keys; else a server error. */
+function matchView(status: number, v: unknown): MatchView {
+	if (!isMatchView(v)) throw malformed(status);
+	return v;
+}
+
+/** An engine error kind or refusal reason: a unit variant is a string, the others one-key objects. */
+const isVariant = (v: unknown): boolean => typeof v === 'string' || isObj(v);
 
 /**
  * A request to a route that needs no account (a court or viewing link): any status but `ok`
@@ -244,7 +270,7 @@ export async function accountRequest<T>(path: string, opts: AccountCall = {}): P
 		if (status === 401 && opts.signedIn && err.code !== 'invalid_credentials') onUnauthorized();
 		throw err;
 	}
-	if (opts.guard && !opts.guard(body)) throw new ApiError(status, 'internal', strings.serverError(status));
+	if (opts.guard && !opts.guard(body)) throw malformed(status);
 	return body as T;
 }
 
@@ -263,12 +289,16 @@ async function answerTo(path: string, init: RequestInit): Promise<{ status: numb
 	return answer;
 }
 
-/** The view a 200, a 409 conflict or a 409 locked carries; null for any other answer. */
+/**
+ * The view a 200, a 409 conflict or a 409 locked carries; null for any other answer. A view that
+ * fails its guard throws a non-retryable `internal` ApiError.
+ */
 function viewOutcome(status: number, body: unknown): Exclude<CommandOutcome, { status: 'rejected' }> | null {
-	const b = body as ApiErrorBody;
-	if (status === 200) return { status: 'applied', view: body as MatchView };
-	if (status === 409 && b.error === 'conflict') return { status: 'conflict', view: b.view };
-	if (status === 409 && b.error === 'locked') return { status: 'locked', view: b.view };
+	if (status === 200) return { status: 'applied', view: matchView(status, body) };
+	const error = isObj(body) ? body.error : undefined;
+	if (status === 409 && (error === 'conflict' || error === 'locked')) {
+		return { status: error, view: matchView(status, (body as { view?: unknown }).view) };
+	}
 	return null;
 }
 
@@ -276,19 +306,25 @@ async function outcome(path: string, req: unknown): Promise<CommandOutcome> {
 	const { status, body } = await answerTo(path, post(req));
 	const known = viewOutcome(status, body);
 	if (known) return known;
-	const b = body as ApiErrorBody;
-	if (status === 422 && b.error === 'rejected') {
-		return { status: 'rejected', kind: b.kind, index: b.index };
+	if (status === 422 && isObj(body) && body.error === 'rejected') {
+		const { kind, index } = body;
+		if (!isVariant(kind) || !Number.isInteger(index) || (index as number) < 0) throw malformed(status);
+		return { status: 'rejected', kind: kind as ErrorKind, index: index as number };
 	}
 	throw failure(status, body);
 }
 
-/** A typed final score's answer, from a scoring link or the coordinator. */
+/**
+ * A typed final score's answer, from a scoring link or the coordinator. A view or reason that is
+ * not the right shape throws a non-retryable `internal` ApiError.
+ */
 export function finalOutcome(status: number, body: unknown): FinalOutcome | null {
 	const known = viewOutcome(status, body);
 	if (known) return known;
-	const b = body as ApiErrorBody;
-	if (status === 422 && b.error === 'invalid_score') return { status: 'invalid_score', reason: b.reason };
+	if (status === 422 && isObj(body) && body.error === 'invalid_score') {
+		if (!isVariant(body.reason)) throw malformed(status);
+		return { status: 'invalid_score', reason: body.reason as InvalidScore };
+	}
 	return null;
 }
 
@@ -298,12 +334,12 @@ export function createMatch(req: CreateMatchRequest): Promise<CreatedMatch> {
 
 /** The scorer's view; the token must be a scoring token. */
 export function getScore(token: string): Promise<MatchView> {
-	return request(`/api/score/${enc(token)}`, 200, undefined, REQUEST_TIMEOUT_MS);
+	return request(`/api/score/${enc(token)}`, 200, undefined, REQUEST_TIMEOUT_MS, isMatchView);
 }
 
 /** The read-only view; either token works. */
 export function getView(token: string): Promise<MatchView> {
-	return request(`/api/view/${enc(token)}`, 200, undefined, REQUEST_TIMEOUT_MS);
+	return request(`/api/view/${enc(token)}`, 200, undefined, REQUEST_TIMEOUT_MS, isMatchView);
 }
 
 export function postCommands(token: string, req: CommandRequest): Promise<CommandOutcome> {
