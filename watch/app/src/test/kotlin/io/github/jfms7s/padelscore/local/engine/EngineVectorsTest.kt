@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,8 +21,17 @@ private data class EngineVector(
     val steps: List<JsonElement>,
 )
 
+// Rules and starts the Rust engine refuses; `error` is its RulesError.
 @Serializable
-private data class EngineVectors(val vectors: List<EngineVector>)
+private data class InvalidCase(
+    val name: String,
+    val rules: SetRules,
+    val start: Start,
+    val error: String,
+)
+
+@Serializable
+private data class EngineVectors(val vectors: List<EngineVector>, val invalid: List<InvalidCase>)
 
 // WireJson minus its leniency: a field the Rust Score gains must fail here until the port has it.
 private val StrictJson = Json {
@@ -32,12 +42,13 @@ private val StrictJson = Json {
 
 // The Rust engine's own outputs (crates/scoring/tests/engine_vectors.rs): the port must match every step.
 class EngineVectorsTest {
-    private val vectors: List<EngineVector> by lazy {
+    private val file: EngineVectors by lazy {
         val text = checkNotNull(javaClass.classLoader?.getResource("engine-vectors.json")) {
             "missing test resource engine-vectors.json"
         }.readText()
-        StrictJson.decodeFromString(EngineVectors.serializer(), text).vectors
+        StrictJson.decodeFromString(EngineVectors.serializer(), text)
     }
+    private val vectors: List<EngineVector> get() = file.vectors
 
     @Test
     fun port_matches_every_engine_vector() {
@@ -58,6 +69,14 @@ class EngineVectorsTest {
                     assertEquals("${v.name}[$i]", StrictJson.decodeFromJsonElement(EngineScore.serializer(), step), m.score())
                 }
             }
+        }
+    }
+
+    @Test
+    fun port_rejects_every_invalid_rule_set_and_start() {
+        assertTrue(file.invalid.isNotEmpty())
+        for (c in file.invalid) {
+            assertNull("${c.name}: accepted", SetsMatch.create(c.rules, c.start))
         }
     }
 
