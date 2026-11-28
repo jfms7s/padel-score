@@ -48,16 +48,20 @@ pub async fn on_start(
 
 /// Runs after every applied command on an event match (points, undos that un-finish it,
 /// typed results), inside its transaction; read `match_results` to know whether it is finished.
+/// Returns the ids of the matches it withdrew (only a tournament's bracket withdraws any).
 pub async fn on_result(
     kind: Kind,
     tx: &mut Tx<'_>,
     ev: &Competition,
     match_id: &str,
     now: i64,
-) -> Result<(), StoreError> {
+) -> Result<Vec<String>, StoreError> {
     match kind {
         Kind::Tournament => tournament::on_result(tx, ev, match_id, now).await,
-        Kind::NonStop => non_stop::on_result(tx, ev, match_id, now).await,
+        Kind::NonStop => {
+            non_stop::on_result(tx, ev, match_id, now).await?;
+            Ok(Vec::new())
+        }
     }
 }
 

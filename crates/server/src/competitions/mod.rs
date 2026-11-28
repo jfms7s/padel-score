@@ -285,11 +285,18 @@ pub(crate) async fn competition_by_join_token_in(
 /// `results::sync_in`: for an event match it calls [`kinds::on_result`], which reads
 /// `match_results` to see whether the match is now finished (or no longer is, after an undo).
 /// For any other match it does nothing beyond one indexed lookup.
-pub async fn after_result_in(tx: &mut Tx<'_>, m: &StoredMatch, now: i64) -> Result<(), StoreError> {
-    if let Some((ev, link)) = courts::event_of_match_in(tx, &m.id).await? {
-        kinds::on_result(ev.kind, tx, &ev, &link.match_id, now).await?;
+///
+/// Returns the ids of the matches the event withdrew as a result (a bracket correction), whose
+/// live streams the caller closes after the commit.
+pub async fn after_result_in(
+    tx: &mut Tx<'_>,
+    m: &StoredMatch,
+    now: i64,
+) -> Result<Vec<String>, StoreError> {
+    match courts::event_of_match_in(tx, &m.id).await? {
+        Some((ev, link)) => kinds::on_result(ev.kind, tx, &ev, &link.match_id, now).await,
+        None => Ok(Vec::new()),
     }
-    Ok(())
 }
 
 fn team_from_row(row: &SqliteRow) -> Result<EventTeam, sqlx::Error> {

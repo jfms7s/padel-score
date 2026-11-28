@@ -69,23 +69,24 @@ pub async fn on_start(tx: &mut Tx<'_>, ev: &Competition, now: i64) -> Result<(),
 ///
 /// Never refuses: it runs inside every command on an event match, and a state the bracket can't
 /// act on is held, not an error. A match outside the bracket (made by hand) is ignored.
+///
+/// Returns the ids of the matches the plan withdrew, so the caller can close their live
+/// streams once the transaction commits.
 pub async fn on_result(
     tx: &mut Tx<'_>,
     ev: &Competition,
     match_id: &str,
     now: i64,
-) -> Result<(), StoreError> {
+) -> Result<Vec<String>, StoreError> {
     let Some(bracket) = store::load_in(tx, ev).await? else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let Some(pos) = bracket.node_by_match(match_id).map(|n| n.pos) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let plan = bracket.on_result(pos);
     match ev.status {
-        Status::Running => {
-            store::apply_plan_in(tx, ev, &bracket, &plan, now).await?;
-        }
+        Status::Running => store::apply_plan_in(tx, ev, &bracket, &plan, now).await,
         Status::Finished => {
             let plan = if plan.create.is_empty() && plan.withdraw.is_empty() {
                 plan
@@ -95,13 +96,13 @@ pub async fn on_result(
                     ..Plan::default()
                 }
             };
-            store::apply_plan_in(tx, ev, &bracket, &plan, now).await?;
+            let withdrawn = store::apply_plan_in(tx, ev, &bracket, &plan, now).await?;
             store::rewrite_placings_in(tx, ev, now).await?;
+            Ok(withdrawn)
         }
         // A bracket is drawn at Start, so an event in setup has none.
-        Status::Setup | Status::Cancelled => {}
+        Status::Setup | Status::Cancelled => Ok(Vec::new()),
     }
-    Ok(())
 }
 
 /// A tournament always works out its final places from the bracket.

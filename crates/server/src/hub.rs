@@ -103,7 +103,7 @@ impl Hub {
     }
 
     /// Drop the match's entry. The sender goes with it, so every subscriber's `recv` returns
-    /// `Closed` and its stream ends. Used when the match is purged.
+    /// `Closed` and its stream ends. Used when the match is purged or a bracket withdraws it.
     pub fn close(&self, match_id: &str) {
         self.matches.lock().remove(match_id);
     }

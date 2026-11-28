@@ -136,6 +136,25 @@ pub enum CommandOutcome {
     },
 }
 
+/// What a command did: the outcome the client gets (and that is saved for its `client_id`),
+/// and the matches an event withdrew because of it (a bracket correction). The withdrawn ids
+/// are not part of the saved result: a resend (`Replayed`) carries none, since the first
+/// request already closed their streams.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Executed {
+    pub outcome: CommandOutcome,
+    pub withdrawn: Vec<String>,
+}
+
+impl From<CommandOutcome> for Executed {
+    fn from(outcome: CommandOutcome) -> Self {
+        Executed {
+            outcome,
+            withdrawn: Vec::new(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(tag = "error", rename_all = "snake_case")]
 enum ErrorBody<'a> {
@@ -205,6 +224,20 @@ pub async fn apply_command(
     now: i64,
     authority: Authority,
 ) -> Result<CommandOutcome, StoreError> {
+    Ok(apply_command_executed(store, m, req, now, authority)
+        .await?
+        .outcome)
+}
+
+/// [`apply_command`], also returning the matches withdrawn because of it. The HTTP routes use
+/// this one so they can close the withdrawn matches' streams.
+pub async fn apply_command_executed(
+    store: &Store,
+    m: &StoredMatch,
+    req: CommandRequest,
+    now: i64,
+    authority: Authority,
+) -> Result<Executed, StoreError> {
     let guard = if req.batch {
         Guard::Batch {
             base_revision: req.base_revision,
@@ -233,6 +266,19 @@ pub async fn replace_from(
     now: i64,
     authority: Authority,
 ) -> Result<CommandOutcome, StoreError> {
+    Ok(replace_from_executed(store, m, req, now, authority)
+        .await?
+        .outcome)
+}
+
+/// [`replace_from`], also returning the matches withdrawn because of it.
+pub async fn replace_from_executed(
+    store: &Store,
+    m: &StoredMatch,
+    req: ReplaceRequest,
+    now: i64,
+    authority: Authority,
+) -> Result<Executed, StoreError> {
     let guard = Guard::Replace {
         base_revision: req.base_revision,
         base_seq: req.base_seq,
@@ -262,6 +308,19 @@ pub async fn record_final(
     authority: Authority,
     now: i64,
 ) -> Result<CommandOutcome, StoreError> {
+    Ok(record_final_executed(store, m, req, authority, now)
+        .await?
+        .outcome)
+}
+
+/// [`record_final`], also returning the matches withdrawn because of it.
+pub async fn record_final_executed(
+    store: &Store,
+    m: &StoredMatch,
+    req: FinalRequest,
+    authority: Authority,
+    now: i64,
+) -> Result<Executed, StoreError> {
     let events = events_for_final(&m.format, &req.score).map_err(StoreError::InvalidScore)?;
     let commands: Vec<Command> = events
         .into_iter()
@@ -441,9 +500,9 @@ async fn execute(
     commands: &[Command],
     authority: Authority,
     now: i64,
-) -> Result<CommandOutcome, StoreError> {
+) -> Result<Executed, StoreError> {
     if let Some(message) = invalid(client_id, commands) {
-        return Ok(CommandOutcome::Invalid(message));
+        return Ok(CommandOutcome::Invalid(message).into());
     }
     // Dropping `tx` without a commit rolls it back: every early return below writes nothing.
     let mut tx = store.begin().await?;
@@ -451,22 +510,19 @@ async fn execute(
         return Ok(CommandOutcome::Replayed {
             status: saved.status,
             body: saved.body,
-        });
+        }
+        .into());
     }
     let m = match_by_id_in(&mut tx, match_id)
         .await?
         .ok_or(StoreError::NotFound)?;
     let events = events_in(&mut tx, match_id).await?;
     if authority == Authority::Scorer && m.result_locked_at.is_some() {
-        return Ok(CommandOutcome::Locked(
-            view_of(&m, &events).map_err(corrupt)?,
-        ));
+        return Ok(CommandOutcome::Locked(view_of(&m, &events).map_err(corrupt)?).into());
     }
     let head_seq = head_seq_of(&events);
-    let conflict = || -> Result<CommandOutcome, StoreError> {
-        Ok(CommandOutcome::Conflict(
-            view_of(&m, &events).map_err(corrupt)?,
-        ))
+    let conflict = || -> Result<Executed, StoreError> {
+        Ok(CommandOutcome::Conflict(view_of(&m, &events).map_err(corrupt)?).into())
     };
     let locks = authority == Authority::Owner && matches!(guard, Guard::Final { .. });
 
@@ -527,7 +583,7 @@ async fn execute(
                 let outcome = CommandOutcome::Rejected { kind, index };
                 save(&mut tx, match_id, client_id, &outcome).await?;
                 tx.commit().await?;
-                Ok(outcome)
+                Ok(outcome.into())
             }
         };
     }
@@ -551,9 +607,9 @@ async fn execute(
     // The results projection follows the log in the same transaction (rejected or conflicting
     // commands return above and write nothing).
     results::sync_in(&mut tx, &m, &view.score, now).await?;
-    crate::competitions::after_result_in(&mut tx, &m, now).await?;
+    let withdrawn = crate::competitions::after_result_in(&mut tx, &m, now).await?;
     let outcome = CommandOutcome::Applied(view);
     save(&mut tx, match_id, client_id, &outcome).await?;
     tx.commit().await?;
-    Ok(outcome)
+    Ok(Executed { outcome, withdrawn })
 }

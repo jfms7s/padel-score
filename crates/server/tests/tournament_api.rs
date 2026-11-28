@@ -187,21 +187,12 @@ async fn typed(state: &AppState, app: &Router, raw: &str, id: &str, m: &str, a: 
 
 /// One point to side A through the scorer token.
 async fn point(app: &Router, scorer_token: &str) {
-    let n = CLIENT.fetch_add(1, Ordering::Relaxed);
-    let res = send(
+    scorer_commands(
         app,
-        req(
-            Method::POST,
-            &format!("/api/score/{scorer_token}/commands"),
-            Some(json!({
-                "client_id": format!("p-{n}"), "batch": false, "base_revision": 0,
-                "commands": [{ "kind": "point", "team": "a" }],
-            })),
-            &[],
-        ),
+        scorer_token,
+        vec![json!({ "kind": "point", "team": "a" })],
     )
     .await;
-    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
 }
 
 /// Task 3's held bracket over the API: full placement, QF1 and QF2 won by side A, one point
@@ -588,6 +579,95 @@ async fn decision_replay_closes_old_streams() {
     assert!(fence.ends_within(Duration::from_secs(2)).await);
     let frame = events.next("event").await;
     assert_eq!(node(&frame, &qf(1))["held"], json!(false));
+}
+
+/// Opens the scorer-token stream of `match_id` and reads its first `state` frame.
+async fn fence_on(app: &Router, d: &Value, match_id: &str) -> Sse {
+    let token = scorer(d, match_id);
+    let mut fence = Sse::open(
+        app,
+        req(
+            Method::GET,
+            &format!("/api/score/{token}/stream"),
+            None,
+            &[],
+        ),
+    )
+    .await;
+    fence.next("state").await;
+    fence
+}
+
+/// Sends `commands` live through the scorer token and returns the new view.
+async fn scorer_commands(app: &Router, scorer_token: &str, commands: Vec<Value>) -> Value {
+    let n = CLIENT.fetch_add(1, Ordering::Relaxed);
+    let res = send(
+        app,
+        req(
+            Method::POST,
+            &format!("/api/score/{scorer_token}/commands"),
+            Some(json!({
+                "client_id": format!("c-{n}"), "batch": false, "base_revision": 0,
+                "commands": commands,
+            })),
+            &[],
+        ),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::OK, "{}", res.body);
+    res.body
+}
+
+#[tokio::test]
+async fn a_correction_closes_the_withdrawn_matchs_stream() {
+    let (state, _pool, app, _admin, raw) = with_admin().await;
+    let id = running(&state, &app, &raw, false).await;
+    let d = detail(&state, &app, &raw, &id).await;
+    let (q1, q2) = (match_id(&d, &qf(1)), match_id(&d, &qf(2)));
+    typed(&state, &app, &raw, &id, &q1, 6, 0).await;
+    typed(&state, &app, &raw, &id, &q2, 6, 0).await;
+    let d = detail(&state, &app, &raw, &id).await;
+    let old_sf1 = match_id(&d, &sf(1));
+    let mut fence = fence_on(&app, &d, &old_sf1).await;
+    let mut corrected = fence_on(&app, &d, &q1).await;
+
+    // QF1's other team won after all: the unstarted semi-final is withdrawn and made again.
+    typed(&state, &app, &raw, &id, &q1, 2, 6).await;
+
+    let d = detail(&state, &app, &raw, &id).await;
+    let new_sf1 = node(&d, &sf(1))["match_id"].clone();
+    assert!(new_sf1.is_string());
+    assert_ne!(new_sf1, json!(old_sf1));
+    assert!(fence.ends_within(Duration::from_secs(2)).await);
+    // Only the withdrawn match's streams end: the corrected match is still there.
+    assert!(!corrected.ends_within(Duration::from_millis(500)).await);
+}
+
+#[tokio::test]
+async fn an_undo_on_the_scorer_route_closes_the_withdrawn_matchs_stream() {
+    let (state, _pool, app, _admin, raw) = with_admin().await;
+    let id = running(&state, &app, &raw, false).await;
+    let d = detail(&state, &app, &raw, &id).await;
+    let (q1, q2) = (match_id(&d, &qf(1)), match_id(&d, &qf(2)));
+    let set_to_a = vec![json!({ "kind": "point", "team": "a" }); 24];
+    let view = scorer_commands(&app, &scorer(&d, &q1), set_to_a.clone()).await;
+    let last_seq = view["events"].as_array().unwrap().last().unwrap()["seq"].clone();
+    scorer_commands(&app, &scorer(&d, &q2), set_to_a).await;
+    let d = detail(&state, &app, &raw, &id).await;
+    let old_sf1 = match_id(&d, &sf(1));
+    let mut fence = fence_on(&app, &d, &old_sf1).await;
+
+    // Undoing QF1's match point un-finishes it, so the semi-final it fed is withdrawn.
+    scorer_commands(
+        &app,
+        &scorer(&d, &q1),
+        vec![json!({ "kind": "undo", "target_seq": last_seq })],
+    )
+    .await;
+
+    let d = detail(&state, &app, &raw, &id).await;
+    assert_ne!(node(&d, &sf(1))["match_id"], json!(old_sf1));
+    assert!(fence.ends_within(Duration::from_secs(2)).await);
 }
 
 #[tokio::test]
