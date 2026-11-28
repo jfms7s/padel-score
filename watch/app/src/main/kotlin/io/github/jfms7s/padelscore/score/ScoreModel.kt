@@ -36,7 +36,10 @@ data class ScoreUi(
 
 /**
  * The watch sends commands and shows only views the server returned (POST answer or stream frame),
- * never a local guess. One command at a time; a failed one is reported, never stored or retried.
+ * never a local guess. One command at a time; a failed one is reported and never sent on its own.
+ * The last request that ended "not sent" is kept only so that the same tap, repeated while the same
+ * view is shown, goes out again with the same client id: the server may have saved the first one
+ * after the watch gave up, and a known id returns the saved answer instead of counting twice.
  * Views only move forward: one whose revision is not above the shown one is dropped.
  */
 class ScoreModel(
@@ -53,6 +56,9 @@ class ScoreModel(
     val unauthorized: StateFlow<Boolean> = _unauthorized.asStateFlow()
 
     private var collection: Job? = null
+
+    /** The last request that ended "not sent"; cleared by any other answer or a newer shown view. */
+    private var unsent: CommandRequest? = null
 
     /** A finished match takes no more points, but undo stays available (it may reopen the match). */
     fun point(team: Team) {
@@ -93,7 +99,9 @@ class ScoreModel(
 
     private fun send(view: MatchView, command: Command) {
         _ui.update { it.copy(sending = true, feedback = Feedback.None) }
-        val request = CommandRequest(newId(), batch = false, baseRevision = view.revision, commands = listOf(command))
+        val commands = listOf(command)
+        val request = unsent?.takeIf { it.commands == commands && it.baseRevision == view.revision }
+            ?: CommandRequest(newId(), batch = false, baseRevision = view.revision, commands = commands)
         viewModelScope.launch {
             // The API maps failures to results, but a bug there must not leave the screen stuck on "sending".
             val result = try {
@@ -103,12 +111,13 @@ class ScoreModel(
             } catch (_: Exception) {
                 SendResult.NotSent("send failed")
             }
-            onResult(result)
+            onResult(request, result)
         }
     }
 
-    private fun onResult(result: SendResult) {
+    private fun onResult(request: CommandRequest, result: SendResult) {
         _ui.update { it.copy(sending = false) }
+        unsent = if (result is SendResult.NotSent) request else null
         when (result) {
             is SendResult.Applied -> {
                 show(result.view)
@@ -146,7 +155,13 @@ class ScoreModel(
 
     private fun show(view: MatchView) = _ui.update { state ->
         val shown = state.view
-        if (shown == null || view.revision > shown.revision) state.copy(view = view) else state
+        if (shown == null || view.revision > shown.revision) {
+            // The score moved, so the next tap is a new point, not a retry of the unsent one.
+            unsent = null
+            state.copy(view = view)
+        } else {
+            state
+        }
     }
 
     private fun feedback(kind: Feedback) = _ui.update { it.copy(feedback = kind, feedbackId = it.feedbackId + 1) }

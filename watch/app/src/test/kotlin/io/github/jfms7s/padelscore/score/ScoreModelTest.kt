@@ -179,6 +179,74 @@ class ScoreModelTest {
     }
 
     @Test
+    fun retry_after_not_sent_reuses_the_client_id() {
+        val model = model()
+        api.result = SendResult.NotSent("timeout")
+        tap(model)
+        tap(model)
+        val (first, second) = api.requests.map { it.second }
+        assertEquals(first, second)
+        assertEquals("id-1", second.clientId)
+    }
+
+    @Test
+    fun newer_view_after_not_sent_gets_a_fresh_id() {
+        val model = model()
+        api.result = SendResult.NotSent("timeout")
+        tap(model)
+        emit(StreamItem.Frame(onePoint.copy(revision = onePoint.revision + 1)))
+        tap(model)
+        val (first, second) = api.requests.map { it.second }
+        assertEquals("id-1", first.clientId)
+        assertEquals(CommandRequest("id-2", false, onePoint.revision + 1, listOf(Command.Point(Team.A))), second)
+    }
+
+    @Test
+    fun other_team_after_not_sent_gets_a_fresh_id() {
+        val model = model()
+        api.result = SendResult.NotSent("timeout")
+        tap(model, Team.A)
+        tap(model, Team.B)
+        // The unsent A is not resent on its own, and B does not reuse its id.
+        assertEquals(
+            listOf(
+                CommandRequest("id-1", false, onePoint.revision, listOf(Command.Point(Team.A))),
+                CommandRequest("id-2", false, onePoint.revision, listOf(Command.Point(Team.B))),
+            ),
+            api.requests.map { it.second },
+        )
+        // A again after B: B was the last unsent one, so A is a new request.
+        tap(model, Team.A)
+        assertEquals("id-3", api.requests.last().second.clientId)
+    }
+
+    @Test
+    fun undo_retry_after_not_sent_reuses_the_client_id() {
+        val before = fixtureView("view-undo-before.json") // events [1, 2]
+        val model = model(before)
+        api.result = SendResult.NotSent("timeout")
+        model.undo()
+        scheduler.runCurrent()
+        model.undo()
+        scheduler.runCurrent()
+        val expected = CommandRequest("id-1", false, before.revision, listOf(Command.Undo(2)))
+        assertEquals(listOf(expected, expected), api.requests.map { it.second })
+    }
+
+    @Test
+    fun any_answer_after_a_retry_ends_the_reuse() {
+        val model = model()
+        api.result = SendResult.NotSent("timeout")
+        tap(model)
+        // The resend reaches the server, which answers without moving the revision past the shown one.
+        api.result = SendResult.Rejected(JsonPrimitive("match_over"))
+        tap(model)
+        api.result = SendResult.NotSent("timeout")
+        tap(model)
+        assertEquals(listOf("id-1", "id-1", "id-2"), api.requests.map { it.second.clientId })
+    }
+
+    @Test
     fun point_after_match_over_shows_match_over_not_not_sent() {
         val model = model()
         api.result = SendResult.Rejected(JsonPrimitive("match_over"))
