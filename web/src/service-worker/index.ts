@@ -6,6 +6,7 @@ import { version } from '$app/env';
 import { assets, immutable } from '$app/manifest';
 import { self as sw } from '$app/service-worker';
 import { noticeText, safeNoticeUrl } from '#lib/notice.ts';
+import { navigate } from '#lib/shell.ts';
 import type { NoticePayload } from '#lib/types.ts';
 
 const CACHE = `shell-${version}`;
@@ -47,10 +48,10 @@ sw.addEventListener('fetch', (event) => {
 	if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return;
 
 	if (request.mode === 'navigate') {
-		// Online, the server answers; offline, any route is the cached shell.
-		// A gateway error (502, 503, 504: a proxy with nothing behind it) counts as offline.
-		const shell = async () => (await caches.match(SHELL)) ?? Response.error();
-		event.respondWith(fetch(request).then((res) => ([502, 503, 504].includes(res.status) ? shell() : res), shell));
+		// Online, the server answers; offline, any route is the cached shell. A gateway error
+		// (502, 503, 504: a proxy with nothing behind it) or no answer within 3 seconds (a court
+		// signal that connects and then stalls) counts as offline (#lib/shell.ts).
+		event.respondWith(navigate(request, fetch, () => caches.match(SHELL)));
 		return;
 	}
 
