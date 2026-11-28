@@ -2,7 +2,8 @@
 	Owned by phase 8 (the non-stop). What the court page shows of the clock: the round and court,
 	the countdown (red in the last minute), the count-in digit with its beeps, "Paused", "Waiting
 	for the clock" and, once the slot is done, "Time's up". The court phone also sounds the horn
-	(`viewer` pages don't). Overtime is not shown here: the fence's rules line already says it.
+	(`viewer` pages don't), and says so while sound is locked until a tap. Overtime is not shown
+	here: the fence's rules line already says it.
 -->
 <script module lang="ts">
 	// Module-level, so a sound already made isn't made again when the court page swaps between
@@ -11,7 +12,7 @@
 </script>
 
 <script lang="ts">
-	import { unlockAudio } from '#lib/audio.ts';
+	import { audioContext, audioReady } from '#lib/audio.ts';
 	import {
 		clockText,
 		countInMs,
@@ -50,20 +51,28 @@
 	/** The first go hasn't happened (ready, or paused in the count-in): practice points still show. */
 	const beforeGo = $derived(clock !== null && (clock.state === 'ready' || (clock.state === 'paused' && !clock.went)));
 
+	// Sound stays locked after a reload until someone taps; the court page and the fence unlock it.
+	// Read again on every tick below.
+	let soundLocked = $state(!audioReady());
+	const showTapForSound = $derived(!viewer && clock !== null && clock.state !== 'done' && soundLocked);
+
 	// The last local time-to-zero of the slot being counted, for a slot that turns done early.
 	let lastSlot = -1;
 	let lastToEnd = 0;
 
 	$effect(() => {
 		if (viewer || clock === null) return;
-		const ctx = unlockAudio();
+		// Never unlocked here: outside a tap a browser ignores it, and the horn would be used up unheard.
+		const audible = audioReady();
+		soundLocked = !audible;
 		const synced = serverClock().synced();
 		if (clock.slot !== lastSlot) {
 			lastSlot = clock.slot;
 			lastToEnd = 0;
 		}
 		const toEnd = clock.state === 'done' ? lastToEnd : msToEnd(clock, now);
-		const due = soundsDue(clock, now, toEnd, synced, played, court.event.id);
+		const due = soundsDue(clock, now, toEnd, synced, audible, played, court.event.id);
+		const ctx = audioContext();
 		for (const kind of due.beeps) playBeep(ctx, kind === 'go');
 		if (due.horn) playHorn(ctx);
 		// Only a synced time to zero counts for a slot that turns done early.
@@ -88,6 +97,7 @@
 			{/if}
 		{/if}
 		{#if beforeGo}<p class="note">{t.practiceNote}</p>{/if}
+		{#if showTapForSound}<p class="sound" role="status">{t.tapForSound}</p>{/if}
 	</div>
 {/if}
 
@@ -120,6 +130,10 @@
 		color: var(--muted);
 		font-size: 14px;
 	}
+	.sound {
+		font-size: 14px;
+		font-weight: 600;
+	}
 	/* A landscape phone has little height: one compact row instead of a stack. */
 	@media (orientation: landscape) and (max-height: 500px) {
 		.clock {
@@ -138,7 +152,8 @@
 		}
 		.line,
 		.status,
-		.note {
+		.note,
+		.sound {
 			font-size: 14px;
 			line-height: 1.2;
 		}

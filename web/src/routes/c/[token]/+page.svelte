@@ -185,6 +185,14 @@
 
 	$effect(() => () => awake?.release());
 
+	/**
+	 * Any tap on the joined court page unlocks sound: after a reload no join tap comes, and the
+	 * banner asks for one ("Tap here to turn sound on") on screens where a tap does nothing else.
+	 */
+	function tapAnywhere() {
+		if (joined) unlockAudio();
+	}
+
 	function join() {
 		// The tap is the user gesture browsers want before playing sound or keeping the screen on.
 		unlockAudio();
@@ -248,6 +256,8 @@
 		if (!(screen === 'live' || screen === 'finished')) document.title = title;
 	});
 </script>
+
+<svelte:document onclick={tapAnywhere} />
 
 {#snippet banner()}
 	{#if court && current}

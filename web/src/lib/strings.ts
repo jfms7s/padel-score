@@ -858,6 +858,8 @@ export const strings = {
 		paused: 'Paused',
 		pausedBeforeGo: 'Paused · Waiting for the clock',
 		timeUp: 'Time’s up',
+		/** On the court phone while sound is locked (after a reload): a tap on the court page unlocks it. */
+		tapForSound: 'Tap here to turn sound on',
 		overtime: 'Overtime: the next game wins',
 		start: (slotText: string) => `Start ${slotText}`,
 		pause: 'Pause',

@@ -1,5 +1,5 @@
-// Browsers keep audio locked until the user interacts with the page. The fence unlocks it on
-// the first tap so that a later sound (the non-stop horn) can play without one.
+// Browsers keep audio locked until the user interacts with the page. The fence and the court
+// page unlock it on a tap so that a later sound (the non-stop horn) can play without one.
 
 let context: AudioContext | null = null;
 
@@ -14,5 +14,19 @@ export function unlockAudio(): AudioContext | null {
 		return context;
 	} catch {
 		return null;
+	}
+}
+
+/** The shared AudioContext if a tap has made one; never creates or resumes it. */
+export function audioContext(): AudioContext | null {
+	return context;
+}
+
+/** Whether a sound played now can be heard: the shared context exists and is running. Never throws. */
+export function audioReady(): boolean {
+	try {
+		return context?.state === 'running';
+	} catch {
+		return false;
 	}
 }

@@ -108,14 +108,64 @@ describe('server time', () => {
 		expect(c.synced()).toBe(true);
 		expect(c.now()).toBe(2000);
 		c.stop();
-		// A sync that got no sample still resolves: the phone's own time is all there is.
+		// A sync that got no sample resolves but is not synced: the phone's own time may be off.
 		const down = createServerClock(
 			async () => Promise.reject(new Error('down')),
 			() => 5
 		);
 		await down.sync();
-		expect(down.synced()).toBe(true);
+		expect(down.synced()).toBe(false);
 		down.stop();
+	});
+
+	it('server_clock_is_not_synced_until_a_sample_succeeds', async () => {
+		vi.useFakeTimers();
+		try {
+			let up = false;
+			let calls = 0;
+			const c = createServerClock(
+				async () => (calls++, up ? 7000 : Promise.reject(new Error('down'))),
+				() => 0
+			);
+			await c.sync();
+			expect(c.synced()).toBe(false);
+			// The retry comes on its own after 15 s, not 10 minutes.
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(calls).toBe(10);
+			expect(c.synced()).toBe(false);
+			up = true;
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(c.synced()).toBe(true);
+			expect(c.now()).toBe(7000);
+			// Once synced, back to the 10-minute re-sync.
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(calls).toBe(15);
+			await vi.advanceTimersByTimeAsync(10 * 60_000);
+			expect(calls).toBe(20);
+			c.stop();
+			// stop() leaves no timer running.
+			expect(vi.getTimerCount()).toBe(0);
+			await vi.advanceTimersByTimeAsync(10 * 60_000);
+			expect(calls).toBe(20);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('server_clock_stop_clears_the_retry_timer', async () => {
+		vi.useFakeTimers();
+		try {
+			const c = createServerClock(
+				async () => Promise.reject(new Error('down')),
+				() => 0
+			);
+			await c.sync();
+			expect(vi.getTimerCount()).toBe(1);
+			c.stop();
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('server_clock_survives_a_failed_sync', async () => {
@@ -216,15 +266,28 @@ describe('beeps and horn', () => {
 		const c = clock();
 		const played = { beeps: new Set<string>(), horns: new Set<string>() };
 		// 2.5 s of count-in left, and a horn due on a slot that ended just now.
-		expect(soundsDue(c, 97_500, 900_000, false, played, 'e1')).toEqual({ beeps: [], horn: false });
-		expect(soundsDue(c, 1_000_000, 0, false, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 97_500, 900_000, false, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 1_000_000, 0, false, true, played, 'e1')).toEqual({ beeps: [], horn: false });
 		expect(played.beeps.size).toBe(0);
 		expect(played.horns.size).toBe(0);
 		// Synced: each plays, once.
-		expect(soundsDue(c, 97_500, 900_000, true, played, 'e1')).toEqual({ beeps: ['beep'], horn: false });
-		expect(soundsDue(c, 97_500, 900_000, true, played, 'e1')).toEqual({ beeps: [], horn: false });
-		expect(soundsDue(c, 1_000_000, 0, true, played, 'e1')).toEqual({ beeps: [], horn: true });
-		expect(soundsDue(c, 1_000_000, 0, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 97_500, 900_000, true, true, played, 'e1')).toEqual({ beeps: ['beep'], horn: false });
+		expect(soundsDue(c, 97_500, 900_000, true, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 1_000_000, 0, true, true, played, 'e1')).toEqual({ beeps: [], horn: true });
+		expect(soundsDue(c, 1_000_000, 0, true, true, played, 'e1')).toEqual({ beeps: [], horn: false });
+	});
+
+	it('horn_is_not_marked_played_while_audio_is_locked', () => {
+		const c = clock();
+		const played = { beeps: new Set<string>(), horns: new Set<string>() };
+		// Synced but locked: at zero, and in the count-in, nothing plays and nothing is used up.
+		expect(soundsDue(c, 1_000_000, 0, true, false, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(soundsDue(c, 97_500, 900_000, true, false, played, 'e1')).toEqual({ beeps: [], horn: false });
+		expect(played.beeps.size).toBe(0);
+		expect(played.horns.size).toBe(0);
+		// A tap 2 s after zero (inside LATE_MS): the horn still sounds, once.
+		expect(soundsDue(c, 1_002_000, -2000, true, true, played, 'e1')).toEqual({ beeps: [], horn: true });
+		expect(soundsDue(c, 1_002_250, -2250, true, true, played, 'e1')).toEqual({ beeps: [], horn: false });
 	});
 
 	it('playHorn_null_is_noop', () => {

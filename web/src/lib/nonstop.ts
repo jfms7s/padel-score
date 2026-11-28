@@ -166,17 +166,22 @@ export function bestOffset(samples: readonly TimeSample[]): number | null {
 
 const SAMPLES = 5;
 const RESYNC_MS = 10 * 60_000;
+/** How often to try again while no sample has ever succeeded. */
+const RETRY_MS = 15_000;
 const SAMPLE_TIMEOUT_MS = 3000;
 
 export interface ServerClock {
 	/** Server time in unix ms; the local time until the first sync lands. */
 	now(): number;
 	/**
-	 * Whether a sync has finished (with or without a sample). Until then `now()` is the phone's
-	 * own time, which may be off, so no beep or horn is played.
+	 * Whether at least one time sample has succeeded. Until then `now()` is the phone's own time,
+	 * which may be off, so no beep or horn is played.
 	 */
 	synced(): boolean;
-	/** Take samples and update the offset; starts the 10-minute re-sync. Never throws. */
+	/**
+	 * Take samples and update the offset; starts the re-sync (every 15 s until a sample has
+	 * succeeded, then every 10 minutes). Never throws.
+	 */
 	sync(): Promise<void>;
 	stop(): void;
 }
@@ -187,9 +192,11 @@ export function createServerClock(
 ): ServerClock {
 	let offset = 0;
 	let timer: ReturnType<typeof setInterval> | null = null;
+	/** The interval `timer` runs at, so the first success can slow it down. */
+	let every = 0;
 	let syncing: Promise<void> | null = null;
 	let again = false;
-	let done = false;
+	let sampled = false;
 
 	/** One sample, given up on after SAMPLE_TIMEOUT_MS so a hung fetch can't block later syncs. */
 	function sample(): Promise<number> {
@@ -214,11 +221,23 @@ export function createServerClock(
 			}
 		}
 		const best = bestOffset(samples);
-		if (best !== null) offset = best;
+		if (best !== null) {
+			offset = best;
+			sampled = true;
+		}
+	}
+
+	/** Run the re-sync timer at the pace for the current state (fast until the first sample). */
+	function schedule(): void {
+		const want = sampled ? RESYNC_MS : RETRY_MS;
+		if (timer !== null && every === want) return;
+		if (timer !== null) clearInterval(timer);
+		every = want;
+		timer = setInterval(() => void sync(), want);
 	}
 
 	function sync(): Promise<void> {
-		timer ??= setInterval(() => void sync(), RESYNC_MS);
+		schedule();
 		if (syncing !== null) {
 			// A sync asked for while one runs (a reconnect) measures once more afterwards.
 			again = true;
@@ -230,9 +249,10 @@ export function createServerClock(
 					again = false;
 					await measure();
 				} while (again);
-				done = true;
 			} finally {
 				syncing = null;
+				// Not after stop(): a stopped clock stays stopped.
+				if (timer !== null) schedule();
 			}
 		})();
 		return syncing;
@@ -240,7 +260,7 @@ export function createServerClock(
 
 	return {
 		now: () => now() + offset,
-		synced: () => done,
+		synced: () => sampled,
 		sync,
 		stop() {
 			if (timer !== null) clearInterval(timer);
@@ -355,18 +375,21 @@ export function markHorn(clock: Clock, played: Set<string>, eventId: string): vo
 /**
  * The beeps and horn the court phone plays now, each marked played. Nothing, and nothing
  * marked, until the server clock has `synced`: before that `serverNow` is the phone's own time,
- * and a skewed phone would sound (and so use up) a beep or the horn early. `toEnd` is as for
- * `shouldHorn`.
+ * and a skewed phone would sound (and so use up) a beep or the horn early. Likewise nothing
+ * while sound is not `audible` (no tap has unlocked it since the page loaded): a sound played
+ * then is never heard, so it stays due, and a tap within 3 s of zero still gets the horn.
+ * `toEnd` is as for `shouldHorn`.
  */
 export function soundsDue(
 	clock: Clock,
 	serverNow: number,
 	toEnd: number,
 	synced: boolean,
+	audible: boolean,
 	played: { beeps: Set<string>; horns: Set<string> },
 	eventId: string
 ): { beeps: Beep[]; horn: boolean } {
-	if (!synced) return { beeps: [], horn: false };
+	if (!synced || !audible) return { beeps: [], horn: false };
 	const beeps = beepsDue(clock, serverNow, played.beeps, eventId);
 	markBeeps(clock, serverNow, played.beeps, eventId);
 	const horn = shouldHorn(clock, toEnd, played.horns, eventId);
