@@ -16,13 +16,14 @@
 	import {
 		clockText,
 		countInMs,
+		createHornTracker,
 		isLow,
-		msToEnd,
 		nonStopCourtData,
 		playBeep,
 		playHorn,
 		remainingMs,
 		serverClock,
+		shouldHorn,
 		soundsDue
 	} from '#lib/nonstop.ts';
 	import { strings } from '#lib/strings.ts';
@@ -54,11 +55,13 @@
 	// Sound stays locked after a reload until someone taps; the court page and the fence unlock it.
 	// Read again on every tick below.
 	let soundLocked = $state(!audioReady());
-	const showTapForSound = $derived(!viewer && clock !== null && clock.state !== 'done' && soundLocked);
+	// A slot that just turned done may still owe its horn (for 3 s): keep asking for the tap.
+	let hornOwed = $state(false);
+	const showTapForSound = $derived(
+		!viewer && clock !== null && soundLocked && (clock.state !== 'done' || hornOwed)
+	);
 
-	// The last local time-to-zero of the slot being counted, for a slot that turns done early.
-	let lastSlot = -1;
-	let lastToEnd = 0;
+	const horn = createHornTracker();
 
 	$effect(() => {
 		if (viewer || clock === null) return;
@@ -66,17 +69,12 @@
 		const audible = audioReady();
 		soundLocked = !audible;
 		const synced = serverClock().synced();
-		if (clock.slot !== lastSlot) {
-			lastSlot = clock.slot;
-			lastToEnd = 0;
-		}
-		const toEnd = clock.state === 'done' ? lastToEnd : msToEnd(clock, now);
+		const toEnd = horn.toEnd(clock, now, synced);
 		const due = soundsDue(clock, now, toEnd, synced, audible, played, court.event.id);
 		const ctx = audioContext();
 		for (const kind of due.beeps) playBeep(ctx, kind === 'go');
 		if (due.horn) playHorn(ctx);
-		// Only a synced time to zero counts for a slot that turns done early.
-		if (clock.state === 'running' && synced) lastToEnd = toEnd;
+		hornOwed = clock.state === 'done' && shouldHorn(clock, toEnd, played.horns, court.event.id);
 	});
 </script>
 

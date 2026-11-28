@@ -357,15 +357,55 @@ export function markBeeps(clock: Clock, serverNow: number, played: Set<string>, 
 const hornKey = (clock: Clock, eventId: string) => `${eventId}:${clock.slot}`;
 
 /**
- * Whether to sound the horn: once per `eventId:slot`, when the clock has just reached zero
- * (`remaining` is `msToEnd(clock, serverNow)`, not the clamped `remainingMs`: 0 down to −3 s counts, a reload later
- * stays quiet), or when a frame turns the slot `done` while `remaining` (the last local value)
- * still had time on it (End now).
+ * Whether to sound the horn: once per `eventId:slot`, from the moment time is up until 3 s after
+ * (a reload later stays quiet). `remaining` is the time to that moment, negative once past it:
+ * `msToEnd(clock, serverNow)` while running, and for a slot that turned `done` what
+ * `createHornTracker` gives (it keeps counting from zero, or from an End now).
  */
 export function shouldHorn(clock: Clock, remaining: number, played: ReadonlySet<string>, eventId: string): boolean {
 	if (played.has(hornKey(clock, eventId))) return false;
-	if (clock.state === 'done') return remaining > 0;
-	return clock.state === 'running' && remaining <= 0 && remaining > -LATE_MS;
+	if (clock.state !== 'running' && clock.state !== 'done') return false;
+	return remaining <= 0 && remaining > -LATE_MS;
+}
+
+export interface HornTracker {
+	/** The `remaining` for `shouldHorn` and `soundsDue` this tick. Call it on every tick. */
+	toEnd(clock: Clock, serverNow: number, synced: boolean): number;
+}
+
+/**
+ * Follows one court's slot so the horn window survives the frame that turns it `done`. While it
+ * runs, the time to zero is `msToEnd`. Once done, it counts from the moment time was up: the
+ * deadline if a synced tick already saw it pass, or the done frame itself if time was left (the
+ * frame beat the local zero, or End now). A slot never seen running on a synced clock gives no
+ * horn (a reload after time-up).
+ */
+export function createHornTracker(): HornTracker {
+	let slot: number | null = null;
+	let endsAt: number | null = null;
+	let leftAtLastTick = 0;
+	let upAt: number | null = null;
+	return {
+		toEnd(clock, serverNow, synced) {
+			if (clock.slot !== slot) {
+				slot = clock.slot;
+				endsAt = null;
+				upAt = null;
+			}
+			if (clock.state === 'running') {
+				const toEnd = msToEnd(clock, serverNow);
+				// Only a synced time to zero counts for a slot that turns done.
+				if (synced && clock.ends_at_ms !== null) {
+					endsAt = clock.ends_at_ms;
+					leftAtLastTick = toEnd;
+				}
+				return toEnd;
+			}
+			if (clock.state !== 'done') return 0;
+			if (upAt === null && endsAt !== null) upAt = leftAtLastTick > 0 ? serverNow : endsAt;
+			return upAt === null ? Number.NEGATIVE_INFINITY : upAt - serverNow;
+		}
+	};
 }
 
 export function markHorn(clock: Clock, played: Set<string>, eventId: string): void {
