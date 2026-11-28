@@ -50,7 +50,10 @@ fn final_score_accepts_valid() {
         Ok(Some(Team::A))
     );
     assert_eq!(
-        validate_final(&full, &Sets(vec![s(7, 6), stb(6, 7, (5, 7)), s(6, 4)])),
+        validate_final(
+            &full,
+            &Sets(vec![stb(7, 6, (7, 4)), stb(6, 7, (5, 7)), s(6, 4)])
+        ),
         Ok(Some(Team::A))
     );
     assert_eq!(
@@ -388,6 +391,24 @@ fn events_for_final_needs_tiebreak_points() {
     assert_eq!(
         events_for_final(&f, &Sets(vec![s(7, 6)])),
         Err(InvalidScore::MissingTieBreak { index: 0 })
+    );
+}
+
+#[test]
+fn validate_final_needs_tiebreak_points() {
+    let f = fmt(BestOf3, FullSet);
+    let typed = Sets(vec![s(7, 6), s(6, 4)]);
+    let missing = Err(InvalidScore::MissingTieBreak { index: 0 });
+    assert_eq!(validate_final(&f, &typed), missing);
+    assert_eq!(events_for_final(&f, &typed).map(|_| None), missing);
+    // either way round, and in a later set
+    assert_eq!(
+        validate_final(&f, &Sets(vec![s(6, 7), s(4, 6)])),
+        Err(InvalidScore::MissingTieBreak { index: 0 })
+    );
+    assert_eq!(
+        validate_final(&f, &Sets(vec![s(6, 4), s(7, 6)])),
+        Err(InvalidScore::MissingTieBreak { index: 1 })
     );
 }
 

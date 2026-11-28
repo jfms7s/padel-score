@@ -42,6 +42,59 @@ fn fresh_timed_match_is_a_game_in_progress() {
 }
 
 #[test]
+fn time_up_at_love_all() {
+    // No games at all: a draw when draws are allowed ...
+    let s = play(&draws(), "t");
+    assert_eq!(s.games, [0, 0]);
+    assert_eq!(s.status, Status::Finished { winner: None });
+    assert_eq!(s.current, Current::None);
+    assert!(s.time_up);
+    assert!(!s.overtime);
+    // ... and an overtime game from love-all when they are not.
+    let s = play(&no_draws(), "t");
+    assert_eq!(s.games, [0, 0]);
+    assert_eq!(s.status, Status::InProgress);
+    assert_eq!(s.current, Current::Game(LOVE_ALL));
+    assert!(s.overtime);
+    let s = play(&no_draws(), "t aaaa");
+    assert_eq!(s.games, [1, 0]);
+    assert_eq!(
+        s.status,
+        Status::Finished {
+            winner: Some(Team::A)
+        }
+    );
+}
+
+#[test]
+fn overtime_under_star_point() {
+    let f = timed(StarPoint, false);
+    let to_overtime = "aaaa bbbb t";
+    // Second deuce: still advantage play, so one point does not win the match.
+    let s = play(&f, &format!("{to_overtime} aaabbb ab a"));
+    assert_eq!(s.status, Status::InProgress);
+    // Third deuce: the star point decides the overtime game and the match.
+    let s = play(&f, &format!("{to_overtime} aaabbb ab ab"));
+    assert_eq!(s.status, Status::InProgress);
+    assert!(matches!(
+        s.current,
+        Current::Game(GameScore {
+            deciding_point: true,
+            ..
+        })
+    ));
+    let s = play(&f, &format!("{to_overtime} aaabbb ab ab b"));
+    assert_eq!(
+        s.status,
+        Status::Finished {
+            winner: Some(Team::B)
+        }
+    );
+    assert_eq!(s.games, [1, 2]);
+    assert!(s.overtime);
+}
+
+#[test]
 fn games_accumulate_past_six() {
     let s = play(&draws(), &"aaaa".repeat(7));
     assert_eq!(s.games, [7, 0]);

@@ -139,6 +139,40 @@ fn next_set_after_tiebreak() {
 }
 
 #[test]
+fn tiebreak_server_with_other_first_server_one() {
+    // A0 serves first and B1 is B's first server, so the order is A0, B1, A1, B0.
+    let st = start(p(Team::A, 0), 1);
+    let order = serve_order(&st);
+    assert_eq!(
+        order,
+        [p(Team::A, 0), p(Team::B, 1), p(Team::A, 1), p(Team::B, 0)]
+    );
+    let at_six_all = games(6, 6);
+    // 12 games played, so the rotation is back to its first server; then x, n, n, x2, x2.
+    let expected = [order[0], order[1], order[1], order[2], order[2]];
+    for (k, want) in expected.iter().enumerate() {
+        let points = &"ababa"[..k];
+        let s = replay(&bo3(), &st, &ev(&format!("{at_six_all}{points}"))).unwrap();
+        assert!(matches!(s.current, Current::TieBreak { .. }));
+        assert_eq!(s.server, *want, "server for tie-break point {}", k + 1);
+    }
+}
+
+#[test]
+fn next_set_server_with_other_first_server_one() {
+    let st = start(p(Team::A, 0), 1);
+    let s = replay(&bo3(), &st, &ev(&format!("{}aaaaaaa", games(6, 6)))).unwrap();
+    assert_eq!(s.sets_won, [1, 0]);
+    assert_eq!(s.games, [0, 0]);
+    // The tie-break's first server was A0, so the next set opens with the player after A0: B1.
+    assert_eq!(s.server, p(Team::B, 1));
+    // And a 6-4 set (10 games) leaves the next set with the third in the order: A1.
+    let s = replay(&bo3(), &st, &ev(&games(6, 4))).unwrap();
+    assert_eq!(s.sets_won, [1, 0]);
+    assert_eq!(s.server, p(Team::A, 1));
+}
+
+#[test]
 fn super_tiebreak_uses_tiebreak_service_pattern() {
     let f = sets(GoldenPoint, BestOf3, SuperTieBreak);
     let to_deciding = format!("{}{}", games(6, 0), games(0, 6));

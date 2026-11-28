@@ -142,6 +142,19 @@ fn hand_written_vectors() -> Vec<Value> {
     // One set each, then a super tie-break to 10-8 through 8-8.
     let super_tiebreak = format!("{}{}{}aa", games(6, 0), games(0, 6), "ab".repeat(8));
 
+    // One set each, then 6-6 in the deciding full set and a tie-break to 7-5.
+    let deciding_tiebreak = format!(
+        "{}{}{}{}aa",
+        games(6, 4),
+        games(4, 6),
+        games(6, 6),
+        "ab".repeat(5)
+    );
+    let two_7_5 = format!("{}{}", games(7, 5), games(7, 5));
+    // Team B serves the set's first game, so it also serves the tie-break's first point.
+    let b_start = start_for(7);
+    let b_tiebreak = format!("{}{}bb", games(6, 6), "ab".repeat(5));
+
     vec![
         vector(
             "star-point-long-deuce",
@@ -157,22 +170,80 @@ fn hand_written_vectors() -> Vec<Value> {
         ),
         vector("tiebreak-7-5", golden, start, &tiebreak),
         vector("super-tiebreak-10-8", super_rules, start, &super_tiebreak),
+        vector(
+            "deciding-set-tiebreak",
+            rules(DeuceRule::Advantage, DecidingSet::FullSet),
+            start,
+            &deciding_tiebreak,
+        ),
+        vector(
+            "two-7-5-sets",
+            rules(DeuceRule::StarPoint, DecidingSet::FullSet),
+            start_for(3),
+            &two_7_5,
+        ),
+        vector("tiebreak-b-serves-first", golden, b_start, &b_tiebreak),
     ]
 }
 
-fn render(vectors: &[Value]) -> String {
-    let lines: Vec<String> = vectors
-        .iter()
-        .map(|v| serde_json::to_string(v).unwrap())
-        .collect();
-    format!("{{\"vectors\":[\n{}\n]}}\n", lines.join(",\n"))
+/// Rules and starts the engine refuses, so the port must refuse them too.
+fn invalid_cases() -> Vec<Value> {
+    let rules = |sets, deciding| SetRules {
+        deuce: DeuceRule::GoldenPoint,
+        sets,
+        deciding,
+    };
+    let bo3 = rules(SetsFormat::BestOf3, DecidingSet::FullSet);
+    let start = start_for(0);
+    let first_server_index_2 = Start {
+        first_server: Player {
+            team: Team::B,
+            index: 2,
+        },
+        ..start
+    };
+    let other_first_server_2 = Start {
+        other_first_server: 2,
+        ..start
+    };
+    [
+        (
+            "one-set-super-tiebreak",
+            rules(SetsFormat::One, DecidingSet::SuperTieBreak),
+            start,
+        ),
+        ("first-server-index-2", bo3, first_server_index_2),
+        ("other-first-server-2", bo3, other_first_server_2),
+    ]
+    .into_iter()
+    .map(|(name, rules, start)| {
+        let error = MatchState::new(Format::Sets(rules), start).err();
+        assert!(error.is_some(), "{name}: the engine accepts it");
+        json!({ "name": name, "rules": rules, "start": start, "error": error })
+    })
+    .collect()
+}
+
+fn render(vectors: &[Value], invalid: &[Value]) -> String {
+    let lines = |values: &[Value]| {
+        values
+            .iter()
+            .map(|v| serde_json::to_string(v).unwrap())
+            .collect::<Vec<_>>()
+            .join(",\n")
+    };
+    format!(
+        "{{\"vectors\":[\n{}\n],\n\"invalid\":[\n{}\n]}}\n",
+        lines(vectors),
+        lines(invalid)
+    )
 }
 
 fn build() -> String {
     let all = |with_lopsided_one_set| {
         let mut vectors = random_vectors(with_lopsided_one_set);
         vectors.extend(hand_written_vectors());
-        render(&vectors)
+        render(&vectors, &invalid_cases())
     };
     let text = all(true);
     if text.len() < MAX_FILE_BYTES {

@@ -241,8 +241,11 @@ impl TimedMatch {
         *g = g.saturating_add(1);
         let [a, b] = self.games;
         // The whole match is one "set" for the change-of-ends rule.
-        self.rotation = self.rotation.wrapping_add(1) % 4;
-        self.change_ends |= ends_change_after_game(a.saturating_add(b));
+        game_finished(
+            &mut self.rotation,
+            &mut self.change_ends,
+            a.saturating_add(b),
+        );
         if self.overtime {
             self.finish(Some(w));
         } else {
@@ -368,7 +371,7 @@ impl SetsMatch {
                 if let Some(w) = won {
                     if super_tiebreak {
                         // A super tie-break is its set's only game.
-                        self.game_finished(1);
+                        game_finished(&mut self.rotation, &mut self.change_ends, 1);
                         let (a, b) = match w {
                             Team::A => (1, 0),
                             Team::B => (0, 1),
@@ -395,7 +398,11 @@ impl SetsMatch {
         let g = slot(&mut self.games, w);
         *g = g.saturating_add(1);
         let [a, b] = self.games;
-        self.game_finished(u16::from(a).saturating_add(u16::from(b)));
+        game_finished(
+            &mut self.rotation,
+            &mut self.change_ends,
+            u16::from(a).saturating_add(u16::from(b)),
+        );
         if let Some(set_winner) = set_won(a, b) {
             self.set_won(set_winner, SetScore { a, b, tiebreak });
         } else if a == SET_GAMES && b == SET_GAMES {
@@ -406,14 +413,6 @@ impl SetsMatch {
         } else {
             self.unit = Unit::Game(Game::new(self.rules.deuce));
         }
-    }
-
-    /// A game (or tie-break) ended with `games_in_set` games now played in its set:
-    /// pass service to the next player in rotation and apply the change-of-ends rule.
-    /// After a tie-break that player is the one after the tie-break's first server.
-    fn game_finished(&mut self, games_in_set: u16) {
-        self.rotation = self.rotation.wrapping_add(1) % 4;
-        self.change_ends |= ends_change_after_game(games_in_set);
     }
 
     fn set_won(&mut self, w: Team, set: SetScore) {
@@ -509,6 +508,15 @@ fn slot<T>(pair: &mut [T; 2], team: Team) -> &mut T {
         Team::A => a,
         Team::B => b,
     }
+}
+
+/// A game (or tie-break) ended with `games_in_set` games now played in its set (in a timed
+/// match, the whole match is the set): pass service to the next player in `rotation` and apply
+/// the change-of-ends rule. After a tie-break that player is the one after the tie-break's first
+/// server.
+fn game_finished(rotation: &mut u16, change_ends: &mut bool, games_in_set: u16) {
+    *rotation = rotation.wrapping_add(1) % 4;
+    *change_ends |= ends_change_after_game(games_in_set);
 }
 
 #[cfg(test)]
