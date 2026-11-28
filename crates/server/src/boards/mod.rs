@@ -637,8 +637,46 @@ pub(crate) async fn settle_in(
             }
         }
     }
-    queue_in(tx, &notices, now).await?;
+    queue_in(tx, &collapse_formed(notices), now).await?;
     Ok(())
+}
+
+/// Collapse the `GameFormed` notices of one settle to one per user: a user told about several
+/// games keeps the notice of the earliest one, with `count` set to how many it stands for. A
+/// user with one game keeps it untouched, other kinds pass through, and the order is kept (each
+/// user's collapsed notice sits where their first one was).
+fn collapse_formed(notices: Vec<Notice>) -> Vec<Notice> {
+    let mut out: Vec<Notice> = Vec::with_capacity(notices.len());
+    // user id -> (index in `out`, games collapsed into it)
+    let mut formed: HashMap<String, (usize, u32)> = HashMap::new();
+    for notice in notices {
+        if notice.payload.kind != NoticeKind::GameFormed {
+            out.push(notice);
+            continue;
+        }
+        match formed.get_mut(&notice.user_id) {
+            Some((at, count)) => {
+                *count = count.saturating_add(1);
+                if let Some(kept) = out.get_mut(*at)
+                    && notice.payload.start < kept.payload.start
+                {
+                    *kept = notice;
+                }
+            }
+            None => {
+                formed.insert(notice.user_id.clone(), (out.len(), 1));
+                out.push(notice);
+            }
+        }
+    }
+    for (at, count) in formed.into_values() {
+        if count > 1
+            && let Some(kept) = out.get_mut(at)
+        {
+            kept.payload.count = Some(count);
+        }
+    }
+    out
 }
 
 /// The board as `viewer` sees it. Reads only.
@@ -1164,5 +1202,76 @@ mod order_tests {
             vec![early_a.clone(), fill.clone(), early_b.clone(), late.clone()]
         );
         assert_eq!(b, vec![early_a, early_b, late, fill]);
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+mod collapse_tests {
+    use super::*;
+
+    fn notice(user: &str, kind: NoticeKind, start: i64) -> Notice {
+        Notice {
+            user_id: user.to_owned(),
+            payload: Payload {
+                kind,
+                url: "/b/t".to_owned(),
+                start: Some(start),
+                end: Some(start + 3600),
+                ..Payload::default()
+            },
+            dedupe: None,
+        }
+    }
+
+    fn summary(notices: &[Notice]) -> Vec<(&str, NoticeKind, Option<i64>, Option<u32>)> {
+        notices
+            .iter()
+            .map(|n| {
+                (
+                    n.user_id.as_str(),
+                    n.payload.kind,
+                    n.payload.start,
+                    n.payload.count,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn formed_notices_collapse_to_the_earliest_per_user_with_a_count() {
+        let out = collapse_formed(vec![
+            notice("a", NoticeKind::GameFormed, 300),
+            notice("b", NoticeKind::GameFormed, 300),
+            notice("c", NoticeKind::MovedIn, 50),
+            notice("a", NoticeKind::GameFormed, 100),
+            notice("c", NoticeKind::MovedIn, 60),
+            notice("a", NoticeKind::MovedIn, 400),
+            notice("a", NoticeKind::GameFormed, 200),
+        ]);
+        assert_eq!(
+            summary(&out),
+            vec![
+                ("a", NoticeKind::GameFormed, Some(100), Some(3)),
+                ("b", NoticeKind::GameFormed, Some(300), None),
+                ("c", NoticeKind::MovedIn, Some(50), None),
+                ("c", NoticeKind::MovedIn, Some(60), None),
+                ("a", NoticeKind::MovedIn, Some(400), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_single_formed_notice_is_untouched() {
+        let out = collapse_formed(vec![notice("a", NoticeKind::GameFormed, 100)]);
+        assert_eq!(
+            summary(&out),
+            vec![("a", NoticeKind::GameFormed, Some(100), None)]
+        );
     }
 }

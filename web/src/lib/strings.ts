@@ -983,6 +983,8 @@ export const strings = {
 			body: "You'll get game and event updates on this device."
 		},
 		gameFormed: 'Game formed',
+		gamesFormed: (n: number) => `${n} games formed`,
+		firstGame: (when: string) => `First: ${when}`,
 		movedIn: "You're in a game",
 		playerLeft: (name: string | undefined) => `${name ?? 'Someone'} left your game`,
 		boardDeleted: 'Board deleted',

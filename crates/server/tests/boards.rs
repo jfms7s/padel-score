@@ -353,6 +353,44 @@ async fn four_overlapping_ranges_form_a_game_and_queue_four_notices() {
         assert_eq!(p["title"], "Thursday padel");
         assert_eq!(p["start"], START);
         assert_eq!(p["end"], START + HOUR);
+        assert!(p.get("count").is_none(), "a single game has no count: {p}");
+    }
+}
+
+#[tokio::test]
+async fn one_write_forming_many_games_queues_one_notice_per_player() {
+    let (s, pool) = setup().await;
+    let a = user(&s, "Ana").await;
+    let b = user(&s, "Rui").await;
+    let c = user(&s, "Marta").await;
+    let d = user(&s, "Joana").await;
+    let token = board(&s, &a).await;
+    // Three separate one-hour slots, two hours apart.
+    let slots = [START, START + 2 * HOUR, START + 4 * HOUR];
+    let mut now = T0;
+    for who in [&a, &b, &c] {
+        for slot in slots {
+            now += 1;
+            s.add_free(&token, who, slot, slot + HOUR, now)
+                .await
+                .unwrap();
+        }
+    }
+    assert!(outbox(&pool).await.is_empty());
+    // The fourth paints all three slots in one write.
+    let view = s
+        .add_free(&token, &d, START, START + 5 * HOUR, now + 1)
+        .await
+        .unwrap();
+    assert_eq!(view.games.len(), 3);
+
+    let rows = outbox(&pool).await;
+    assert_eq!(rows.len(), 4, "one notice per player: {rows:?}");
+    assert_eq!(kinds(&rows, "game_formed"), sorted(&[&a, &b, &c, &d]));
+    for (_, p) in &rows {
+        assert_eq!(p["count"], 3);
+        assert_eq!(p["start"], START);
+        assert_eq!(p["end"], START + HOUR);
     }
 }
 
