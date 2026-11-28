@@ -10,7 +10,7 @@ mod support;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use padel_score_server::retention::{ANON_RETENTION_SECS, purge_inactive, purge_once};
+use padel_score_server::retention::{RETENTION_SECS, purge_inactive, purge_once};
 use padel_score_server::store::{EventState, NewMatch, Store, Teams, append};
 use padel_score_server::{AppState, Config, db};
 use padel_scoring::{
@@ -82,8 +82,8 @@ async fn purges_only_old_anonymous_matches() {
 #[tokio::test]
 async fn exactly_thirty_days_idle_is_kept() {
     let (store, _) = setup().await;
-    let edge = idle_match(&store, ANON_RETENTION_SECS).await;
-    let past = idle_match(&store, ANON_RETENTION_SECS + 1).await;
+    let edge = idle_match(&store, RETENTION_SECS).await;
+    let past = idle_match(&store, RETENTION_SECS + 1).await;
     let purged = purge_inactive(&store, NOW).await.unwrap();
     assert_eq!(purged, vec![past.id.clone()]);
     assert!(exists(&store, &edge).await);
@@ -223,4 +223,251 @@ async fn retention_purges_expired_auth_but_keeps_owned_matches() {
             .unwrap();
         assert_eq!((table, old, live), (table, 0, 1));
     }
+}
+
+async fn count(pool: &SqlitePool, sql: &'static str, id: &str) -> i64 {
+    sqlx::query_scalar(sql)
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn add_result(pool: &SqlitePool, match_id: &str) {
+    sqlx::query(
+        "INSERT INTO command_results (match_id, client_id, status, body) VALUES (?, 'c1', 200, '{}')",
+    )
+    .bind(match_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn results_of(pool: &SqlitePool, match_id: &str) -> i64 {
+    count(
+        pool,
+        "SELECT COUNT(*) FROM command_results WHERE match_id = ?",
+        match_id,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn stale_command_results_are_purged_recent_kept() {
+    let (state, pool, _, admin_id, _) = support::with_admin().await;
+    let mut owned = Vec::new();
+    for idle in [31 * DAY, RETENTION_SECS, DAY] {
+        let m = idle_match(&state.store, idle).await;
+        sqlx::query("UPDATE matches SET owner_user_id = ? WHERE id = ?")
+            .bind(&admin_id)
+            .bind(&m.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        add_result(&pool, &m.id).await;
+        owned.push(m);
+    }
+    assert_eq!(purge_once(&state, NOW).await, 0);
+    let [old, edge, recent] = owned.as_slice() else {
+        unreachable!()
+    };
+    assert_eq!(results_of(&pool, &old.id).await, 0);
+    assert_eq!(
+        results_of(&pool, &edge.id).await,
+        1,
+        "exactly 30 days is kept"
+    );
+    assert_eq!(results_of(&pool, &recent.id).await, 1);
+    for m in &owned {
+        assert!(exists(&state.store, m).await);
+        assert_eq!(state.store.events(&m.id).await.unwrap().len(), 1);
+    }
+}
+
+/// A board that ended `ended` seconds before `NOW`, with a member, a range, a guest, a played
+/// game (pointing at `match_id`, if any), its players, a line head and a request. Returns the board id.
+async fn ended_board(
+    pool: &SqlitePool,
+    creator: &str,
+    ended: i64,
+    match_id: Option<&str>,
+) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    let game = format!("{id}-g1");
+    let guest = format!("guest_{id}");
+    let ends = NOW - ended;
+    let starts = ends - 7 * DAY;
+    let stmts: [(&str, Vec<String>); 9] = [
+        (
+            "INSERT INTO boards (id, token, creator_user_id, title, place, time_zone, starts_at, \
+             ends_at, created_at, allow_guests) VALUES (?1, ?1, ?2, 'Week', NULL, 'UTC', ?3, ?4, ?3, 1)",
+            vec![
+                id.clone(),
+                creator.into(),
+                starts.to_string(),
+                ends.to_string(),
+            ],
+        ),
+        (
+            "INSERT INTO board_members (board_id, user_id, joined_at) VALUES (?1, ?2, ?3)",
+            vec![id.clone(), creator.into(), starts.to_string()],
+        ),
+        (
+            "INSERT INTO board_ranges (id, board_id, user_id, starts_at, ends_at, created_at) \
+             VALUES (?1 || '-r1', ?1, ?2, ?3, ?3 + 3600, ?3)",
+            vec![id.clone(), creator.into(), starts.to_string()],
+        ),
+        (
+            "INSERT INTO board_guests (id, board_id, name, name_key, created_at) \
+             VALUES (?2, ?1, 'Gil', 'gil', ?3)",
+            vec![id.clone(), guest.clone(), starts.to_string()],
+        ),
+        (
+            "INSERT INTO board_guest_keys (key_hash, guest_id, created_at) VALUES (?1, ?2, ?3)",
+            vec![format!("{id}-key"), guest.clone(), starts.to_string()],
+        ),
+        (
+            "INSERT INTO board_games (id, board_id, starts_at, ends_at, formed_at, match_id, played_at) \
+             VALUES (?1, ?2, ?3, ?3 + 5400, ?3, NULLIF(?4, ''), ?3)",
+            vec![
+                game.clone(),
+                id.clone(),
+                starts.to_string(),
+                match_id.unwrap_or_default().to_owned(),
+            ],
+        ),
+        (
+            "INSERT INTO board_game_players (game_id, user_id, seat, joined_at) VALUES (?1, ?2, 0, ?3)",
+            vec![game.clone(), creator.into(), starts.to_string()],
+        ),
+        (
+            "INSERT INTO board_line_heads (game_id, user_id, at) VALUES (?1, ?2, ?3)",
+            vec![game.clone(), guest.clone(), starts.to_string()],
+        ),
+        (
+            "INSERT INTO board_requests (id, board_id, kind, from_user_id, game_id, game_version, \
+             to_user_id, created_at) VALUES (?1 || '-q1', ?1, 'swap', ?2, ?3, 0, ?4, ?5)",
+            vec![
+                id.clone(),
+                creator.into(),
+                game.clone(),
+                guest.clone(),
+                starts.to_string(),
+            ],
+        ),
+    ];
+    for (sql, binds) in stmts {
+        let mut q = sqlx::query(sql);
+        for b in binds {
+            q = q.bind(b);
+        }
+        q.execute(pool).await.unwrap();
+    }
+    id
+}
+
+const BOARD_TABLES: [&str; 6] = [
+    "SELECT COUNT(*) FROM boards WHERE id = ?",
+    "SELECT COUNT(*) FROM board_members WHERE board_id = ?",
+    "SELECT COUNT(*) FROM board_ranges WHERE board_id = ?",
+    "SELECT COUNT(*) FROM board_guests WHERE board_id = ?",
+    "SELECT COUNT(*) FROM board_games WHERE board_id = ?",
+    "SELECT COUNT(*) FROM board_requests WHERE board_id = ?",
+];
+
+async fn board_rows(pool: &SqlitePool, id: &str) -> Vec<i64> {
+    let mut out = Vec::new();
+    for sql in BOARD_TABLES {
+        out.push(count(pool, sql, id).await);
+    }
+    for sql in [
+        "SELECT COUNT(*) FROM board_game_players WHERE game_id = ? || '-g1'",
+        "SELECT COUNT(*) FROM board_line_heads WHERE game_id = ? || '-g1'",
+        "SELECT COUNT(*) FROM board_guest_keys WHERE guest_id = 'guest_' || ?",
+    ] {
+        out.push(count(pool, sql, id).await);
+    }
+    out
+}
+
+#[tokio::test]
+async fn boards_ended_long_ago_are_purged() {
+    let (state, pool, _, admin_id, _) = support::with_admin().await;
+    let old = ended_board(&pool, &admin_id, 31 * DAY, None).await;
+    let edge = ended_board(&pool, &admin_id, RETENTION_SECS, None).await;
+    let recent = ended_board(&pool, &admin_id, DAY, None).await;
+    assert_eq!(board_rows(&pool, &old).await, vec![1; 9]);
+    purge_once(&state, NOW).await;
+    assert_eq!(board_rows(&pool, &old).await, vec![0; 9]);
+    assert_eq!(
+        board_rows(&pool, &edge).await,
+        vec![1; 9],
+        "exactly 30 days is kept"
+    );
+    assert_eq!(board_rows(&pool, &recent).await, vec![1; 9]);
+    let broken: Vec<(String,)> = sqlx::query_as("SELECT \"table\" FROM pragma_foreign_key_check")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert!(broken.is_empty(), "{broken:?}");
+}
+
+#[tokio::test]
+async fn a_match_started_from_a_purged_board_survives() {
+    let (state, pool, _, admin_id, _) = support::with_admin().await;
+    let m = idle_match(&state.store, DAY).await;
+    sqlx::query("UPDATE matches SET owner_user_id = ? WHERE id = ?")
+        .bind(&admin_id)
+        .bind(&m.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let board = ended_board(&pool, &admin_id, 31 * DAY, Some(&m.id)).await;
+    purge_once(&state, NOW).await;
+    assert_eq!(board_rows(&pool, &board).await, vec![0; 9]);
+    assert!(exists(&state.store, &m).await);
+    assert_eq!(state.store.events(&m.id).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn the_non_stop_runners_time_up_results_are_kept() {
+    let (state, pool, _, _, _) = support::with_admin().await;
+    let m = idle_match(&state.store, 31 * DAY).await;
+    sqlx::query("UPDATE matches SET owner_user_id = 'u1' WHERE id = ?")
+        .bind(&m.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    add_result(&pool, &m.id).await;
+    sqlx::query(
+        "INSERT INTO command_results (match_id, client_id, status, body) \
+         VALUES (?1, 'time_up:' || ?1 || ':1', 200, '{}')",
+    )
+    .bind(&m.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    purge_once(&state, NOW).await;
+    let kept: Vec<(String,)> =
+        sqlx::query_as("SELECT client_id FROM command_results WHERE match_id = ?")
+            .bind(&m.id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kept, vec![(format!("time_up:{}:1", m.id),)]);
+}
+
+#[tokio::test]
+async fn a_failed_purge_does_not_stop_the_others() {
+    let (state, pool, _, admin_id, _) = support::with_admin().await;
+    let anon = idle_match(&state.store, 31 * DAY).await;
+    let board = ended_board(&pool, &admin_id, 31 * DAY, None).await;
+    // The command results purge (between the two) now fails.
+    sqlx::query("DROP TABLE command_results")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(purge_once(&state, NOW).await, 1);
+    assert!(!exists(&state.store, &anon).await);
+    assert_eq!(count(&pool, BOARD_TABLES[0], &board).await, 0);
 }

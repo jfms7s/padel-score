@@ -783,6 +783,28 @@ async fn leave_board_in(
 }
 
 impl Store {
+    /// How many boards [`Store::purge_boards_ended_before`] would delete.
+    pub async fn count_boards_ended_before(&self, cutoff: i64) -> Result<i64, StoreError> {
+        Ok(
+            sqlx::query_scalar("SELECT COUNT(*) FROM boards WHERE ends_at < ?")
+                .bind(cutoff)
+                .fetch_one(self.pool())
+                .await?,
+        )
+    }
+
+    /// Delete the boards that ended before `cutoff`, with everything on them: every board table
+    /// references `boards` or `board_games` with `ON DELETE CASCADE`. A match started from one of
+    /// their games stays (`board_games.match_id` is `ON DELETE SET NULL` the other way round).
+    /// Returns how many boards went.
+    pub async fn purge_boards_ended_before(&self, cutoff: i64) -> Result<u64, StoreError> {
+        Ok(sqlx::query("DELETE FROM boards WHERE ends_at < ?")
+            .bind(cutoff)
+            .execute(self.pool())
+            .await?
+            .rows_affected())
+    }
+
     pub async fn create_board(
         &self,
         creator: &str,
