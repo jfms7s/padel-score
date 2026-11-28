@@ -421,14 +421,7 @@ pub(crate) async fn load_state_in(
     .fetch_all(&mut *conn)
     .await?;
 
-    let holds: Vec<(String, String, i64, i64)> = sqlx::query_as(
-        "SELECT h.game_id, h.user_id, h.starts_at, h.ends_at FROM board_game_holds h \
-         JOIN board_games g ON g.id = h.game_id WHERE g.board_id = ? \
-         ORDER BY h.game_id, h.user_id, h.starts_at, h.ends_at",
-    )
-    .bind(board_id)
-    .fetch_all(&mut *conn)
-    .await?;
+    let holds = load_holds_in(conn, board_id).await?;
 
     let mut players: HashMap<String, Vec<String>> = HashMap::new();
     for (game, user) in seats {
@@ -468,16 +461,32 @@ pub(crate) async fn load_state_in(
                 formed_at,
             })
             .collect(),
-        holds: holds
-            .into_iter()
-            .map(|(game_id, user_id, start, end)| Hold {
-                game_id,
-                user_id,
-                start,
-                end,
-            })
-            .collect(),
+        holds,
     })
+}
+
+/// The board's holds: the times moved games left, per player (see `BoardState::busy`).
+async fn load_holds_in(
+    conn: &mut SqliteConnection,
+    board_id: &str,
+) -> Result<Vec<Hold>, StoreError> {
+    let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(
+        "SELECT h.game_id, h.user_id, h.starts_at, h.ends_at FROM board_game_holds h \
+         JOIN board_games g ON g.id = h.game_id WHERE g.board_id = ? \
+         ORDER BY h.game_id, h.user_id, h.starts_at, h.ends_at",
+    )
+    .bind(board_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(game_id, user_id, start, end)| Hold {
+            game_id,
+            user_id,
+            start,
+            end,
+        })
+        .collect())
 }
 
 /// The games one write forms get stored (so listed, since rows tie on `formed_at`) by start, then
