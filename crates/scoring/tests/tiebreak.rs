@@ -36,6 +36,16 @@ fn seven_love_wins() {
 }
 
 #[test]
+fn points_after_a_b_win_do_not_change_tiebreak() {
+    let (mut tb, w) = play(TIEBREAK_TO, "bbbbbbb");
+    assert_eq!(w, Some(Team::B));
+    assert_eq!(tb.point(Team::A), Some(Team::B));
+    assert_eq!(tb.point(Team::B), Some(Team::B));
+    assert_eq!(tb.points(), (0, 7));
+    assert_eq!(tb.points_played(), 7);
+}
+
+#[test]
 fn needs_two_clear() {
     let (_, w) = play(TIEBREAK_TO, "aaaaaabbbbbb");
     assert_eq!(w, None);
