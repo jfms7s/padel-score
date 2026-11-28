@@ -330,7 +330,8 @@ const stored: Check = (v) =>
 	nul(baseShape)(v.base) &&
 	nul((o) => obj(o) && (o.kind === 'batch' || o.kind === 'replace') && int(o.count) && request(o.req))(v.outstanding);
 
-type Loaded = { kind: 'none' } | { kind: 'ok'; value: Stored } | { kind: 'discarded' };
+/** What was stored for a token; `raw` is the string as read. */
+type Loaded = { kind: 'none' } | { kind: 'ok'; value: Stored; raw: string } | { kind: 'discarded'; raw: string };
 
 function load(storage: StorageLike, key: string): Loaded {
 	let raw: string | null;
@@ -342,11 +343,11 @@ function load(storage: StorageLike, key: string): Loaded {
 	if (raw === null) return { kind: 'none' };
 	try {
 		const value: unknown = JSON.parse(raw);
-		if (stored(value)) return { kind: 'ok', value: value as Stored };
+		if (stored(value)) return { kind: 'ok', value: value as Stored, raw };
 	} catch {
 		// Unreadable: discarded below.
 	}
-	return { kind: 'discarded' };
+	return { kind: 'discarded', raw };
 }
 
 /**
@@ -411,6 +412,11 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 	const now = () => (host.now ? host.now() : performance.now());
 
 	const loaded = load(storage, key);
+	/**
+	 * The stored string this queue last read or wrote. Another tab on the same token shares the
+	 * key: a queue removes only what it put there (or found there), never that tab's taps.
+	 */
+	let ours: string | null = loaded.kind === 'none' ? null : loaded.raw;
 	if (loaded.kind === 'ok') {
 		const s = loaded.value;
 		const byId = new Map<number, Job>();
@@ -439,7 +445,12 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 
 	function forget() {
 		try {
+			const current = storage.getItem(key);
+			// Someone else's taps (another tab's): theirs to keep. Two tabs that both hold taps
+			// stay last-writer-wins; only an idle queue holds back.
+			if (current !== null && current !== ours) return;
 			storage.removeItem(key);
+			ours = null;
 		} catch {
 			// Nothing to keep anyway.
 		}
@@ -466,7 +477,9 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 			outstanding
 		};
 		try {
-			storage.setItem(key, JSON.stringify(s));
+			const raw = JSON.stringify(s);
+			storage.setItem(key, raw);
+			ours = raw;
 		} catch {
 			// A full or blocked store: the queue still lives as long as the page.
 		}
@@ -954,8 +967,13 @@ export function createQueue(token: string, storage: StorageLike, api: QueueApi, 
 		void pump();
 	}
 
-	// Taps left from before a reload go now.
-	if (loaded.kind === 'ok') void pump();
+	// Taps left from before a reload go now, but not inside this call: a page that creates the
+	// queue in an effect would otherwise take whatever pump reads (host.view()) as one of the
+	// effect's dependencies, and rebuild the queue on every new view.
+	if (loaded.kind === 'ok')
+		queueMicrotask(() => {
+			if (!stopped) void pump();
+		});
 
 	return {
 		point,

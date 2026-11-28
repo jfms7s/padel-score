@@ -7,7 +7,7 @@
 	// (the next match). A new `token`
 	// starts over: a fresh load, stream and queue, keyed by token, so an old match's taps never
 	// go to the new one.
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { ApiError, getScore, postCommands, replace, streamUrl } from '#lib/api.ts';
 	import { unlockAudio } from '#lib/audio.ts';
 	import { engineReady, initEngine, replayLocal } from '#lib/engine.ts';
@@ -25,7 +25,7 @@
 	} from '#lib/fence.ts';
 	import { createQueue, localView, type Dropped, type Problem, type Queue, type QueueState } from '#lib/queue.ts';
 	import { loadView, saveView } from '#lib/lastview.ts';
-	import { matchLabel, recentSpectator } from '#lib/setup.ts';
+	import { matchLabel, recentSpectator, removeRecent } from '#lib/setup.ts';
 	import { safeStorage } from '#lib/storage.ts';
 	import { openStream, type StreamStatus } from '#lib/stream.ts';
 	import { strings } from '#lib/strings.ts';
@@ -192,24 +192,34 @@
 					}
 					return;
 				}
-				loadError = e instanceof ApiError && e.code === 'not_found' ? f.notFound : f.loadFailed;
+				const gone = e instanceof ApiError && e.code === 'not_found';
+				// This match is no more: it leaves this device's recent list (a retryable failure
+				// keeps it, above).
+				if (gone) removeRecent(safeStorage(), t);
+				loadError = gone ? f.notFound : f.loadFailed;
 				s.close();
 			}
 		);
-		const q = createQueue(t, safeStorage(), { post: postCommands, replace }, replayLocal, {
-			view: () => view,
-			newClientId: () => newClientId(),
-			setTimeout: (fn, ms) => setTimeout(fn, ms),
-			clearTimeout: (id) => clearTimeout(id),
-			onView: (v) => live && accept(v),
-			onDropped: (d) => live && dropped(d),
-			onState: (st) => {
-				if (live) sending = st;
-			}
-		});
+		// Untracked: nothing the queue reads while it starts (the view, say) may become a
+		// dependency of this effect, or every new view would tear the queue down and rebuild it.
+		const q = untrack(() =>
+			createQueue(t, safeStorage(), { post: postCommands, replace }, replayLocal, {
+				view: () => view,
+				newClientId: () => newClientId(),
+				setTimeout: (fn, ms) => setTimeout(fn, ms),
+				clearTimeout: (id) => clearTimeout(id),
+				onView: (v) => live && accept(v),
+				onDropped: (d) => live && dropped(d),
+				onState: (st) => {
+					if (live) sending = st;
+				}
+			})
+		);
 		sender = q;
-		sending = q.state();
-		if (q.discardedOnLoad) say(strings.queue.lost);
+		untrack(() => {
+			sending = q.state();
+			if (q.discardedOnLoad) say(strings.queue.lost);
+		});
 		const online = () => q.reconnect();
 		const offline = () => q.connection('offline');
 		addEventListener('online', online);
