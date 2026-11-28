@@ -357,6 +357,8 @@ describe('offline queue', () => {
 		await tick();
 		expect(r.sent).toEqual(h.sent);
 		expect(r.queue.state().pending).toEqual([]);
+		// The reloaded queue owns what it loaded: once the tap lands, it is cleared from the store.
+		expect(storage.getItem(KEY)).toBeNull();
 	});
 
 	it('a conflict before reload asks again after it', async () => {
@@ -629,6 +631,53 @@ describe('review fixes, round 2', () => {
 		const r = harness([hang], { view: seen, storage });
 		expect(r.queue.discardedOnLoad).toBe(false);
 		expect(r.queue.state()).toMatchObject({ offline: false, pending: [{ sent: true }] });
+	});
+});
+
+describe('two tabs on one scorer token', () => {
+	it('an_idle_queue_does_not_delete_another_queues_stored_taps', async () => {
+		const storage = new MemoryStorage();
+		const a = harness([], { view: seen, storage });
+		const b = harness([], { view: seen, storage, idsFrom: 50 });
+		b.queue.connection('offline');
+		b.queue.point('a');
+		b.queue.point('b');
+		const mine = storage.getItem(KEY);
+		expect(JSON.parse(mine ?? 'null').queued).toHaveLength(2);
+		// The idle tab sees its stream drop and come back: it has nothing of its own to keep.
+		a.queue.connection('offline');
+		a.queue.connection('live');
+		a.queue.reconnect();
+		await tick();
+		expect(a.queue.state().unsaved).toBe(false);
+		expect(storage.getItem(KEY)).toBe(mine);
+	});
+
+	it('a queue still clears what it stored itself once it is sent', async () => {
+		const storage = new MemoryStorage();
+		const h = offlineWith(['a'], [applied(grow(seen, ['a']))], { storage });
+		expect(storage.getItem(KEY)).not.toBeNull();
+		h.queue.connection('live');
+		await tick();
+		expect(storage.getItem(KEY)).toBeNull();
+	});
+
+	it('a reloaded queue clears the taps it loaded once they are sent', async () => {
+		const storage = new MemoryStorage();
+		offlineWith(['a'], [], { storage }).queue.stop();
+		const r = harness([applied(grow(seen, ['a']))], { view: seen, storage, idsFrom: 50 });
+		r.queue.connection('live');
+		await tick();
+		expect(r.sent).toHaveLength(1);
+		expect(storage.getItem(KEY)).toBeNull();
+	});
+
+	it('an unreadable stored queue is still discarded at load', () => {
+		const storage = new MemoryStorage();
+		storage.setItem(KEY, '{not json');
+		const r = harness([], { view: seen, storage });
+		expect(r.queue.discardedOnLoad).toBe(true);
+		expect(storage.getItem(KEY)).toBeNull();
 	});
 });
 
