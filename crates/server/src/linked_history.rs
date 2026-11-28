@@ -1,6 +1,8 @@
 //! A player's combined history across every coordinator: phase 5's history join with
 //! `players.linked_user_id = ?` in place of `players.id = ?`. Nothing is copied or moved; an
-//! unlink drops the entry from the next read. Who may see which entry is decided by
+//! unlink drops the entry from the next read. An automatic link (`players.link_auto = 1`) is left
+//! out until the person approves it, so a match or placing on such an entry stays out of their
+//! combined record, history and placings. Who may see which entry is decided by
 //! [`crate::privacy`], never here.
 
 use padel_scoring::Team;
@@ -93,11 +95,12 @@ pub struct LinkedPlacing {
 }
 
 /// The start of the derived table `mp` of the matches `user_id` is linked into, once per
-/// (match, side): it ends where the user id goes, then [`LINKED_MATCHES_END`].
+/// (match, side): it ends where the user id goes, then [`LINKED_MATCHES_END`]. Automatic links
+/// not yet approved are left out.
 macro_rules! linked_matches {
     () => {
         "(SELECT DISTINCT mp.match_id, mp.team FROM players p \
-          JOIN match_players mp ON mp.player_id = p.id WHERE p.linked_user_id = "
+          JOIN match_players mp ON mp.player_id = p.id WHERE p.link_auto = 0 AND p.linked_user_id = "
     };
 }
 const LINKED_MATCHES_END: &str = ") mp";
@@ -174,13 +177,14 @@ impl Store {
         }))
     }
 
-    /// The placings of the entries linked to `user_id`, newest first.
+    /// The placings of the entries linked to `user_id`, newest first; automatic links not yet
+    /// approved are left out.
     pub async fn linked_placings(&self, user_id: &str) -> Result<Vec<LinkedPlacing>, StoreError> {
         let rows = sqlx::query(
             "SELECT pl.event_id, c.name AS event_name, c.owner_user_id, pl.event_kind, pl.place, pl.place_to, \
              pl.field_size, pl.finished_at FROM placings pl JOIN players p ON p.id = pl.player_id \
              JOIN competitions c ON c.id = pl.event_id \
-             WHERE p.linked_user_id = ? ORDER BY pl.finished_at DESC, pl.event_id DESC",
+             WHERE p.link_auto = 0 AND p.linked_user_id = ? ORDER BY pl.finished_at DESC, pl.event_id DESC",
         )
         .bind(user_id)
         .fetch_all(self.pool())

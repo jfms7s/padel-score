@@ -512,3 +512,133 @@ async fn link_code_after_a_claim_settles_the_claim() {
         inbox.body
     );
 }
+
+#[tokio::test]
+async fn auto_linked_matches_stay_out_of_the_combined_history_until_approved() {
+    let w = world().await;
+    let m = w
+        .state
+        .store
+        .create_match(
+            NewMatch {
+                format: format(),
+                start: Start {
+                    first_server: Player {
+                        team: Team::A,
+                        index: 0,
+                    },
+                    other_first_server: 0,
+                },
+                teams: Teams {
+                    a: ["A1".into(), "A2".into()],
+                    b: ["B1".into(), "B2".into()],
+                },
+                owner_user_id: Some(w.ana_id.clone()),
+                players: PlayerSlots {
+                    a: [Some(w.entry.clone()), None],
+                    b: [None, None],
+                },
+            },
+            1,
+        )
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO match_results (match_id, owner_user_id, winner, score, finished_at) \
+         VALUES (?, ?, 'a', ?, 1000)",
+    )
+    .bind(&m.id)
+    .bind(&w.ana_id)
+    .bind(r#"{"sets":[],"games":[6,3],"regulation_games":[6,3],"overtime":false,"timed":false}"#)
+    .execute(&w.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO competitions (id, owner_user_id, name, kind, format, status, \
+         spectator_token, created_at, started_at, finished_at) \
+         VALUES ('ev1', ?, 'Ana''s cup', 'tournament', '{}', 'finished', 'ev1-view', 1, 1500, \
+         2500)",
+    )
+    .bind(&w.ana_id)
+    .execute(&w.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO placings (player_id, event_id, event_kind, place, place_to, field_size, \
+         finished_at) VALUES (?, 'ev1', 'tournament', 2, 2, 8, 2500)",
+    )
+    .bind(&w.entry)
+    .execute(&w.pool)
+    .await
+    .unwrap();
+
+    // Automatic: nothing reaches Rui's combined record, history or placings.
+    let s = &w.state.store;
+    let record = s.linked_record(&w.rui_id).await.unwrap();
+    assert_eq!((record.wins, record.losses), (0, 0), "{record:?}");
+    let (history, _) = s.linked_history(&w.rui_id, None, 20).await.unwrap();
+    assert!(history.is_empty(), "{history:?}");
+    assert!(s.linked_placings(&w.rui_id).await.unwrap().is_empty());
+    // Their own page too.
+    let own = w.call(&w.rui, Method::GET, "/api/me/results", None).await;
+    assert_eq!(own.status, StatusCode::OK, "{}", own.body);
+    assert_eq!(own.body["items"], json!([]));
+    assert_eq!(own.body["placings"], json!([]));
+    assert_eq!(
+        own.body["record"],
+        json!({"wins": 0, "losses": 0, "draws": 0})
+    );
+
+    // Rui accepts a link code: the mark clears and both show.
+    let made = w
+        .call(
+            &w.ana,
+            Method::POST,
+            &format!("/api/players/{}/link-code", w.entry),
+            None,
+        )
+        .await;
+    assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
+    let code = fragment_code(made.body["url"].as_str().unwrap());
+    let accepted = w
+        .call(
+            &w.rui,
+            Method::POST,
+            "/api/link-codes/accept",
+            Some(json!({ "code": code })),
+        )
+        .await;
+    assert_eq!(accepted.status, StatusCode::OK, "{}", accepted.body);
+    assert_eq!(flag(&w.pool, &w.entry).await.0, 0);
+
+    let record = s.linked_record(&w.rui_id).await.unwrap();
+    assert_eq!((record.wins, record.losses), (1, 0), "{record:?}");
+    let (history, _) = s.linked_history(&w.rui_id, None, 20).await.unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .map(|e| e.match_id.as_str())
+            .collect::<Vec<_>>(),
+        [m.id.as_str()]
+    );
+    let placings = s.linked_placings(&w.rui_id).await.unwrap();
+    assert_eq!(
+        placings
+            .iter()
+            .map(|p| p.event_id.as_str())
+            .collect::<Vec<_>>(),
+        ["ev1"]
+    );
+    let own = w.call(&w.rui, Method::GET, "/api/me/results", None).await;
+    assert_eq!(
+        own.body["items"][0]["match_id"],
+        m.id.as_str(),
+        "{}",
+        own.body
+    );
+    assert_eq!(own.body["placings"][0]["event_id"], "ev1", "{}", own.body);
+    assert_eq!(
+        own.body["record"],
+        json!({"wins": 1, "losses": 0, "draws": 0})
+    );
+}
