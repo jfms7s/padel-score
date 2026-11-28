@@ -311,6 +311,8 @@ describe('typed results and the serve choice', () => {
 			await expect(postCommands('t', REQ)).rejects.toMatchObject({ status: 422, ...SERVER_ERROR });
 			serve(422, { error: 'rejected', index: 0 });
 			await expect(postCommands('t', REQ)).rejects.toMatchObject(SERVER_ERROR);
+			serve(422, { error: 'rejected', kind: {}, index: 0 });
+			await expect(postCommands('t', REQ)).rejects.toMatchObject(SERVER_ERROR);
 		});
 
 		it('a rejected kind may be a one-key object, as ErrorKind allows', async () => {
@@ -337,6 +339,10 @@ describe('typed results and the serve choice', () => {
 			await expect(postFinal('t', FINAL)).rejects.toMatchObject({ status: 422, ...SERVER_ERROR });
 			serve(422, { error: 'invalid_score', reason: 7 });
 			await expect(postFinal('t', FINAL)).rejects.toMatchObject(SERVER_ERROR);
+			for (const reason of [{}, { impossible_set: null }, { impossible_set: { index: 0 }, extra: 1 }]) {
+				serve(422, { error: 'invalid_score', reason });
+				await expect(postFinal('t', FINAL)).rejects.toMatchObject(SERVER_ERROR);
+			}
 			const reason = { impossible_set: { index: 0 } };
 			serve(422, { error: 'invalid_score', reason });
 			await expect(postFinal('t', FINAL)).resolves.toEqual({ status: 'invalid_score', reason });

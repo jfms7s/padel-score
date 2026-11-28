@@ -1,7 +1,7 @@
 // The match API (crates/server/src/api.rs). Paths are relative: in production the same binary
 // serves the app and the API, and in dev vite proxies /api to it.
 
-import { isMatchView, isObj } from './guards';
+import { int, isMatchView, isObj, str } from './guards';
 import { loginPath } from './next';
 import { strings } from './strings';
 import type {
@@ -203,17 +203,18 @@ async function request<T>(
 ): Promise<T> {
 	const { status, body, retryAfter } = await call(path, init, timeoutMs);
 	if (status !== ok) throw failure(status, body, retryAfter);
-	if (guard && !guard(body)) throw malformed(status);
+	if (guard && !guard(body)) throw new ApiError(status, 'internal', strings.serverError(status));
 	return body as T;
 }
 
 /**
- * An answer whose body is not the shape its status promises (an old cached app against a newer
- * server, a proxy rewriting the body). It is a server error and not retryable: a resend with the
- * same client_id gets the same saved answer back, so retrying it would never end.
+ * An answer to a send whose body is not the shape its status promises (an old cached app against
+ * a newer server, a proxy rewriting the body). It is a server error and not retryable: a resend
+ * with the same client_id gets the same saved answer back, so retrying it would never end. The
+ * server may have applied the send, so the message says it may have counted.
  */
 function malformed(status: number): ApiError {
-	return new ApiError(status, 'internal', strings.serverError(status));
+	return new ApiError(status, 'internal', strings.unreadableAnswer);
 }
 
 /** `v` when it passes the (lenient) view guard, so newer servers may add keys; else a server error. */
@@ -222,8 +223,20 @@ function matchView(status: number, v: unknown): MatchView {
 	return v;
 }
 
-/** An engine error kind or refusal reason: a unit variant is a string, the others one-key objects. */
-const isVariant = (v: unknown): boolean => typeof v === 'string' || isObj(v);
+/** One key, `key`, whose value passes `check`: the externally tagged variants of ErrorKind and InvalidScore. */
+const variant = (v: unknown, key: string, check: (x: unknown) => boolean): boolean =>
+	isObj(v) && Object.keys(v).length === 1 && check(v[key]);
+const atIndex = (x: unknown) => isObj(x) && int(x.index);
+
+/** ErrorKind: a unit variant is a string (an unknown one from a newer server is allowed). */
+const isErrorKind = (v: unknown): boolean => str(v) || variant(v, 'invalid_rules', str);
+
+/** InvalidScore: a unit variant is a string, the others the one-key objects in types.ts. */
+const isInvalidScore = (v: unknown): boolean =>
+	str(v) ||
+	variant(v, 'invalid_rules', str) ||
+	variant(v, 'impossible_set', atIndex) ||
+	variant(v, 'missing_tie_break', atIndex);
 
 /**
  * A request to a route that needs no account (a court or viewing link): any status but `ok`
@@ -270,7 +283,7 @@ export async function accountRequest<T>(path: string, opts: AccountCall = {}): P
 		if (status === 401 && opts.signedIn && err.code !== 'invalid_credentials') onUnauthorized();
 		throw err;
 	}
-	if (opts.guard && !opts.guard(body)) throw malformed(status);
+	if (opts.guard && !opts.guard(body)) throw new ApiError(status, 'internal', strings.serverError(status));
 	return body as T;
 }
 
@@ -308,7 +321,7 @@ async function outcome(path: string, req: unknown): Promise<CommandOutcome> {
 	if (known) return known;
 	if (status === 422 && isObj(body) && body.error === 'rejected') {
 		const { kind, index } = body;
-		if (!isVariant(kind) || !Number.isInteger(index) || (index as number) < 0) throw malformed(status);
+		if (!isErrorKind(kind) || !int(index)) throw malformed(status);
 		return { status: 'rejected', kind: kind as ErrorKind, index: index as number };
 	}
 	throw failure(status, body);
@@ -322,7 +335,7 @@ export function finalOutcome(status: number, body: unknown): FinalOutcome | null
 	const known = viewOutcome(status, body);
 	if (known) return known;
 	if (status === 422 && isObj(body) && body.error === 'invalid_score') {
-		if (!isVariant(body.reason)) throw malformed(status);
+		if (!isInvalidScore(body.reason)) throw malformed(status);
 		return { status: 'invalid_score', reason: body.reason as InvalidScore };
 	}
 	return null;
