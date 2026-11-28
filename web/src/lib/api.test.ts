@@ -295,6 +295,81 @@ describe('typed results and the serve choice', () => {
 		expect(err).toMatchObject({ status: 409, code: 'already_started' });
 	});
 
+	describe('a malformed match answer is a server error', () => {
+		const SERVER_ERROR = { code: 'internal', retryable: false };
+		const MALFORMED = { revision: 1 };
+		const REPLACE = { client_id: 'c2', base_revision: 1, base_seq: 0, commands: [] };
+
+		it('a_malformed_command_answer_is_a_server_error', async () => {
+			serve(200, MALFORMED);
+			await expect(postCommands('t', REQ)).rejects.toMatchObject({ status: 200, ...SERVER_ERROR });
+			serve(409, { error: 'conflict', view: MALFORMED });
+			await expect(postCommands('t', REQ)).rejects.toMatchObject({ status: 409, ...SERVER_ERROR });
+			serve(409, { error: 'locked' });
+			await expect(postCommands('t', REQ)).rejects.toMatchObject(SERVER_ERROR);
+			serve(422, { error: 'rejected', kind: 'match_over' });
+			await expect(postCommands('t', REQ)).rejects.toMatchObject({ status: 422, ...SERVER_ERROR });
+			serve(422, { error: 'rejected', index: 0 });
+			await expect(postCommands('t', REQ)).rejects.toMatchObject(SERVER_ERROR);
+			serve(422, { error: 'rejected', kind: {}, index: 0 });
+			await expect(postCommands('t', REQ)).rejects.toMatchObject(SERVER_ERROR);
+		});
+
+		it('a rejected kind may be a one-key object, as ErrorKind allows', async () => {
+			const kind = { invalid_rules: 'invalid_player_index' };
+			serve(422, { error: 'rejected', kind, index: 2 });
+			await expect(postCommands('t', REQ)).resolves.toEqual({ status: 'rejected', kind, index: 2 });
+		});
+
+		it('a malformed replace answer is a server error', async () => {
+			serve(200, MALFORMED);
+			await expect(replace('t', REPLACE)).rejects.toMatchObject(SERVER_ERROR);
+			serve(409, { error: 'conflict', view: MALFORMED });
+			await expect(replace('t', REPLACE)).rejects.toMatchObject(SERVER_ERROR);
+			serve(422, { error: 'rejected', kind: 'match_over', index: -1 });
+			await expect(replace('t', REPLACE)).rejects.toMatchObject(SERVER_ERROR);
+		});
+
+		it('a malformed final answer is a server error', async () => {
+			serve(200, MALFORMED);
+			await expect(postFinal('t', FINAL)).rejects.toMatchObject(SERVER_ERROR);
+			serve(409, { error: 'locked', view: MALFORMED });
+			await expect(postFinal('t', FINAL)).rejects.toMatchObject(SERVER_ERROR);
+			serve(422, { error: 'invalid_score' });
+			await expect(postFinal('t', FINAL)).rejects.toMatchObject({ status: 422, ...SERVER_ERROR });
+			serve(422, { error: 'invalid_score', reason: 7 });
+			await expect(postFinal('t', FINAL)).rejects.toMatchObject(SERVER_ERROR);
+			for (const reason of [{}, { impossible_set: null }, { impossible_set: { index: 0 }, extra: 1 }]) {
+				serve(422, { error: 'invalid_score', reason });
+				await expect(postFinal('t', FINAL)).rejects.toMatchObject(SERVER_ERROR);
+			}
+			const reason = { impossible_set: { index: 0 } };
+			serve(422, { error: 'invalid_score', reason });
+			await expect(postFinal('t', FINAL)).resolves.toEqual({ status: 'invalid_score', reason });
+		});
+
+		it('a malformed start answer is a server error', async () => {
+			serve(200, MALFORMED);
+			await expect(putStart('t', START)).rejects.toMatchObject(SERVER_ERROR);
+			serve(409, { error: 'locked', view: MALFORMED });
+			await expect(putStart('t', START)).rejects.toMatchObject(SERVER_ERROR);
+		});
+
+		it('a_malformed_view_read_is_a_server_error', async () => {
+			serve(200, MALFORMED);
+			await expect(getScore('t')).rejects.toMatchObject({ status: 200, ...SERVER_ERROR });
+			await expect(getView('t')).rejects.toMatchObject({ status: 200, ...SERVER_ERROR });
+			serve(200, null);
+			await expect(getView('t')).rejects.toMatchObject(SERVER_ERROR);
+		});
+
+		it('a newer server may add keys to a view', async () => {
+			serve(200, { ...v, from_a_newer_server: true });
+			await expect(getScore('t')).resolves.toMatchObject({ revision: v.revision });
+			await expect(postCommands('t', REQ)).resolves.toMatchObject({ status: 'applied' });
+		});
+	});
+
 	it('courtUrl', () => {
 		expect(courtUrl('a b')).toBe('/api/court/a%20b');
 		expect(courtUrl('t', '/advance')).toBe('/api/court/t/advance');

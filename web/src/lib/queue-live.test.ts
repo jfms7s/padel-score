@@ -158,6 +158,22 @@ describe('live sending', () => {
 		expect(h.dropped).toEqual([{ intent: { kind: 'point', team: 'a' }, reason: { kind: 'failed', message: 'bad' } }]);
 	});
 
+	it('a malformed applied answer ends as a visible failure and never reaches the host', async () => {
+		vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ revision: 1 }), { status: 200 }));
+		try {
+			const h = harness([(req) => postCommands('tok', req)]);
+			h.sender.point('a');
+			await tick();
+			expect(h.post).toHaveBeenCalledTimes(1);
+			expect(h.views).toEqual([]);
+			expect(h.dropped).toEqual([
+				{ intent: { kind: 'point', team: 'a' }, reason: { kind: 'failed', message: expect.any(String) } }
+			]);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it('stop cancels a pending retry', async () => {
 		const h = harness([offline]);
 		h.sender.point('a');

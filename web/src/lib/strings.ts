@@ -929,6 +929,8 @@ export const strings = {
 	// API failures.
 	networkError: "Can't reach the server.",
 	serverError: (status: number) => `The server answered ${status}.`,
+	/** A scoring answer this app can't read; the server may still have applied it. */
+	unreadableAnswer: "It may have counted, but this app can't read the server's answer. Reload the page.",
 
 	// App navigation: tab bar, rail and back links.
 	nav: {
