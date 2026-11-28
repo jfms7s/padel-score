@@ -558,7 +558,48 @@ impl Store {
         .bind(cutoff)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.iter().map(|row| row.get("id")).collect())
+        Ok(rows
+            .iter()
+            .map(|row| row.try_get("id"))
+            .collect::<Result<Vec<String>, sqlx::Error>>()?)
+    }
+
+    /// How many anonymous matches [`Store::purge_anonymous_idle_before`] would delete.
+    pub async fn count_anonymous_idle_before(&self, cutoff: i64) -> Result<i64, StoreError> {
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM matches WHERE owner_user_id IS NULL AND last_activity_at < ?",
+        )
+        .bind(cutoff)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    /// How many stored command results [`Store::purge_command_results_idle_before`] would delete.
+    pub async fn count_command_results_idle_before(&self, cutoff: i64) -> Result<i64, StoreError> {
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM command_results WHERE substr(client_id, 1, 8) <> 'time_up:' \
+             AND match_id IN (SELECT id FROM matches WHERE last_activity_at < ?)",
+        )
+        .bind(cutoff)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    /// Delete the stored command results of every match, owned or not, whose last activity is
+    /// before `cutoff`. The matches and their events stay; a resend of one of those commands is
+    /// applied as new. The non-stop runner's own `time_up:{match}:{head}` results are kept: the
+    /// runner reads one as "time already called at this log head", so without it a time-up the
+    /// scorer undid would be applied again. There are a few per match at most. Returns how many
+    /// rows went.
+    pub async fn purge_command_results_idle_before(&self, cutoff: i64) -> Result<u64, StoreError> {
+        Ok(sqlx::query(
+            "DELETE FROM command_results WHERE substr(client_id, 1, 8) <> 'time_up:' \
+             AND match_id IN (SELECT id FROM matches WHERE last_activity_at < ?)",
+        )
+        .bind(cutoff)
+        .execute(&self.pool)
+        .await?
+        .rows_affected())
     }
 
     pub async fn create_match(&self, new: NewMatch, now: i64) -> Result<StoredMatch, StoreError> {
