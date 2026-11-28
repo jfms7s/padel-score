@@ -47,6 +47,22 @@ describe('noticeText for the board kinds', () => {
 		expect(a.tag).not.toBe(b.tag);
 	});
 
+	it('a game_formed notice for several games says how many', () => {
+		const n = noticeText({ kind: 'game_formed', count: 3, ...game }, utc);
+		expect(n.title).toBe('3 games formed');
+		expect(n.body).toBe('First: Wed 4 · 20:00–21:30 · Thursday padel');
+		expect(n.body.startsWith('First:')).toBe(true);
+		expect(n.tag).toBe(`game_formed:/b/tok:${game.start}`);
+	});
+
+	it('reads a count of 1 or a non-integer count as a single game', () => {
+		for (const count of [1, 2.5, 0, -2]) {
+			const n = noticeText({ kind: 'game_formed', count, ...game }, utc);
+			expect(n.title).toBe('Game formed');
+			expect(n.body).toBe('Wed 4 · 20:00–21:30 · Thursday padel');
+		}
+	});
+
 	it('says you moved into a game', () => {
 		const n = noticeText({ kind: 'moved_in', ...game }, utc);
 		expect(n.title).toBe("You're in a game");

@@ -79,6 +79,11 @@ export function noticeText(p: NoticePayload, opts: NoticeOptions = {}): NoticeTe
 		case 'test':
 			return made(t.test.title, t.test.body);
 		case 'game_formed':
+			// One write can form several games; the server then sends one notice with the count
+			// and the earliest game's time.
+			if (Number.isInteger(p.count) && (p.count ?? 0) > 1) {
+				return made(t.gamesFormed(p.count ?? 0), t.firstGame(gameBody(p, opts)));
+			}
 			return made(t.gameFormed, gameBody(p, opts));
 		case 'moved_in':
 			return made(t.movedIn, gameBody(p, opts));

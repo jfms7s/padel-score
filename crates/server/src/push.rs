@@ -306,6 +306,9 @@ pub struct Payload {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accepted: Option<bool>,
+    /// How many games this notice stands for, when more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<u32>,
 }
 
 /// One notice for one user. With a `dedupe` key it is queued at most once while the earlier row

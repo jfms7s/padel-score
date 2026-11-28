@@ -184,6 +184,8 @@ export interface NoticePayload {
 	new_end?: number;
 	name?: string;
 	accepted?: boolean;
+	/** How many games a `game_formed` notice stands for, when more than one. */
+	count?: number;
 }
 
 /** Every non-2xx body the API sends has an `error` code. */
