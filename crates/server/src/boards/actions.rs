@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use sqlx::SqliteConnection;
 
 use super::formation::{self, BoardState, Give, GiveRefusal, PLACES, can_swap, check_new_time};
-use super::ranges::{Trim, trim, trim_ranges, uncovered_parts};
+use super::ranges::{Trim, trim, uncovered_parts};
 use super::{
     BoardRow, BoardView, MAX_PIECES_PER_MEMBER, MemberRef, RequestKind, RequestOut,
     display_name_in, find_by_id_in, find_by_token_in, insert_piece_in, join_in, load_state_in,
@@ -585,8 +585,9 @@ enum Verdict {
     Expired(StoreError),
 }
 
-/// Move a game to `[start, end)` by hand. Each player's free time over the old time that the new
-/// time does not also cover goes, or the next settle would form a second game there with them.
+/// Move a game to `[start, end)` by hand. Players keep their free time. So that the next settle
+/// does not form a second game at the old time with them, each player gets a hold over every part
+/// of the old time the new time does not also cover (they stay blocked there until they leave).
 /// The game is `moved`, so it is no longer tied to the players' ranges. Everyone in it but
 /// `skip` is told. The caller settles.
 async fn apply_time_in(
@@ -608,8 +609,18 @@ async fn apply_time_in(
     // Old minus new: at most the part before the new time and the part after it.
     let cuts = [(old.0, old.1.min(new.0)), (old.0.max(new.1), old.1)];
     for player in &players {
-        let cut = trim_ranges(&mine(&state, player), &cuts);
-        apply_trim_in(tx, &board.id, player, cut).await?;
+        for &(start, end) in cuts.iter().filter(|(s, e)| s < e) {
+            sqlx::query(
+                "INSERT OR IGNORE INTO board_game_holds (game_id, user_id, starts_at, ends_at) \
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(game_id)
+            .bind(player)
+            .bind(start)
+            .bind(end)
+            .execute(&mut **tx)
+            .await?;
+        }
     }
     sqlx::query(
         "UPDATE board_games SET starts_at = ?, ends_at = ?, moved = 1, version = version + 1 \

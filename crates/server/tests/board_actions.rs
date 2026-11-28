@@ -888,12 +888,48 @@ async fn a_lone_player_changes_the_time_at_once() {
     assert!(outbox(&pool).await.is_empty());
 }
 
+/// Every painted range on the board: id, user, bounds and `created_at`.
+async fn range_rows(pool: &SqlitePool) -> Vec<(String, String, i64, i64, i64)> {
+    sqlx::query_as(
+        "SELECT id, user_id, starts_at, ends_at, created_at FROM board_ranges \
+         ORDER BY user_id, starts_at, id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn moving_a_game_keeps_the_players_free_time() {
+    // An agreed move.
+    let (s, pool, token, who) = formed().await;
+    let before = range_rows(&pool).await;
+    assert_eq!(before.len(), 4);
+    ask_later(&s, &token, &who, true, T0 + 20).await;
+    assert_eq!(range_rows(&pool).await, before);
+    // An accepted request.
+    let (s, pool, token, who) = formed().await;
+    let before = range_rows(&pool).await;
+    let asked = ask_later(&s, &token, &who, false, T0 + 20).await;
+    let id = first_request(&asked).id.clone();
+    for (i, u) in who[1..].iter().enumerate() {
+        let now = T0 + 30 + i64::try_from(i).unwrap();
+        s.answer_request(&id, u, true, now).await.unwrap();
+    }
+    assert_eq!(request_status(&pool, &id).await, "accepted");
+    assert_eq!(range_rows(&pool).await, before);
+    let v = view(&s, &token, &who[0], T0 + 40).await;
+    assert!(v.games[0].moved);
+    assert_eq!(v.pieces.len(), 4);
+}
+
 #[tokio::test]
 async fn moved_game_keeps_players_without_ranges_at_the_new_time() {
     let (s, _, token, who) = formed().await;
     let after = ask_later(&s, &token, &who, true, T0 + 20).await;
-    // Nobody has free time over the new time, yet a later settle keeps them in.
-    assert!(after.pieces.is_empty());
+    // Nobody has free time over the new time, yet a later settle keeps them in. Their free time
+    // over the old time is still there.
+    assert_eq!(after.pieces.len(), 4);
     let z = user(&s, "Zed").await;
     let later = s
         .add_free(&token, &z, START + 5 * HOUR, START + 6 * HOUR, T0 + 30)
@@ -908,16 +944,26 @@ async fn moved_game_keeps_players_without_ranges_at_the_new_time() {
 async fn moved_game_does_not_reform_at_the_old_time() {
     let (s, _, token, who) = formed().await;
     let after = ask_later(&s, &token, &who, true, T0 + 20).await;
-    // The four are not free at the old time any more, so no second game forms there.
+    // The four are still free at the old time but held there, so no second game forms there,
+    // not even after another member adds time and the board settles again.
     assert_eq!(after.games.len(), 1);
     assert_eq!(after.games[0].start, START + 2 * HOUR);
+    assert_eq!(after.pieces.len(), 4);
     assert!(
         after
             .pieces
             .iter()
-            .all(|p| p.end <= START || p.start >= START + HOUR)
+            .all(|p| (p.start, p.end) == (START, START + HOUR))
     );
-    // An overlapping move keeps the shared part of their free time.
+    let z = user(&s, "Zed").await;
+    let later = s
+        .add_free(&token, &z, START + 5 * HOUR, START + 6 * HOUR, T0 + 30)
+        .await
+        .unwrap();
+    assert_eq!(later.games.len(), 1);
+    assert_eq!(later.games[0].start, START + 2 * HOUR);
+    assert_eq!(later.pieces.len(), 5);
+    // An overlapping move keeps all of their free time too.
     let (s, _, token, who) = formed().await;
     let v = view(&s, &token, &who[0], T0 + 20).await;
     let after = s
@@ -939,8 +985,88 @@ async fn moved_game_does_not_reform_at_the_old_time() {
         after
             .pieces
             .iter()
-            .all(|p| (p.start, p.end) == (START + HALF, START + HOUR))
+            .all(|p| (p.start, p.end) == (START, START + HOUR))
     );
+}
+
+#[tokio::test]
+async fn a_fifth_player_cannot_draw_the_movers_into_a_game_at_the_old_time() {
+    let (s, _, token, who) = formed().await;
+    ask_later(&s, &token, &who, true, T0 + 20).await;
+    let e = user(&s, "Eva").await;
+    let after = s
+        .add_free(&token, &e, START, START + HOUR, T0 + 30)
+        .await
+        .unwrap();
+    assert_eq!(after.games.len(), 1);
+    assert_eq!(after.games[0].start, START + 2 * HOUR);
+    assert_eq!(players(&after, 0), who.to_vec());
+}
+
+#[tokio::test]
+async fn a_player_who_leaves_a_moved_game_is_free_at_the_old_time_again() {
+    let (s, _, token, who) = formed().await;
+    ask_later(&s, &token, &who, true, T0 + 20).await;
+    let others = [
+        user(&s, "Eva").await,
+        user(&s, "Ines").await,
+        user(&s, "Lia").await,
+    ];
+    for (i, o) in others.iter().enumerate() {
+        let now = T0 + 30 + i64::try_from(i).unwrap();
+        let v = s
+            .add_free(&token, o, START, START + HOUR, now)
+            .await
+            .unwrap();
+        // Only the three are free at the old time: no game yet.
+        assert_eq!(v.games.len(), 1);
+    }
+    let v = view(&s, &token, &who[1], T0 + 40).await;
+    let after = s
+        .leave_game(&token, &v.games[0].id, &who[1], v.games[0].version, T0 + 40)
+        .await
+        .unwrap();
+    assert_eq!(after.games.len(), 2);
+    let old = after.games.iter().find(|g| g.start == START).unwrap();
+    let mut got: Vec<String> = old.players.iter().map(|p| p.user_id.clone()).collect();
+    got.sort();
+    let mut want = vec![
+        who[1].clone(),
+        others[0].clone(),
+        others[1].clone(),
+        others[2].clone(),
+    ];
+    want.sort();
+    assert_eq!(got, want);
+}
+
+#[tokio::test]
+async fn a_moved_game_can_move_back() {
+    let (s, pool, token, who) = formed().await;
+    let before = range_rows(&pool).await;
+    ask_later(&s, &token, &who, true, T0 + 20).await;
+    let v = view(&s, &token, &who[0], T0 + 30).await;
+    let after = s
+        .ask_time(
+            &token,
+            &v.games[0].id,
+            &who[0],
+            v.games[0].version,
+            START,
+            START + HOUR,
+            true,
+            T0 + 30,
+        )
+        .await
+        .unwrap();
+    assert_eq!(after.games.len(), 1);
+    assert_eq!(
+        (after.games[0].start, after.games[0].end),
+        (START, START + HOUR)
+    );
+    assert_eq!(players(&after, 0), who.to_vec());
+    assert_eq!(after.pieces.len(), 4);
+    assert_eq!(range_rows(&pool).await, before);
 }
 
 #[tokio::test]
