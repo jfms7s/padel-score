@@ -386,6 +386,51 @@ mod reminders {
     }
 
     #[tokio::test]
+    async fn short_game_alert_skips_members_held_at_that_time() {
+        let (state, pool, _app, _admin, _raw) = with_admin().await;
+        let (token, _first, leaver, idle, _second) = short_world(&state).await;
+        // The idle member sits in a moved game later on, which left the short game's time.
+        let board_id: String = sqlx::query_scalar("SELECT id FROM boards WHERE token = ?")
+            .bind(&token)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO board_games (id, board_id, starts_at, ends_at, formed_at, moved) \
+             VALUES ('moved', ?, ?, ?, ?, 1)",
+        )
+        .bind(&board_id)
+        .bind(START + 5 * HOUR)
+        .bind(START + 6 * HOUR)
+        .bind(T0)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO board_game_players (game_id, user_id, seat, joined_at) \
+             VALUES ('moved', ?, 0, ?)",
+        )
+        .bind(&idle)
+        .bind(T0)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO board_game_holds (game_id, user_id, starts_at, ends_at) \
+             VALUES ('moved', ?, ?, ?)",
+        )
+        .bind(&idle)
+        .bind(START)
+        .bind(START + HOUR)
+        .execute(&pool)
+        .await
+        .unwrap();
+        tick_once(&state, START - 3 * HOUR).await;
+        let rows = rows(&pool, "short_game").await;
+        assert_eq!(users(&rows), vec![leaver]);
+    }
+
+    #[tokio::test]
     async fn nothing_for_games_more_than_24h_away() {
         let (state, pool, _app, _admin, _raw) = with_admin().await;
         short_world(&state).await;

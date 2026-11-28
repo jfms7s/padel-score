@@ -1040,6 +1040,152 @@ async fn a_player_who_leaves_a_moved_game_is_free_at_the_old_time_again() {
     assert_eq!(got, want);
 }
 
+/// Every hold row: game, user, bounds.
+async fn hold_rows(pool: &SqlitePool) -> Vec<(String, String, i64, i64)> {
+    sqlx::query_as(
+        "SELECT game_id, user_id, starts_at, ends_at FROM board_game_holds \
+         ORDER BY user_id, starts_at, game_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn take_is_refused_at_a_time_the_players_game_left() {
+    let (s, _, token, who) = formed().await;
+    ask_later(&s, &token, &who, true, T0 + 20).await;
+    // Four others form a game at the old time; one leaves inside the hour, leaving it short.
+    let mut others = Vec::new();
+    for (i, name) in ["Eva", "Ines", "Lia", "Tom"].into_iter().enumerate() {
+        let u = user(&s, name).await;
+        s.add_free(
+            &token,
+            &u,
+            START,
+            START + HOUR,
+            T0 + 30 + i64::try_from(i).unwrap(),
+        )
+        .await
+        .unwrap();
+        others.push(u);
+    }
+    let now = START - HALF;
+    let v = view(&s, &token, &others[0], now).await;
+    let old = v.games.iter().find(|g| g.start == START).unwrap();
+    s.leave_game(&token, &old.id, &others[0], old.version, now)
+        .await
+        .unwrap();
+    let v = view(&s, &token, &who[1], now).await;
+    let old = v.games.iter().find(|g| g.start == START).unwrap();
+    assert_eq!(old.state, GameState::Short);
+    let err = s
+        .take_place(&token, &old.id, &who[1], old.version, now)
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "busy");
+}
+
+#[tokio::test]
+async fn another_game_cannot_move_onto_a_time_a_player_left() {
+    let (s, _, token, who) = formed().await;
+    ask_later(&s, &token, &who, true, T0 + 20).await;
+    // The first mover is also in a second game later on.
+    let mut others = Vec::new();
+    for name in ["Eva", "Ines", "Lia"] {
+        others.push(user(&s, name).await);
+    }
+    let (start, end) = (START + 4 * HOUR, START + 5 * HOUR);
+    s.add_free(&token, &who[0], start, end, T0 + 30)
+        .await
+        .unwrap();
+    for (i, u) in others.iter().enumerate() {
+        s.add_free(&token, u, start, end, T0 + 31 + i64::try_from(i).unwrap())
+            .await
+            .unwrap();
+    }
+    let v = view(&s, &token, &who[0], T0 + 40).await;
+    assert_eq!(v.games.len(), 2);
+    let second = v.games.iter().find(|g| g.start == start).unwrap();
+    let err = s
+        .ask_time(
+            &token,
+            &second.id,
+            &who[0],
+            second.version,
+            START,
+            START + HOUR,
+            true,
+            T0 + 40,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(code(err), "players_busy");
+}
+
+#[tokio::test]
+async fn a_swapped_out_player_is_free_at_the_old_time_again() {
+    let (s, pool, token, who) = formed().await;
+    ask_later(&s, &token, &who, true, T0 + 20).await;
+    assert_eq!(hold_rows(&pool).await.len(), 4);
+    // Someone free at the new time takes Rui's place.
+    let z = user(&s, "Zed").await;
+    s.add_free(&token, &z, START + 2 * HOUR, START + 3 * HOUR, T0 + 30)
+        .await
+        .unwrap();
+    let v = view(&s, &token, &who[1], T0 + 40).await;
+    let after = s
+        .give_place(&token, &v.games[0].id, &who[1], v.games[0].version, T0 + 40)
+        .await
+        .unwrap();
+    assert!(players(&after, 0).contains(&z));
+    assert!(!players(&after, 0).contains(&who[1]));
+    let rows = hold_rows(&pool).await;
+    assert_eq!(rows.len(), 3);
+    assert!(rows.iter().all(|r| r.1 != who[1]));
+}
+
+#[tokio::test]
+async fn moving_twice_keeps_both_left_times_blocked() {
+    let (s, pool, token, who) = formed().await;
+    ask_later(&s, &token, &who, true, T0 + 20).await;
+    let v = view(&s, &token, &who[0], T0 + 30).await;
+    s.ask_time(
+        &token,
+        &v.games[0].id,
+        &who[0],
+        v.games[0].version,
+        START + 4 * HOUR,
+        START + 5 * HOUR,
+        true,
+        T0 + 30,
+    )
+    .await
+    .unwrap();
+    let rows = hold_rows(&pool).await;
+    assert_eq!(rows.len(), 8);
+    for u in &who {
+        let mut mine: Vec<(i64, i64)> = rows
+            .iter()
+            .filter(|r| &r.1 == u)
+            .map(|r| (r.2, r.3))
+            .collect();
+        mine.sort_unstable();
+        assert_eq!(
+            mine,
+            vec![(START, START + HOUR), (START + 2 * HOUR, START + 3 * HOUR)]
+        );
+    }
+    // A fifth player free at the first old time still cannot draw them into a game there.
+    let e = user(&s, "Eva").await;
+    let after = s
+        .add_free(&token, &e, START, START + HOUR, T0 + 40)
+        .await
+        .unwrap();
+    assert_eq!(after.games.len(), 1);
+    assert_eq!(after.games[0].start, START + 4 * HOUR);
+}
+
 #[tokio::test]
 async fn a_moved_game_can_move_back() {
     let (s, pool, token, who) = formed().await;

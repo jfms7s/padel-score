@@ -2,7 +2,11 @@
 -- it when it moved: they cannot be put into another game there, though their painted free time is
 -- kept. One row per player, per game and per part of the old time that the new time does not
 -- cover. The cascade drops a player's holds when they leave the game or the game is deleted, and
--- follows the `user_id` rewrite when a guest claims a seat.
+-- follows the `user_id` rewrite when a guest claims a seat. Holds of a game a match was started
+-- from (`match_id` set) are ignored, so they never block anyone for good.
+-- A later migration that rebuilds `board_game_players` (DROP + RENAME, as 0014 did) with foreign
+-- keys on would cascade-delete every hold: it must copy `board_game_holds` too, or rebuild with
+-- foreign keys off.
 CREATE TABLE board_game_holds (
     game_id TEXT NOT NULL,
     user_id TEXT NOT NULL,

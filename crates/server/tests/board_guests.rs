@@ -527,6 +527,49 @@ async fn claim_moves_ranges_and_seat() {
 }
 
 #[tokio::test]
+async fn a_claimed_guest_seat_keeps_its_hold() {
+    let (s, pool, token, [a, ..], g) = game_with_guest().await;
+    let v = view(&s, &token, &a, NOW + 11).await;
+    s.ask_time(
+        &token,
+        &v.games[0].id,
+        &a,
+        v.games[0].version,
+        START + 2 * HOUR,
+        START + 3 * HOUR,
+        true,
+        NOW + 12,
+    )
+    .await
+    .unwrap();
+    let holds = |who: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM board_game_holds WHERE user_id = ?")
+                .bind(who)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(holds(g.clone()).await, 1);
+    let d = user(&s, "Joana").await;
+    s.claim_guest(&token, &d, &g, NOW + 20).await.unwrap();
+    assert_eq!(holds(g.clone()).await, 0);
+    assert_eq!(holds(d.clone()).await, 1);
+    // The claimer is blocked at the old time: three others free there form no game.
+    let mut others = Vec::new();
+    for name in ["Eva", "Ines", "Lia"] {
+        others.push(user(&s, name).await);
+    }
+    let refs: Vec<&str> = others.iter().map(String::as_str).collect();
+    add_free_for(&s, &token, &refs, START).await;
+    let after = view(&s, &token, &d, NOW + 30).await;
+    assert_eq!(after.games.len(), 1);
+    assert_eq!(after.games[0].start, START + 2 * HOUR);
+}
+
+#[tokio::test]
 async fn claim_merges_overlapping_free_time() {
     let (s, _, token) = open_board().await;
     let b = user(&s, "Rui").await;
