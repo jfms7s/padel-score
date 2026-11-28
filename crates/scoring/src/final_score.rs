@@ -211,17 +211,23 @@ fn regular_set_winner(index: usize, set: &SetScore) -> Result<Team, InvalidScore
     if already_won.is_some() {
         return Err(impossible);
     }
+    tiebreak_points_fit(index, set, winner)?;
+    Ok(winner)
+}
+
+/// A 7-6 set was decided by its tie-break, so it must carry the points, and they must be a
+/// finished tie-break won by the set's winner. Any other set must carry none.
+fn tiebreak_points_fit(index: usize, set: &SetScore, winner: Team) -> Result<(), InvalidScore> {
     let is_tiebreak_set = set.a.max(set.b) == 7 && set.a.min(set.b) == 6;
     match set.tiebreak {
-        // A 7-6 set was decided by its tie-break, so its points are part of the score.
         None if is_tiebreak_set => Err(InvalidScore::MissingTieBreak { index }),
-        None => Ok(winner),
+        None => Ok(()),
         Some((x, y))
             if is_tiebreak_set && reachable_tiebreak_winner(x, y, TIEBREAK_TO) == Some(winner) =>
         {
-            Ok(winner)
+            Ok(())
         }
-        Some(_) => Err(impossible),
+        Some(_) => Err(InvalidScore::ImpossibleSet { index }),
     }
 }
 
