@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqliteConnection};
 
 use crate::linking::{ClaimPreview, link_in, preview_in};
+use crate::results::parse_team;
 use crate::store::{Store, StoreError};
 
 /// How many claims one person can have waiting at once.
@@ -286,13 +287,11 @@ impl Store {
             let linked: Option<String> = row.try_get("linked_user_id")?;
             let claim: Option<String> = row.try_get("claim")?;
             let state = SlotKind::of(linked.as_deref(), claim.as_deref(), user_id);
-            let team = match row.try_get::<String, _>("team")?.as_str() {
-                "a" => Team::A,
-                _ => Team::B,
-            };
+            let team = parse_team(row.try_get::<&str, _>("team")?)?;
             out.push(SlotState {
                 team,
-                position: u8::try_from(row.try_get::<i64, _>("position")?).unwrap_or(0),
+                position: u8::try_from(row.try_get::<i64, _>("position")?)
+                    .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
                 name: row.try_get("name")?,
                 state,
             });
@@ -336,7 +335,8 @@ impl Store {
                 let claim: Option<String> = row.try_get("claim")?;
                 Ok(EventSlotState {
                     team_id: row.try_get("team_id")?,
-                    position: u8::try_from(row.try_get::<i64, _>("slot")?).unwrap_or(0),
+                    position: u8::try_from(row.try_get::<i64, _>("slot")?)
+                        .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
                     name: row.try_get("name")?,
                     state: SlotKind::of(linked.as_deref(), claim.as_deref(), user_id),
                 })
@@ -398,8 +398,9 @@ impl Store {
         .bind(user_id)
         .fetch_optional(&mut *tx)
         .await?;
-        let existing_id: Option<String> = existing.as_ref().map(|r| r.get("id"));
-        let existing_status: Option<String> = existing.as_ref().map(|r| r.get("status"));
+        let existing_id: Option<String> = existing.as_ref().map(|r| r.try_get("id")).transpose()?;
+        let existing_status: Option<String> =
+            existing.as_ref().map(|r| r.try_get("status")).transpose()?;
 
         let (id, created) = if owner == user_id {
             link_in(&mut tx, &player_id, user_id, now).await?;
@@ -576,7 +577,9 @@ impl Store {
             .map(|row| {
                 Ok((
                     row.try_get("player_id")?,
-                    row.try_get::<i64, _>("n")?.try_into().unwrap_or(0),
+                    row.try_get::<i64, _>("n")?
+                        .try_into()
+                        .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
                 ))
             })
             .collect::<Result<_, sqlx::Error>>()
