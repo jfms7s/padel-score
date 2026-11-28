@@ -46,9 +46,16 @@ describe('navigate', () => {
 
 	it('passes_a_timely_answer_through', async () => {
 		const res = page();
-		const fn = vi.fn(async () => res);
+		let signal: AbortSignal | undefined;
+		const fn = vi.fn(async (_r: Request, init?: RequestInit) => {
+			signal = init?.signal ?? undefined;
+			return res;
+		});
 		expect(await navigate(request(), fn, async () => shellPage())).toBe(res);
 		expect(vi.getTimerCount()).toBe(0);
+		// The body is still streaming: the timer must not abort it once headers are in.
+		await vi.advanceTimersByTimeAsync(NAV_TIMEOUT_MS * 2);
+		expect(signal?.aborted).toBe(false);
 	});
 
 	it('serves_the_shell_on_a_gateway_error', async () => {
@@ -106,5 +113,25 @@ describe('navigate', () => {
 		});
 		const res = await navigate(request(), fn, async () => undefined);
 		expect(res.type).toBe('error');
+	});
+
+	it('passes_a_gateway_error_through_when_no_shell_is_cached', async () => {
+		const res = page(503);
+		expect(
+			await navigate(
+				request(),
+				async () => res,
+				async () => undefined
+			)
+		).toBe(res);
+	});
+
+	it('waits_for_the_network_when_the_cache_cannot_be_read', async () => {
+		const res = page();
+		const fn = vi.fn(async () => res);
+		const broken = async (): Promise<Response | undefined> => {
+			throw new DOMException('broken', 'UnknownError');
+		};
+		expect(await navigate(request(), fn, broken)).toBe(res);
 	});
 });

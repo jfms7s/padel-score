@@ -22,7 +22,8 @@ export async function navigate(
 	shell: () => Promise<Response | undefined>,
 	ms = NAV_TIMEOUT_MS
 ): Promise<Response> {
-	const cached = await shell();
+	// A cache that cannot be read is no shell: the network still answers.
+	const cached = await shell().catch(() => undefined);
 	if (!cached) {
 		try {
 			return await fetchFn(request);
