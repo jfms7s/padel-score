@@ -74,6 +74,7 @@ class ScoreModelTest {
     private val api = FakeSendApi()
     private val haptics = FakeHaptics()
     private var ids = 0
+    private var clockMs = 0L
     private val onePoint = fixtureView("view-one-point.json") // revision 1, events [1]
 
     @Before fun setMain() = Dispatchers.setMain(StandardTestDispatcher(scheduler))
@@ -82,7 +83,7 @@ class ScoreModelTest {
 
     /** A started model already showing [shown]. */
     private fun model(shown: MatchView = onePoint): ScoreModel {
-        val model = ScoreModel(MATCH, api, stream, haptics, newId = { "id-${++ids}" })
+        val model = ScoreModel(MATCH, api, stream, haptics, newId = { "id-${++ids}" }, nowMs = { clockMs })
         model.startStream()
         scheduler.runCurrent()
         emit(StreamItem.Live)
@@ -242,6 +243,71 @@ class ScoreModelTest {
         api.result = SendResult.Rejected(JsonPrimitive("match_over"))
         tap(model)
         api.result = SendResult.NotSent("timeout")
+        tap(model)
+        assertEquals(listOf("id-1", "id-1", "id-2"), api.requests.map { it.second.clientId })
+    }
+
+    @Test
+    fun retry_that_lands_ends_the_reuse() {
+        val model = model()
+        api.result = SendResult.NotSent("timeout")
+        tap(model)
+        // The resend gets the server's saved answer; the view does not move (the same revision was
+        // already shown by a frame, say), but the next tap is a new point all the same.
+        api.result = SendResult.Applied(onePoint)
+        tap(model)
+        api.result = SendResult.NotSent("timeout")
+        tap(model)
+        assertEquals(listOf("id-1", "id-1", "id-2"), api.requests.map { it.second.clientId })
+    }
+
+    @Test
+    fun frame_during_an_unsent_retry_gives_the_next_tap_a_fresh_id() {
+        val model = model()
+        api.result = SendResult.NotSent("timeout")
+        tap(model)
+        api.hold = true
+        tap(model)
+        emit(StreamItem.Frame(onePoint.copy(revision = onePoint.revision + 1)))
+        api.release()
+        scheduler.runCurrent()
+        api.hold = false
+        tap(model)
+        assertEquals(listOf("id-1", "id-1", "id-2"), api.requests.map { it.second.clientId })
+        assertEquals(onePoint.revision + 1, api.requests.last().second.baseRevision)
+    }
+
+    @Test
+    fun send_that_throws_keeps_the_id_for_a_retry() {
+        val model = model()
+        api.failure = RuntimeException("bug in the client")
+        tap(model)
+        api.failure = null
+        api.result = SendResult.Applied(onePoint.copy(revision = 2))
+        tap(model)
+        assertEquals(listOf("id-1", "id-1"), api.requests.map { it.second.clientId })
+    }
+
+    @Test
+    fun same_or_older_frame_keeps_the_id_for_a_retry() {
+        val model = model(onePoint.copy(revision = 3))
+        api.result = SendResult.NotSent("timeout")
+        tap(model)
+        emit(StreamItem.Frame(onePoint.copy(revision = 3)))
+        emit(StreamItem.Frame(onePoint.copy(revision = 2)))
+        tap(model)
+        assertEquals(listOf("id-1", "id-1"), api.requests.map { it.second.clientId })
+    }
+
+    @Test
+    fun retry_window_ends_the_reuse() {
+        val model = model()
+        api.result = SendResult.NotSent("timeout")
+        tap(model)
+        clockMs += ScoreModel.RETRY_WINDOW_MS
+        tap(model) // at the edge: still the retry, and its buzz restarts the window
+        clockMs += ScoreModel.RETRY_WINDOW_MS + 1
+        // No frame came (stream offline): this is the next rally's point, not a retry.
         tap(model)
         assertEquals(listOf("id-1", "id-1", "id-2"), api.requests.map { it.second.clientId })
     }
