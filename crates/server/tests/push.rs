@@ -519,34 +519,191 @@ async fn mixed_device_outcomes_are_counted_and_acted_on_per_device() {
     assert_eq!(send_pending(&state, 1_020).await, SendReport::default());
 }
 
-#[tokio::test]
-async fn failed_send_is_retried_then_dropped() {
+const DAY: i64 = 86_400;
+const DEVICE: &str = "https://push.example.test/device";
+
+/// One subscribed device and a fake push service that answers `statuses` in turn.
+async fn one_device(statuses: &[u16]) -> (AppState, SqlitePool, String, Arc<FakeTransport>) {
     let (mut state, pool, _app, admin, _raw) = with_admin().await;
-    let fake = FakeTransport::answering(&[500, 500, 500]);
+    let fake = FakeTransport::answering(statuses);
     with_fake(&mut state, &fake);
     state
         .store
-        .save_push_subscription(&admin, &typed("https://push.example.test/flaky"), 1_000)
+        .save_push_subscription(&admin, &typed(DEVICE), 1_000)
         .await
         .unwrap();
+    (state, pool, admin, fake)
+}
+
+/// Queue a fresh notice (older unsent ones are closed so they are not retried) and run a pass.
+async fn pass_with_fresh_notice(
+    state: &AppState,
+    pool: &SqlitePool,
+    user: &str,
+    now: i64,
+) -> SendReport {
+    sqlx::query("UPDATE push_outbox SET sent_at = 1 WHERE sent_at IS NULL")
+        .execute(pool)
+        .await
+        .unwrap();
+    state
+        .store
+        .queue(&[test_notice(user, None)], now)
+        .await
+        .unwrap();
+    send_pending(state, now).await
+}
+
+fn failed_once() -> SendReport {
+    SendReport {
+        sent: 0,
+        gone: 0,
+        failed: 1,
+    }
+}
+
+#[tokio::test]
+async fn failed_send_is_retried_then_dropped() {
+    let (state, pool, admin, fake) = one_device(&[500, 500, 500, 500]).await;
     state
         .store
         .queue(&[test_notice(&admin, None)], 1_000)
         .await
         .unwrap();
-    for (run, attempts) in [(1, 1), (2, 2)] {
-        let report = send_pending(&state, 1_000 + run).await;
-        assert_eq!(report.failed, 1);
+    let t0 = 1_010;
+    // Each retry waits longer: 30 s, 2 min, 10 min.
+    let mut at = t0;
+    for (wait, attempts) in [(30, 1), (120, 2), (600, 3)] {
+        assert_eq!(send_pending(&state, at).await.failed, 1);
         let row = &outbox(&pool).await[0];
         assert_eq!((row.1, row.2), (attempts, None));
+        assert_eq!(
+            send_pending(&state, at + wait - 1).await,
+            SendReport::default()
+        );
+        at += wait;
     }
-    let report = send_pending(&state, 1_003).await;
-    assert_eq!(report.failed, 1);
+    assert_eq!(send_pending(&state, at).await.failed, 1);
     let row = &outbox(&pool).await[0];
-    assert_eq!((row.1, row.2), (MAX_ATTEMPTS, Some(1_003)));
-    assert_eq!(fake.requests.lock().unwrap().len(), 3);
-    // The subscription stays: only 404/410 remove it.
+    assert_eq!((row.1, row.2), (MAX_ATTEMPTS, Some(at)));
+    assert_eq!(fake.requests.lock().unwrap().len(), 4);
+    assert_eq!(send_pending(&state, at + DAY).await, SendReport::default());
+    // The subscription stays: only 404/410, or a week of 401/403, remove it.
     assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn a_failed_notice_waits_before_its_retry() {
+    let (state, pool, admin, fake) = one_device(&[500]).await;
+    state
+        .store
+        .queue(&[test_notice(&admin, None)], 1_000)
+        .await
+        .unwrap();
+    assert_eq!(send_pending(&state, 1_010).await, failed_once());
+    assert_eq!(send_pending(&state, 1_039).await, SendReport::default());
+    assert_eq!(fake.requests.lock().unwrap().len(), 1);
+    let next: Option<i64> = sqlx::query_scalar("SELECT next_attempt_at FROM push_outbox")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(next, Some(1_040));
+    assert_eq!(send_pending(&state, 1_040).await.sent, 1);
+}
+
+#[tokio::test]
+async fn a_subscription_refused_for_a_week_is_deleted() {
+    let (state, pool, admin, _fake) = one_device(&[403, 403, 403]).await;
+    let t = 10_000;
+    assert_eq!(
+        pass_with_fresh_notice(&state, &pool, &admin, t).await,
+        failed_once()
+    );
+    assert_eq!(
+        pass_with_fresh_notice(&state, &pool, &admin, t + 6 * DAY).await,
+        failed_once()
+    );
+    assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 1);
+    let report = pass_with_fresh_notice(&state, &pool, &admin, t + 7 * DAY).await;
+    assert_eq!(
+        report,
+        SendReport {
+            sent: 0,
+            gone: 1,
+            failed: 0
+        }
+    );
+    assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn a_401_counts_like_a_403() {
+    let (state, pool, admin, _fake) = one_device(&[401, 403, 401]).await;
+    let t = 10_000;
+    pass_with_fresh_notice(&state, &pool, &admin, t).await;
+    pass_with_fresh_notice(&state, &pool, &admin, t + 3 * DAY).await;
+    let report = pass_with_fresh_notice(&state, &pool, &admin, t + 8 * DAY).await;
+    assert_eq!(report.gone, 1);
+    assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn a_single_refusal_keeps_the_subscription() {
+    let (state, pool, admin, _fake) = one_device(&[403]).await;
+    // However old the subscription is, one refusal never deletes it.
+    let report = pass_with_fresh_notice(&state, &pool, &admin, 1_000 + 30 * DAY).await;
+    assert_eq!(report, failed_once());
+    assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn a_success_clears_the_refusal_run() {
+    let (state, pool, admin, _fake) = one_device(&[403, 201, 403]).await;
+    let t = 10_000;
+    pass_with_fresh_notice(&state, &pool, &admin, t).await;
+    let ok = pass_with_fresh_notice(&state, &pool, &admin, t + 3 * DAY).await;
+    assert_eq!(ok.sent, 1);
+    let report = pass_with_fresh_notice(&state, &pool, &admin, t + 8 * DAY).await;
+    assert_eq!(report, failed_once());
+    assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn resubscribing_clears_the_refusal_run() {
+    let (state, pool, admin, _fake) = one_device(&[403, 403]).await;
+    let t = 10_000;
+    pass_with_fresh_notice(&state, &pool, &admin, t).await;
+    state
+        .store
+        .save_push_subscription(&admin, &typed(DEVICE), t + DAY)
+        .await
+        .unwrap();
+    let report = pass_with_fresh_notice(&state, &pool, &admin, t + 8 * DAY).await;
+    assert_eq!(report, failed_once());
+    assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn a_500_across_a_week_never_deletes() {
+    let (state, pool, admin, _fake) = one_device(&[500, 500, 500]).await;
+    let t = 10_000;
+    for at in [t, t + 4 * DAY, t + 8 * DAY] {
+        assert_eq!(
+            pass_with_fresh_notice(&state, &pool, &admin, at).await,
+            failed_once()
+        );
+    }
+    assert_eq!(state.store.push_device_count(&admin).await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn a_500_does_not_break_a_refusal_run() {
+    let (state, pool, admin, _fake) = one_device(&[403, 500, 403]).await;
+    let t = 10_000;
+    pass_with_fresh_notice(&state, &pool, &admin, t).await;
+    pass_with_fresh_notice(&state, &pool, &admin, t + 4 * DAY).await;
+    let report = pass_with_fresh_notice(&state, &pool, &admin, t + 8 * DAY).await;
+    assert_eq!(report.gone, 1);
 }
 
 #[tokio::test]
