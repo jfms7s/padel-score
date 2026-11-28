@@ -412,24 +412,12 @@ pub(crate) async fn load_state_in(
     .bind(board_id)
     .fetch_all(&mut *conn)
     .await?;
-    let heads: Vec<(String, String)> = sqlx::query_as(
-        "SELECT h.game_id, h.user_id FROM board_line_heads h \
-         JOIN board_games g ON g.id = h.game_id WHERE g.board_id = ? \
-         ORDER BY h.game_id, h.at, h.user_id",
-    )
-    .bind(board_id)
-    .fetch_all(&mut *conn)
-    .await?;
-
+    let mut line_heads = load_line_heads_in(conn, board_id).await?;
     let holds = load_holds_in(conn, board_id).await?;
 
     let mut players: HashMap<String, Vec<String>> = HashMap::new();
     for (game, user) in seats {
         players.entry(game).or_default().push(user);
-    }
-    let mut line_heads: HashMap<String, Vec<String>> = HashMap::new();
-    for (game, user) in heads {
-        line_heads.entry(game).or_default().push(user);
     }
     Ok(BoardState {
         starts_at,
@@ -463,6 +451,26 @@ pub(crate) async fn load_state_in(
             .collect(),
         holds,
     })
+}
+
+/// Each game's line heads, in order.
+async fn load_line_heads_in(
+    conn: &mut SqliteConnection,
+    board_id: &str,
+) -> Result<HashMap<String, Vec<String>>, StoreError> {
+    let heads: Vec<(String, String)> = sqlx::query_as(
+        "SELECT h.game_id, h.user_id FROM board_line_heads h \
+         JOIN board_games g ON g.id = h.game_id WHERE g.board_id = ? \
+         ORDER BY h.game_id, h.at, h.user_id",
+    )
+    .bind(board_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut line_heads: HashMap<String, Vec<String>> = HashMap::new();
+    for (game, user) in heads {
+        line_heads.entry(game).or_default().push(user);
+    }
+    Ok(line_heads)
 }
 
 /// The board's holds: the times moved games left, per player (see `BoardState::busy`).
