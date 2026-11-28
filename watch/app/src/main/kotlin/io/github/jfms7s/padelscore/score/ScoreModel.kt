@@ -36,7 +36,11 @@ data class ScoreUi(
 
 /**
  * The watch sends commands and shows only views the server returned (POST answer or stream frame),
- * never a local guess. One command at a time; a failed one is reported, never stored or retried.
+ * never a local guess. One command at a time; a failed one is reported and never sent on its own.
+ * The last request that ended "not sent" is kept only so that the same tap, repeated while the same
+ * view is shown and within [RETRY_WINDOW_MS] of the buzz, goes out again with the same client id:
+ * the server may have saved the first one after the watch gave up, and a known id returns the saved
+ * answer instead of counting twice. Past the window the tap is taken as a new point (fresh id).
  * Views only move forward: one whose revision is not above the shown one is dropped.
  */
 class ScoreModel(
@@ -45,6 +49,8 @@ class ScoreModel(
     private val stream: Flow<StreamItem<MatchView>>,
     private val haptics: Haptics,
     private val newId: () -> String = { UUID.randomUUID().toString() },
+    /** Monotonic milliseconds; only differences are used. */
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) : ViewModel() {
     private val _ui = MutableStateFlow(ScoreUi(null, live = false, sending = false, Feedback.None, 0))
     val ui: StateFlow<ScoreUi> = _ui.asStateFlow()
@@ -53,6 +59,10 @@ class ScoreModel(
     val unauthorized: StateFlow<Boolean> = _unauthorized.asStateFlow()
 
     private var collection: Job? = null
+
+    /** The last request that ended "not sent"; cleared by any other answer or a newer shown view. */
+    private var unsent: CommandRequest? = null
+    private var unsentAtMs = 0L
 
     /** A finished match takes no more points, but undo stays available (it may reopen the match). */
     fun point(team: Team) {
@@ -93,7 +103,11 @@ class ScoreModel(
 
     private fun send(view: MatchView, command: Command) {
         _ui.update { it.copy(sending = true, feedback = Feedback.None) }
-        val request = CommandRequest(newId(), batch = false, baseRevision = view.revision, commands = listOf(command))
+        val commands = listOf(command)
+        val request = unsent?.takeIf {
+            it.commands == commands && it.baseRevision == view.revision && nowMs() - unsentAtMs <= RETRY_WINDOW_MS
+        }
+            ?: CommandRequest(newId(), batch = false, baseRevision = view.revision, commands = commands)
         viewModelScope.launch {
             // The API maps failures to results, but a bug there must not leave the screen stuck on "sending".
             val result = try {
@@ -103,12 +117,14 @@ class ScoreModel(
             } catch (_: Exception) {
                 SendResult.NotSent("send failed")
             }
-            onResult(result)
+            onResult(request, result)
         }
     }
 
-    private fun onResult(result: SendResult) {
+    private fun onResult(request: CommandRequest, result: SendResult) {
         _ui.update { it.copy(sending = false) }
+        unsent = if (result is SendResult.NotSent) request else null
+        unsentAtMs = nowMs()
         when (result) {
             is SendResult.Applied -> {
                 show(result.view)
@@ -146,7 +162,13 @@ class ScoreModel(
 
     private fun show(view: MatchView) = _ui.update { state ->
         val shown = state.view
-        if (shown == null || view.revision > shown.revision) state.copy(view = view) else state
+        if (shown == null || view.revision > shown.revision) {
+            // The score moved, so the next tap is a new point, not a retry of the unsent one.
+            unsent = null
+            state.copy(view = view)
+        } else {
+            state
+        }
     }
 
     private fun feedback(kind: Feedback) = _ui.update { it.copy(feedback = kind, feedbackId = it.feedbackId + 1) }
@@ -154,5 +176,14 @@ class ScoreModel(
     private fun signOut() {
         _unauthorized.value = true
         stopStream()
+    }
+
+    companion object {
+        /**
+         * How long after a "not sent" buzz the same tap still counts as its retry. Long enough to
+         * look at the watch and tap again, short enough that the next rally's point (when no frame
+         * arrived to move the view) is not mistaken for it and dropped.
+         */
+        const val RETRY_WINDOW_MS = 30_000L
     }
 }
